@@ -91,6 +91,10 @@ sqlc: ## Regenera el código de acceso a datos a partir de las queries
 sqlc-check: ## Falla si el código generado no coincide con las queries
 	$(SQLC) diff
 
+.PHONY: test-e2e
+test-e2e: ## Prueba de punta a punta con Docker: control plane, base y agent
+	./deploy/e2e/run.sh
+
 .PHONY: test-integration
 test-integration: ## Tests de integración; necesita TEST_DATABASE_URL
 	$(GO) test -tags=integration -count=1 ./...

@@ -1,0 +1,13 @@
+# Todo lo que no hace falta para compilar: acelera el build y evita mandar
+# secretos al contexto de Docker.
+.git/
+.github/
+.env
+.env.*
+!.env.example
+bin/
+web/node_modules/
+web/dist/
+docs/
+*.md
+!README.md

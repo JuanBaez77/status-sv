@@ -123,6 +123,19 @@ la borra al terminar. Es lo que permite que los paquetes corran en paralelo sin 
 compartían base, el `TRUNCATE` de uno borraba los datos del otro. Por eso el usuario de
 `TEST_DATABASE_URL` necesita permiso para crear bases.
 
+### Prueba de punta a punta
+
+Levanta PostgreSQL, el control plane y un agent en contenedores, enrola el agent de verdad y
+verifica lo que define el criterio de terminado del Sprint 0: que el latido llegue a la base y que
+sobreviva a un reinicio del control plane.
+
+```bash
+./deploy/e2e/run.sh
+```
+
+Se limpia sola al terminar, incluso si falla, y en ese caso imprime los registros del control
+plane y del agent. Es el mismo script que corre el CI.
+
 ## Control plane
 
 ```bash
