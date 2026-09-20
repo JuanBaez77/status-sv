@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "enroll",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "token": "tok_abcdefghijklmnopqrstuvwxyz012345",
+    "hostname": "vps01.example.com",
+    "agent_version": "0.1.0",
+    "os": "linux",
+    "arch": "amd64"
+  }
+}

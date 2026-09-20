@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "heartbeat",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "agent_version": "0.1.0",
+    "uptime_seconds": 3600,
+    "self_memory_bytes": 23068672,
+    "self_cpu_percent": 0.4
+  }
+}

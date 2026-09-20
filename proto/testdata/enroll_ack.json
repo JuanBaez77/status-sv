@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "type": "enroll_ack",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "server_id": "01924f9c-0000-7000-8000-0000000000aa",
+    "server_name": "vps-01",
+    "credential": "cred_abcdefghijklmnopqrstuvwxyz012345",
+    "config": {
+      "heartbeat_seconds": 15,
+      "metrics_interval_seconds": 10,
+      "metrics_batch_seconds": 10
+    }
+  }
+}
