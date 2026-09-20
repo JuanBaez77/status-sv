@@ -300,7 +300,7 @@ status-sv/
 │   └── internal/     # collector, docker, systemd, deploy, ws
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
-│   ├── internal/     # api, mcp, auth, store, metrics, approvals
+│   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
 │   └── migrations/   # SQL versionado
 ├── internal/         # Go: código compartido por agent y server (buildinfo)
 ├── web/              # React + Vite + TypeScript

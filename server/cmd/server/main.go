@@ -1,14 +1,21 @@
-// Command server es el control plane de status-sv: API REST, WebSocket del panel,
-// servidor MCP y agregación de métricas.
+// Command server es el control plane de status-sv: API REST, WebSocket del
+// panel, servidor MCP y agregación de métricas.
 //
-// Todavía es un esqueleto: solo responde --version. Los endpoints de salud, el
-// enrolamiento y el WebSocket de agents llegan en el PR 5 del Sprint 0.
+// Subcomandos:
+//
+//	server serve                        levanta la API
+//	server migrate up|down|status       aplica o revierte migraciones
+//	server enroll-token --server NOMBRE crea un token de enrolamiento
+//	server version                      imprime la versión
 package main
 
 import (
-	"flag"
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
 )
@@ -16,14 +23,62 @@ import (
 const name = "status-sv-server"
 
 func main() {
-	version := flag.Bool("version", false, "imprime la versión y termina")
-	flag.Parse()
+	// El contexto se cancela con Ctrl+C o con el SIGTERM de systemd, y desde ahí
+	// cada subcomando decide cómo terminar ordenadamente.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	if *version {
-		fmt.Println(buildinfo.Line(name))
-		return
+	if err := run(ctx, os.Args[1:]); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		usage(os.Stderr)
+		return errors.New("falta el subcomando")
 	}
 
-	fmt.Fprintf(os.Stderr, "%s: todavía sin implementar; la API y el WebSocket de agents llegan en el PR 5 del Sprint 0\n", name)
-	os.Exit(1)
+	switch args[0] {
+	case "serve":
+		return runServe(ctx, args[1:])
+	case "migrate":
+		return runMigrate(ctx, args[1:])
+	case "enroll-token":
+		return runEnrollToken(ctx, args[1:])
+	case "version", "--version", "-version":
+		fmt.Println(buildinfo.Line(name))
+		return nil
+	case "help", "--help", "-h":
+		usage(os.Stdout)
+		return nil
+	default:
+		usage(os.Stderr)
+		return fmt.Errorf("subcomando desconocido: %q", args[0])
+	}
+}
+
+func usage(out *os.File) {
+	_, _ = fmt.Fprintf(out, `%s: control plane de status-sv
+
+Uso:
+  server serve                           levanta la API
+  server migrate up                      aplica las migraciones pendientes
+  server migrate down                    revierte la última migración
+  server migrate status                  muestra el estado de cada migración
+  server enroll-token --server NOMBRE    crea un token de enrolamiento
+  server version                         imprime la versión
+
+Configuración (variables de entorno, ver .env.example):
+  DATABASE_URL              cadena de conexión de PostgreSQL (obligatoria)
+  STATUSSV_LISTEN_ADDR      dónde escucha la API (por defecto 127.0.0.1:8080)
+  STATUSSV_ENROLLMENT_TTL   cuánto vive un token de enrolamiento (por defecto 15m)
+  STATUSSV_OFFLINE_AFTER    silencio tras el cual un servidor se marca caído (45s)
+  STATUSSV_LOG_LEVEL        debug, info, warn o error (por defecto info)
+  STATUSSV_LOG_FORMAT       json o text (por defecto json)
+`, name)
 }
