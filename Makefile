@@ -38,8 +38,12 @@ vet: ## Análisis estático con go vet
 	$(GO) vet ./...
 
 .PHONY: lint
-lint: ## Corre golangci-lint
+lint: ## Corre golangci-lint para este sistema
 	golangci-lint run
+
+.PHONY: lint-linux
+lint-linux: ## Corre golangci-lint como lo hace el CI, para linux
+	GOOS=linux golangci-lint run
 
 .PHONY: test
 test: ## Tests unitarios
@@ -92,7 +96,7 @@ test-integration: ## Tests de integración; necesita TEST_DATABASE_URL
 	$(GO) test -tags=integration -count=1 ./...
 
 .PHONY: ci
-ci: fmt-check vet lint sqlc-check test-race size-check ## Todo lo que corre el CI, menos los tests de integración
+ci: fmt-check vet lint lint-linux sqlc-check test-race size-check ## Todo lo que corre el CI, menos los tests de integración
 
 .PHONY: clean
 clean: ## Borra los binarios compilados

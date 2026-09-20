@@ -70,6 +70,7 @@ go vet ./...
 go test ./...
 go build -o bin/ ./agent/cmd/agent ./server/cmd/server
 golangci-lint run
+GOOS=linux golangci-lint run   # como lo corre el CI: hay archivos que solo existen en Linux
 ```
 
 `go test -race` necesita un compilador de C, así que en Windows conviene dejar el detector de
