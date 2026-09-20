@@ -82,3 +82,14 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_test?sslmode=disable
         run: make test-integration
+
+  e2e:
+    name: "Punta a punta: control plane, base y agent en Docker"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Levanta los tres contenedores, enrola un agent de verdad y verifica que
+      # el latido llegue a la base y sobreviva a un reinicio del control plane.
+      - name: Prueba de punta a punta
+        run: ./deploy/e2e/run.sh

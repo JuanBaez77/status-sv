@@ -1,0 +1,68 @@
+# Prueba de punta a punta: PostgreSQL, control plane y agent, todo en
+# contenedores descartables.
+#
+# No se levanta a mano: lo orquesta deploy/e2e/run.sh, que además genera el
+# token de enrolamiento y verifica los resultados.
+
+name: status-sv-e2e
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: statussv
+      POSTGRES_PASSWORD: statussv
+      POSTGRES_DB: statussv
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U statussv -d statussv"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    tmpfs:
+      # Los datos de esta prueba no sobreviven a la corrida, y en memoria es más rápido.
+      - /var/lib/postgresql/data
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: server
+    environment:
+      DATABASE_URL: postgres://statussv:statussv@postgres:5432/statussv?sslmode=disable
+      STATUSSV_LISTEN_ADDR: 0.0.0.0:8080
+      STATUSSV_LOG_FORMAT: text
+      STATUSSV_LOG_LEVEL: debug
+      # Un umbral corto hace que la prueba no tenga que esperar 45 segundos para
+      # ver qué pasa cuando un agent se queda callado.
+      STATUSSV_OFFLINE_AFTER: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+    ports:
+      # Solo para poder mirar desde el host mientras se depura.
+      - "127.0.0.1:8098:8080"
+
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: agent
+    environment:
+      STATUSSV_SERVER_URL: http://server:8080
+      STATUSSV_ENROLL_TOKEN: ${STATUSSV_ENROLL_TOKEN:?hace falta un token de enrolamiento}
+      STATUSSV_STATE_FILE: /var/lib/status-sv/agent.json
+      STATUSSV_LOG_FORMAT: text
+      STATUSSV_LOG_LEVEL: debug
+    depends_on:
+      server:
+        condition: service_healthy
+    # Se enrola y arranca en el mismo contenedor, que nace vacío en cada corrida.
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["/usr/local/bin/agent enroll --force && exec /usr/local/bin/agent run"]
