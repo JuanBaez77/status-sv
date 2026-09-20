@@ -1,0 +1,457 @@
+# status-sv: Documento de diseño
+
+Última actualización: 2026-09-20
+
+## Visión y alcance
+
+status-sv es una plataforma propia para observar y operar servidores VPS: un panel con métricas y estado en vivo, y un MCP remoto para que Claude Code (y después claude.ai) despliegue, reconstruya y verifique proyectos sin recibir acceso de shell.
+
+**Objetivos**
+
+- Ver en un solo panel CPU, RAM, disco, red, contenedores y servicios de todos los servidores.
+- Automatizar el ciclo repetitivo: cambio pedido → PR → merge → deploy → healthcheck → verificación web.
+- Consumir muy poco: agent por debajo de 30 MB de RAM y 1% de CPU en reposo.
+- Ser seguro para darle a un LLM acceso a producción: herramientas tipadas, scopes, aprobaciones y auditoría.
+
+**Dentro del MVP (Fases 1 a 3)**
+
+- Agent en Go con métricas, Docker y systemd.
+- Control plane con API, WebSocket y PostgreSQL.
+- Panel React multi-servidor.
+- Motor de deploy con healthcheck y rollback.
+- MCP remoto por HTTPS con tokens y scopes, conectado a Claude Code.
+
+**Fuera del MVP**
+
+- Multiusuario u organizaciones, facturación y roles finos.
+- Agents para Windows o macOS.
+- Orquestación tipo Kubernetes y autoscaling.
+- Edición libre de archivos de configuración desde el panel; solo las plantillas del proxy son editables.
+- OAuth para claude.ai (Fase 4).
+
+## Principios de diseño
+
+Seis reglas guían cada decisión: si una funcionalidad las rompe, se rediseña.
+
+1. **El LLM llama operaciones, no comandos.** El MCP expone herramientas tipadas (`deploy`, `rollback`, `get_logs`) y nunca `run_shell`. La lógica riesgosa vive en código determinístico.
+2. **El agent solo hace conexiones salientes.** Ningún VPS abre puertos nuevos ni deja SSH expuesto para que el panel lo controle.
+3. **Solo se despliega lo declarado.** Un proyecto debe tener su `project.yaml`; lo demás se observa en modo solo lectura.
+4. **Los secretos nunca viajan al LLM ni al panel.** Se resuelven en el servidor donde corre el agent.
+5. **Toda acción deja rastro.** Quién (persona o LLM), qué, cuándo y con qué resultado, en un log de auditoría inmutable.
+6. **Liviano por diseño.** Se mide desde el primer sprint contra metas concretas (ver Metas de rendimiento), no se optimiza al final.
+
+## Arquitectura
+
+Son cuatro piezas: un agent por servidor, un control plane que concentra todo, un MCP como capa fina encima de la API, y un panel web. Los agents se conectan hacia afuera y mantienen un canal abierto.
+
+```mermaid
+flowchart LR
+  CC["Claude Code<br/>claude.ai"] -->|"MCP HTTPS"| CP
+  UI["Panel React"] -->|"REST + WS"| CP
+  CP["Control plane<br/>Go + PostgreSQL"]
+  A1["Agent VPS 1"] -->|"WSS saliente"| CP
+  A2["Agent VPS 2"] -->|"WSS saliente"| CP
+  CP -.->|"a demanda"| W["Worker smoke<br/>Playwright"]
+```
+
+Los agents inician la conexión, así que el control plane nunca necesita alcanzar a los VPS. Por el mismo canal viajan las métricas hacia arriba y las órdenes hacia abajo.
+
+| Pieza | Responsabilidad | Corre en |
+| --- | --- | --- |
+| Agent | Recolecta métricas de `/proc` y del stream de eventos de Docker. Ejecuta deploys, restarts y rollbacks de proyectos declarados. | Cada VPS, como servicio systemd |
+| Control plane | API REST, WebSocket para el panel, MCP, auth, auditoría, aprobaciones y agregación de métricas. | Un VPS central, un binario |
+| MCP | Herramientas tipadas sobre la API. No tiene lógica propia. | Dentro del control plane |
+| Panel | Vistas de servidores, proyectos, deploys y auditoría. Se compila a estáticos embebidos en el binario. | Servido por el control plane |
+| Worker de smoke tests | Playwright headless que se levanta a demanda para verificar URLs. | Contenedor aparte |
+
+**Adaptadores de runtime del agent**
+
+- **Docker:** contenedores, estado, healthchecks, logs y consumo por contenedor.
+- **systemd:** servicios como gunicorn y nginx, con logs vía journald.
+- **Descubrimiento de procesos:** lo que corre fuera de Docker y systemd aparece como "no gestionado", solo lectura.
+
+## Stack tecnológico
+
+Go en agent y servidor, PostgreSQL como base, y React con Vite para el panel. La prioridad es bajo consumo y velocidad, con un front de aspecto profesional.
+
+| Capa | Elección | Por qué |
+| --- | --- | --- |
+| Agent | Go | Binario estático único, 15 a 30 MB de RAM, casi 0% de CPU en reposo, sin dependencias en el VPS. |
+| Control plane y MCP | Go | Mismo lenguaje que el agent: tipos compartidos y un solo binario. Maneja miles de conexiones con poca memoria. |
+| Base de datos | PostgreSQL | Concurrencia real, tipos JSONB, particionado por tiempo para métricas y migraciones maduras. |
+| Acceso a datos | `pgx` + `sqlc` | Consultas SQL tipadas y generadas, sin ORM pesado. |
+| Migraciones | `goose` ([ADR-004](adr/ADR-004-modulo-go-unico-y-goose.md)) | Versionadas dentro del repo, embebidas en el binario y aplicadas con un subcomando explícito. |
+| Front | React + Vite + TypeScript | Se compila a estáticos y en producción no hay Node corriendo. |
+| UI | Tailwind + shadcn/ui | Aspecto profesional sin diseñar todo desde cero. |
+| Gráficos | uPlot | La librería de series de tiempo más liviana y rápida para métricas en vivo. |
+| Estado del front | TanStack Query + WebSocket | Datos en vivo sin polling. |
+| Contratos | JSON versionado en `proto/` ([ADR-003](adr/ADR-003-contratos-json-versionado.md)) | Un solo origen para los mensajes agent ↔ servidor, legible al depurar. |
+| Smoke tests | Playwright | En un worker aparte, porque el navegador es pesado. |
+| Despliegue propio | Docker Compose + Caddy | Caddy da HTTPS automático con Let's Encrypt. |
+
+**Sobre PostgreSQL**
+
+La base corre como un contenedor más en el VPS central. Para métricas se usan tablas particionadas por día (o TimescaleDB si el volumen lo pide). No hace falta TimescaleDB en el MVP: el particionado nativo y los agregados propios alcanzan para decenas de servidores.
+
+**Sobre Go**
+
+Tu stack fuerte hoy es Python, así que las primeras semanas van a ser de curva. Por eso el Sprint 0 incluye un agent mínimo de punta a punta, para aprender el lenguaje sobre algo real y acotado.
+
+## Modelo de datos
+
+Doce tablas cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo.
+
+| Tabla | Contenido | Notas |
+| --- | --- | --- |
+| `servers` | Nombre, host, estado, versión del agent, último contacto, etiquetas. | Un registro por VPS enrolado. |
+| `agent_credentials` | Hash de credencial por agent, fecha de emisión y revocación. | Se guarda solo el hash. |
+| `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
+| `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno. | Nace del `project.yaml` declarado. |
+| `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
+| `metrics_raw` | Servidor, instante, CPU, RAM, disco, red, carga. | Partición diaria, retención 48 horas. |
+| `metrics_1m` | Mismas magnitudes agregadas por minuto. | Partición mensual, retención 30 días. |
+| `metrics_1h` | Agregado por hora, con mínimo, promedio y máximo. | Retención 1 año. |
+| `audit_log` | Actor, tipo de actor (persona o LLM), acción, objetivo, resultado, IP. | Solo inserciones. |
+
+**Tablas de acceso**
+
+- `users`: cuenta del panel con hash de contraseña (argon2id) y TOTP.
+- `api_tokens`: token del MCP con hash, scopes por proyecto y entorno, y vencimiento.
+- `approvals`: solicitud de aprobación humana con el deploy asociado, quién aprobó y cuándo.
+
+**Reglas**
+
+- Los IDs son UUID v7, que se ordenan por tiempo y son buenos índices.
+- `audit_log` no admite UPDATE ni DELETE: se aplica con permisos del rol de la aplicación.
+- Un job interno agrega `metrics_raw` a `metrics_1m` y a `metrics_1h`, y elimina particiones vencidas.
+- Los estados de servidor (online, offline, degradado) se derivan del último contacto, no se escriben a mano.
+
+## Protocolo agent ↔ control plane
+
+El agent abre un WebSocket seguro (WSS) hacia el control plane y lo mantiene abierto. Los mensajes son binarios (Protobuf) o JSON compacto, definidos en `proto/`, y llevan versión para poder actualizar agents sin romper compatibilidad.
+
+**Enrolamiento**
+
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant C as Control plane
+  A->>C: enroll(token de un solo uso, clave pública)
+  C->>C: valida token y lo consume
+  C-->>A: credencial propia del agent
+  A->>C: conexión WSS autenticada
+  C-->>A: config inicial (intervalos, proyectos)
+```
+
+El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Después el agent usa su propia credencial, revocable desde el panel. La meta es mTLS en la Fase 4.
+
+**Mensajes**
+
+| Dirección | Mensaje | Contenido | Frecuencia |
+| --- | --- | --- | --- |
+| Agent → servidor | `metrics` | Lote de muestras de CPU, RAM, disco, red y carga. | Cada 5 a 10 s |
+| Agent → servidor | `runtime_state` | Contenedores y servicios con su estado. | Solo al cambiar |
+| Agent → servidor | `deploy_event` | Avance y resultado de un deploy. | Por evento |
+| Agent → servidor | `heartbeat` | Vivo y versión. | Cada 15 s |
+| Servidor → agent | `command` | Operación predefinida con parámetros validados. | A demanda |
+| Servidor → agent | `config_update` | Nuevos intervalos o proyectos declarados. | A demanda |
+
+**Comandos permitidos**
+
+`deploy`, `rollback`, `restart`, `stop`, `start`, `get_logs`, `healthcheck`, `discover` y `bootstrap` (deploy desde cero). El agent rechaza cualquier comando fuera de esta lista y cualquier proyecto que no esté declarado.
+
+**Confiabilidad**
+
+- Cada comando lleva un ID y el agent responde con un acuse; los comandos son idempotentes.
+- Si se corta la conexión, el agent reconecta con backoff exponencial y acumula métricas en un buffer en memoria de hasta 10 minutos.
+- Un deploy en curso sigue aunque se corte el canal; el agent reporta el resultado al reconectar.
+- Un servidor sin heartbeat por más de 45 s pasa a offline.
+
+## MCP: herramientas, auth y aprobaciones
+
+El MCP es remoto, usa transporte Streamable HTTP y vive dentro del control plane. Cada herramienta es una operación acotada con parámetros validados; ninguna acepta comandos libres.
+
+| Herramienta | Tipo | Qué hace | Aprobación en producción |
+| --- | --- | --- | --- |
+| `list_servers` | Lectura | Servidores con estado y último contacto. | No |
+| `get_server_metrics` | Lectura | CPU, RAM, disco y red en un rango de tiempo. | No |
+| `list_projects` | Lectura | Proyectos por servidor, runtime y entorno. | No |
+| `get_project_status` | Lectura | Estado, versión desplegada y healthcheck. | No |
+| `get_logs` | Lectura | Últimas N líneas, con secretos enmascarados. | No |
+| `list_deploys` | Lectura | Historial de deploys de un proyecto. | No |
+| `deploy` | Escritura | Despliega una referencia con healthcheck y rollback automático. | Sí |
+| `rollback` | Escritura | Vuelve a la versión anterior conocida. | Sí |
+| `restart` | Escritura | Reinicia un proyecto declarado. | Sí |
+| `smoke_test` | Verificación | Abre la URL con Playwright y valida checks definidos. | No |
+
+**Autenticación**
+
+1. **Etapa 1:** tokens de API con scopes por proyecto y entorno (por ejemplo `deploy:staging` sin `deploy:production`), con vencimiento y revocación. Alcanza para Claude Code.
+2. **Etapa 2:** OAuth 2.1 con registro dinámico de clientes, que es lo que necesita claude.ai para conectores remotos.
+
+**Aprobaciones**
+
+Las herramientas de escritura sobre entornos de producción devuelven `pending_approval` con un ID. Vos aprobás o rechazás desde el panel (o con un enlace firmado), y recién ahí el control plane envía el comando al agent. Los entornos de staging pueden configurarse sin aprobación.
+
+**Flujo completo con Claude Code**
+
+```mermaid
+sequenceDiagram
+  participant J as Juan
+  participant CC as Claude Code
+  participant GH as GitHub
+  participant M as MCP status-sv
+  participant A as Agent
+  J->>CC: el cliente pide tal cambio
+  CC->>GH: rama, commit, PR
+  GH-->>CC: CI verde, merge
+  CC->>M: deploy(proyecto, ref)
+  M-->>J: pide aprobación (producción)
+  J->>M: aprueba
+  M->>A: command deploy
+  A-->>M: healthcheck ok o rollback
+  CC->>M: smoke_test(url, checks)
+  M-->>CC: resultado
+```
+
+Claude Code hace el trabajo de git y PR con `git` y `gh` locales. El MCP se ocupa de lo que Claude Code no puede hacer solo: desplegar, ver el estado real del servidor y verificar la web.
+
+## Deploy desde cero
+
+Además de actualizar proyectos existentes, status-sv levanta un proyecto completo en un servidor a partir de su repositorio. Es una operación distinta del `deploy` común porque crea cosas nuevas (directorio, servicio, proxy, certificado), así que siempre pide aprobación humana, también en staging.
+
+| Herramienta | Qué hace |
+| --- | --- |
+| `register_project` | Declara el proyecto nuevo: repo, servidor, runtime, entorno, dominio, healthcheck y variables requeridas. |
+| `bootstrap_project` | Ejecuta el primer deploy completo de un proyecto ya declarado. |
+
+**Pasos del bootstrap**
+
+1. **Clonar:** el agent crea el directorio de trabajo y clona el repo con una deploy key de solo lectura, una por proyecto.
+2. **Secretos:** el agent revisa las variables que el proyecto declara como requeridas. Los valores los cargás vos en el panel; el LLM nunca los ve. Si falta alguna, el bootstrap queda bloqueado y lo informa.
+3. **Build y arranque:** con Docker, `compose build` y `up -d`. Con gunicorn, crea el entorno virtual, instala dependencias y genera la unidad systemd desde una plantilla.
+4. **Entrada web:** genera el bloque de nginx o Caddy desde una plantilla con dominio y puerto validados, prueba la configuración, recarga y pide el certificado. La plantilla se edita desde el panel, con vista previa y validación antes de aplicar.
+5. **Pasos declarados:** migraciones o carga inicial, solo si están listadas en el `project.yaml` aprobado.
+6. **Verificación:** healthcheck y `smoke_test`. Si algo falla, el agent deshace lo que creó (detiene el servicio, quita el bloque de proxy) y deja el error en el historial.
+
+**Límites de seguridad**
+
+- Las plantillas de systemd y del proxy reciben parámetros validados, nunca texto libre del LLM. Las plantillas solo las edita una persona desde el panel, y cada cambio queda auditado.
+- Los comandos previos y posteriores son solo los que declaraste al registrar el proyecto y aprobaste.
+- La deploy key de cada proyecto se guarda cifrada en el servidor y se puede revocar desde el panel.
+
+## Seguridad
+
+El riesgo central es que un LLM con acceso a producción puede ser engañado. El diseño asume que el LLM puede equivocarse o ser manipulado, y limita el daño posible en cada capa.
+
+| Amenaza | Mitigación |
+| --- | --- |
+| Prompt injection (un issue, PR o web con texto malicioso que induce a desplegar o borrar) | Herramientas acotadas, sin `run_shell`, aprobación humana en producción y auditoría de cada acción. |
+| Token del MCP filtrado | Scopes por proyecto y entorno, vencimiento corto, revocación inmediata y alerta ante uso desde una IP nueva. |
+| Agent comprometido o falso | Enrolamiento con token de un solo uso, credencial propia revocable y mTLS en la Fase 4. |
+| Control plane comprometido | El agent solo ejecuta comandos de la lista permitida sobre proyectos declarados; no hay ejecución arbitraria. |
+| Acceso al socket de Docker (equivale a root) | El agent corre con usuario dedicado, sin exponer el socket por red y con operaciones predefinidas únicamente. |
+| Fuga de secretos | Las variables de entorno se resuelven en el servidor; los logs pasan por un filtro que enmascara patrones de secretos. |
+| Deploy de código no revisado | El deploy exige una referencia que haya pasado por PR con CI verde y branch protection. |
+| Abuso o error repetido | Límites de frecuencia por token y por proyecto, con bloqueo de deploys simultáneos sobre el mismo proyecto. |
+
+**Controles transversales**
+
+- HTTPS obligatorio en todo, con Caddy y certificados automáticos.
+- Contraseñas con argon2id y TOTP obligatorio para cuentas con permiso de aprobar.
+- Auditoría inmutable con actor, tipo de actor (persona o LLM), acción, objetivo y resultado.
+- Actualizaciones firmadas del agent (verificación de checksum y firma antes de reemplazar el binario).
+- El control plane corre sin privilegios de root, en contenedor, con el sistema de archivos en solo lectura donde sea posible.
+
+**Chequeos de seguridad del servidor (Fase 4)**
+
+Intentos fallidos de SSH, puertos abiertos, actualizaciones pendientes, expiración de certificados, estado de backups y contenedores corriendo como root.
+
+## Metas de rendimiento
+
+Las metas se verifican desde el Sprint 1 con pruebas automáticas; si una se rompe, el pipeline falla.
+
+| Métrica | Meta | Cómo se mide |
+| --- | --- | --- |
+| RAM del agent en reposo | Menos de 30 MB | `ps` o cgroup en CI con un agent real. |
+| CPU del agent en reposo | Menos de 1% | Promedio de 10 minutos con métricas cada 10 s. |
+| RAM del control plane con 10 agents | Menos de 100 MB | Prueba de carga con agents simulados. |
+| Latencia métrica → pantalla | Menos de 2 s | Marca de tiempo en el agent contra render en el front. |
+| Carga inicial del panel | Menos de 1 s en conexión normal | Lighthouse en CI. |
+| Tamaño del bundle del front | Menos de 300 KB comprimido | Análisis del build de Vite. |
+| Tamaño del binario del agent | Menos de 15 MB | Verificación en el build. |
+| Inicio de un deploy | Menos de 3 s desde la orden | Evento `deploy_event` de arranque. |
+
+**Cómo se logra**
+
+- El agent lee `/proc` directamente y escucha el stream de eventos de Docker en vez de consultar cada tanto.
+- Las métricas se envían en lotes y solo se manda lo que cambió.
+- El front se suscribe únicamente a lo que está mirando y las listas largas van virtualizadas.
+- Retención escalonada: crudo 48 horas, un minuto 30 días, una hora 1 año.
+
+## Estructura del repo
+
+Un monorepo con un módulo Go compartido, el front y los contratos. Un solo repositorio simplifica los cambios que cruzan agent, servidor y panel.
+
+```text
+status-sv/
+├── agent/            # Go: binario que corre en cada VPS
+│   ├── cmd/agent/
+│   └── internal/     # collector, docker, systemd, deploy, ws
+├── server/           # Go: API + MCP + WebSocket + embed del front
+│   ├── cmd/server/
+│   ├── internal/     # api, mcp, auth, store, metrics, approvals
+│   └── migrations/   # SQL versionado
+├── web/              # React + Vite + TypeScript
+├── proto/            # contratos agent ↔ server
+├── worker-smoke/     # Playwright, a demanda
+├── deploy/           # compose y Caddyfile del control plane
+├── docs/             # este documento y decisiones (ADR)
+└── .github/workflows # CI: lint, tests, build, metas de rendimiento
+```
+
+**Convenciones**
+
+- Ramas cortas desde `main`, PR obligatorio y CI verde para mergear.
+- Commits con el formato Conventional Commits, para generar changelog y versiones.
+- Versionado semántico; el agent y el servidor negocian versión de protocolo al conectar.
+- Cada decisión de arquitectura importante se registra como ADR corto en `docs/adr/`.
+- Tests: unitarios en Go y Vitest en el front, más una prueba de integración con Docker que levanta servidor, base y un agent.
+- Formato y lint automáticos: `gofmt` y `golangci-lint` en Go; ESLint y Prettier en el front.
+
+**Formato del `project.yaml`**
+
+```yaml
+name: cristales-baez
+server: vps-01
+environment: production
+repo: github.com/extendsystem/cristales-baez
+branch: main
+runtime: docker            # docker | systemd
+compose_file: docker-compose.yml
+workdir: /srv/cristales-baez
+healthcheck:
+  url: https://cristales.example.com/health
+  expect_status: 200
+  timeout_seconds: 30
+deploy:
+  pre: []                  # comandos permitidos declarados por vos
+  post: []
+rollback: previous_image
+```
+
+El ejemplo usa datos ilustrativos; los valores reales los definís vos por proyecto.
+
+## Fases y roadmap
+
+El MVP útil llega al final de la Fase 3, con unas 15 semanas de trabajo. Las estimaciones son aproximadas y suponen sprints de 2 semanas con un solo desarrollador a medio tiempo, aprendiendo Go sobre la marcha; conviene revisarlas al cierre del Sprint 1.
+
+| Fase | Objetivo | Sprints | Criterio de salida |
+| --- | --- | --- | --- |
+| Sprint 0 | Fundaciones: repo, CI, PostgreSQL, un agent mínimo que se conecta y envía un latido. | 1 semana | Un agent real aparece como online en la base. |
+| Fase 1 | Observabilidad: métricas y estado de Docker y systemd de varios servidores en el panel. | Sprints 1 a 3 | Dos VPS visibles en vivo, con las metas de rendimiento cumplidas. |
+| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 y 5 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos. |
+| Fase 3 | MCP remoto con tokens, scopes y aprobaciones, conectado a Claude Code. | Sprints 6 y 7 | El flujo completo (PR, merge, deploy aprobado, verificación) corre desde Claude Code. |
+| Fase 4 | Smoke tests, alertas, chequeos de seguridad, mTLS y OAuth para claude.ai. | Sprints 8 en adelante | claude.ai usa el MCP con OAuth y hay alertas activas. |
+
+**Qué entra en cada fase**
+
+- **Fase 1:** enrolamiento de agents, métricas, estado de contenedores y servicios, procesos no gestionados, vista de servidores y de proyectos, login del panel, gráficos en vivo.
+- **Fase 2:** lectura de `project.yaml`, deploy Docker Compose y systemd, healthcheck, rollback, historial, logs en el panel, bloqueo de deploys simultáneos.
+- **Fase 3:** herramientas MCP de lectura y escritura, tokens con scopes, aprobaciones en el panel, límites de frecuencia, auditoría con actor LLM.
+- **Fase 4:** worker Playwright, alertas (correo o Telegram), chequeos de seguridad del servidor, actualización del agent desde el panel, OAuth 2.1.
+
+El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, en el Sprint 5, sobre el deploy Docker y el de systemd, y se expone por MCP en el Sprint 7. Si el Sprint 4 muestra que el alcance no entra, se mueve al Sprint 6.
+
+**Ideas para más adelante**
+
+Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
+
+## Sprint 0 y Sprint 1
+
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, y el Sprint 1 entrega la primera vista útil: las métricas de un servidor en vivo.
+
+**Sprint 0 (1 semana): fundaciones**
+
+Objetivo: un agent real conectado al servidor y visible en la base de datos.
+
+- [ ] Crear el monorepo con la estructura definida, README y `.gitignore`.
+- [ ] Configurar GitHub Actions con lint, tests y build de Go y del front.
+- [ ] Armar el Docker Compose de desarrollo con PostgreSQL y el servidor.
+- [ ] Escribir la primera migración: `servers`, `enrollment_tokens` y `agent_credentials`.
+- [ ] Levantar un servidor Go mínimo con `/healthz` y el endpoint WSS para agents.
+- [ ] Definir en `proto/` los mensajes `enroll`, `heartbeat` y `metrics`.
+- [ ] Programar un agent Go mínimo: enrolamiento con token y latido cada 15 s.
+- [ ] Escribir ADR-001 (Go y PostgreSQL) y ADR-002 (agent con conexión saliente).
+
+Terminado cuando el agent corre como servicio systemd en un VPS real y `servers.last_seen` se actualiza solo.
+
+**Sprint 1 (2 semanas): métricas de un servidor**
+
+Objetivo: ver CPU, RAM, disco y red de un servidor en el panel, en vivo.
+
+Agent
+
+- [ ] Colector de CPU, RAM, disco, red y carga leyendo `/proc`.
+- [ ] Envío en lotes cada 10 s con buffer en memoria y reconexión con backoff.
+- [ ] Medición de la RAM y CPU propias del agent, expuestas en su latido.
+
+Servidor
+
+- [ ] Migración de `metrics_raw` (partición diaria) y `metrics_1m`.
+- [ ] Recepción de lotes y escritura por `COPY` o inserción masiva.
+- [ ] Job de agregación de crudo a un minuto y borrado de particiones vencidas.
+- [ ] API `GET /servers` y `GET /servers/{id}/metrics?from&to`.
+- [ ] WebSocket para el panel con suscripción por servidor.
+
+Panel
+
+- [ ] Scaffold con React, Vite, TypeScript, Tailwind y shadcn/ui.
+- [ ] Login básico con sesión por cookie segura.
+- [ ] Lista de servidores con estado online u offline.
+- [ ] Vista de un servidor con gráficos uPlot en vivo y rango de tiempo.
+
+Calidad
+
+- [ ] Prueba de carga con 10 agents simulados y verificación automática de las metas de RAM y CPU.
+- [ ] Embebido del front compilado en el binario del servidor.
+
+Terminado cuando un VPS real muestra sus métricas en vivo en el panel, con el agent por debajo de 30 MB de RAM y 1% de CPU, y el CI verde.
+
+**Sprints siguientes (resumen)**
+
+| Sprint | Foco | Entregable |
+| --- | --- | --- |
+| 2 | Docker y systemd en el agent | Contenedores y servicios con estado, consumo y logs; procesos no gestionados en solo lectura. |
+| 3 | Proyectos y cierre de la Fase 1 | Lectura de `project.yaml`, vista de proyectos, agregado por hora, TOTP y segundo servidor en vivo. |
+| 4 | Deploy Docker | `deploy` con pull, build, healthcheck y rollback automático. |
+| 5 | Deploy systemd y auditoría | Deploy de gunicorn, historial de deploys y `audit_log`. |
+| 6 | MCP de lectura y tokens | Herramientas de lectura, tokens con scopes, conexión con Claude Code. |
+| 7 | MCP de escritura y aprobaciones | `deploy`, `rollback` y `restart` con aprobación humana en el panel. |
+
+## Riesgos y decisiones abiertas
+
+El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siendo chico. Los demás se controlan con las mitigaciones de la tabla.
+
+| Riesgo | Impacto | Mitigación |
+| --- | --- | --- |
+| Alcance que crece antes de tener el MVP | Alto | Las Fases 1 a 3 son el límite; las ideas nuevas van a la lista de "más adelante". |
+| Curva de aprendizaje de Go | Medio | El Sprint 0 arma algo real y acotado; el agent es chico y sirve para aprender. |
+| El control plane es un punto único de falla | Medio | Los proyectos siguen corriendo si cae; se agregan backups de PostgreSQL y un restore probado. |
+| Un deploy automático rompe producción | Alto | Healthcheck, rollback automático, aprobación humana y bloqueo de deploys simultáneos. |
+| Proyectos gunicorn fuera de systemd | Medio | Pasarlos a systemd durante la Fase 2; hasta entonces quedan en solo lectura. |
+| Prompt injection sobre el LLM | Alto | Herramientas acotadas, aprobaciones y auditoría (ver Seguridad). |
+| El volumen de métricas crece más de lo previsto | Bajo | Particionado y retención escalonada; TimescaleDB si hiciera falta. |
+
+**Decisiones cerradas** (2026-09-20, al abrir el Sprint 0)
+
+- [x] **Uso interno, single-tenant.** Sin organizaciones ni roles finos. Ver [ADR-005](adr/ADR-005-alcance-single-tenant.md).
+- [x] **Particionado nativo de PostgreSQL**, sin TimescaleDB, con criterio explícito para revisarlo. Ver [ADR-001](adr/ADR-001-go-y-postgresql.md).
+- [x] **Contratos en JSON versionado**, no Protobuf; el envelope queda preparado por si hay que migrar el mensaje de métricas. Ver [ADR-003](adr/ADR-003-contratos-json-versionado.md).
+- [x] **Monorepo con un único módulo Go** (`github.com/JuanBaez77/status-sv`). Ver [ADR-004](adr/ADR-004-modulo-go-unico-y-goose.md).
+
+**Decisiones abiertas**
+
+- [ ] ¿Alertas por correo, Telegram o ambos? Se decide en la Fase 4, al construirlas.
+- [ ] ¿Las aprobaciones de producción se hacen solo desde el panel o también por un enlace firmado en el celular? Se decide en el Sprint 7.
+- [ ] ¿Se mantiene la aprobación humana también en staging, o solo en producción? Se decide en el Sprint 7.
