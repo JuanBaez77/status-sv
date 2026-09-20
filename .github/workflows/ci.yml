@@ -27,6 +27,13 @@ jobs:
       - name: Formato con gofmt
         run: make fmt-check
 
+      - uses: sqlc-dev/setup-sqlc@v5
+        with:
+          sqlc-version: "1.31.1"
+
+      - name: Código generado por sqlc al día
+        run: make sqlc-check
+
       - name: Análisis con go vet
         run: make vet
 
@@ -45,3 +52,33 @@ jobs:
         run: |
           make tidy
           git diff --exit-code
+
+  integracion:
+    name: "Integración: migraciones y acceso a datos"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: statussv
+          POSTGRES_PASSWORD: statussv
+          POSTGRES_DB: statussv_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U statussv -d statussv_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Tests de integración contra PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_test?sslmode=disable
+        run: make test-integration

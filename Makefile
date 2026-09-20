@@ -2,6 +2,9 @@
 # En Windows no hay make: el README tiene los comandos equivalentes con go.
 
 GO      ?= go
+# sqlc y goose se instalan aparte; ver la sección de base de datos del README.
+SQLC    ?= sqlc
+SQLC_VERSION ?= 1.31.1
 BIN     ?= bin
 PKG     := github.com/JuanBaez77/status-sv
 LDBASE  := $(PKG)/internal/buildinfo
@@ -27,8 +30,8 @@ fmt: ## Formatea el código Go
 
 .PHONY: fmt-check
 fmt-check: ## Falla si hay archivos Go sin formatear
-	@archivos=$$(gofmt -l .); \
-	if [ -n "$$archivos" ]; then echo "Archivos sin gofmt:"; echo "$$archivos"; exit 1; fi
+	@files=$$(gofmt -l .); \
+	if [ -n "$$files" ]; then echo "Archivos sin gofmt:"; echo "$$files"; exit 1; fi
 
 .PHONY: vet
 vet: ## Análisis estático con go vet
@@ -56,16 +59,40 @@ build-linux: ## Compila para linux/amd64, en bin/linux-amd64/
 
 .PHONY: size-check
 size-check: build-linux ## Verifica la meta de 15 MB del binario del agent
-	@tamano=$$(wc -c < $(BIN)/linux-amd64/agent); \
-	echo "agent: $$tamano bytes (máximo $(AGENT_MAX_BYTES))"; \
-	if [ "$$tamano" -gt "$(AGENT_MAX_BYTES)" ]; then echo "FALLA: el binario del agent supera la meta de 15 MB"; exit 1; fi
+	@size=$$(wc -c < $(BIN)/linux-amd64/agent); \
+	echo "agent: $$size bytes (máximo $(AGENT_MAX_BYTES))"; \
+	if [ "$$size" -gt "$(AGENT_MAX_BYTES)" ]; then echo "FALLA: el binario del agent supera la meta de 15 MB"; exit 1; fi
 
 .PHONY: tidy
 tidy: ## Ordena go.mod y go.sum
 	$(GO) mod tidy
 
+.PHONY: db-up
+db-up: ## Levanta el PostgreSQL de desarrollo
+	docker compose -f deploy/docker-compose.dev.yml up -d
+
+.PHONY: db-down
+db-down: ## Apaga el PostgreSQL de desarrollo y conserva los datos
+	docker compose -f deploy/docker-compose.dev.yml down
+
+.PHONY: db-reset
+db-reset: ## Apaga el PostgreSQL de desarrollo y borra los datos
+	docker compose -f deploy/docker-compose.dev.yml down -v
+
+.PHONY: sqlc
+sqlc: ## Regenera el código de acceso a datos a partir de las queries
+	$(SQLC) generate
+
+.PHONY: sqlc-check
+sqlc-check: ## Falla si el código generado no coincide con las queries
+	$(SQLC) diff
+
+.PHONY: test-integration
+test-integration: ## Tests de integración; necesita TEST_DATABASE_URL
+	$(GO) test -tags=integration -count=1 ./...
+
 .PHONY: ci
-ci: fmt-check vet lint test-race size-check ## Todo lo que corre el CI
+ci: fmt-check vet lint sqlc-check test-race size-check ## Todo lo que corre el CI, menos los tests de integración
 
 .PHONY: clean
 clean: ## Borra los binarios compilados
