@@ -297,7 +297,7 @@ Un monorepo con un módulo Go compartido, el front y los contratos. Un solo repo
 status-sv/
 ├── agent/            # Go: binario que corre en cada VPS
 │   ├── cmd/agent/
-│   └── internal/     # collector, docker, systemd, deploy, ws
+│   └── internal/     # config, state, selfstat, ws; después collector, docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
 │   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
