@@ -25,7 +25,7 @@ status-sv/
 │   └── internal/     # collector, docker, systemd, deploy, ws
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
-│   ├── internal/     # api, mcp, auth, store, metrics, approvals
+│   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
 │   └── migrations/   # SQL versionado
 ├── internal/         # Go: código compartido por agent y server (buildinfo)
 ├── web/              # React + Vite + TypeScript
@@ -116,6 +116,34 @@ Los tests de integración necesitan una base de verdad y se saltean si no encuen
 ```bash
 TEST_DATABASE_URL='postgres://statussv:...@127.0.0.1:5433/statussv_test?sslmode=disable' make test-integration
 ```
+
+Cada paquete de tests **crea su propia base** a partir de esa cadena, le aplica las migraciones y
+la borra al terminar. Es lo que permite que los paquetes corran en paralelo sin pisarse: cuando
+compartían base, el `TRUNCATE` de uno borraba los datos del otro. Por eso el usuario de
+`TEST_DATABASE_URL` necesita permiso para crear bases.
+
+## Control plane
+
+```bash
+go run ./server/cmd/server help              # todos los subcomandos
+go run ./server/cmd/server migrate up        # aplica las migraciones
+go run ./server/cmd/server migrate status    # qué está aplicado y qué no
+go run ./server/cmd/server enroll-token --server vps-01
+go run ./server/cmd/server serve             # levanta la API
+```
+
+Las migraciones **no** se aplican solas al arrancar: se corren a propósito con `migrate up`, para
+poder revisarlas antes de tocar producción.
+
+El token de enrolamiento se imprime **una sola vez**: la base guarda nada más que su hash. Si se
+pierde, se genera otro.
+
+Chequeos de salud:
+
+| Ruta | Qué dice | Para qué |
+| --- | --- | --- |
+| `GET /healthz` | El proceso está vivo. No toca la base. | Lo mira el supervisor para decidir si reiniciar |
+| `GET /readyz` | La base responde. Devuelve 503 si no. | Lo mira el balanceador antes de mandar tráfico |
 
 ## Documentación
 

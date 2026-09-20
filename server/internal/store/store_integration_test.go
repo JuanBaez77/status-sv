@@ -1,17 +1,16 @@
 //go:build integration
 
-// Tests contra un PostgreSQL de verdad: aplican las migraciones y ejercitan las
-// consultas generadas por sqlc. Se saltean si no hay TEST_DATABASE_URL.
+// Tests contra un PostgreSQL de verdad: ejercitan las consultas generadas por
+// sqlc sobre el esquema real. Se saltean si no hay TEST_DATABASE_URL.
 //
-// Cada test arranca con las tablas vacías, así que no se pueden correr en
-// paralelo entre sí sobre la misma base.
+// Cada test arranca con las tablas vacías, así que los de este paquete no se
+// pueden correr en paralelo entre sí. Con los de otros paquetes no hay problema:
+// testdb le da a cada paquete su propia base.
 package store_test
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -19,47 +18,20 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib" // driver database/sql que necesita goose
 
 	"github.com/JuanBaez77/status-sv/server/internal/store"
-	"github.com/JuanBaez77/status-sv/server/migrations"
+	"github.com/JuanBaez77/status-sv/server/internal/testdb"
 )
 
 // uniqueViolation es el código de PostgreSQL para una violación de unicidad.
 const uniqueViolation = "23505"
 
-// setup aplica las migraciones, deja las tablas vacías y devuelve las consultas
-// listas para usar.
+// setup deja las tablas vacías y devuelve las consultas listas para usar.
 func setup(t *testing.T) (*store.Queries, *pgxpool.Pool) {
 	t.Helper()
 
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL no está definida: se saltean los tests de integración")
-	}
-
-	ctx := t.Context()
-
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("abrir la base para migrar: %v", err)
-	}
-	if _, err := migrations.Up(ctx, db); err != nil {
-		t.Fatalf("aplicar las migraciones: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("cerrar la conexión de migración: %v", err)
-	}
-
-	pool, err := store.OpenPool(ctx, store.Config{DSN: dsn})
-	if err != nil {
-		t.Fatalf("abrir el pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	if _, err := pool.Exec(ctx, "TRUNCATE agent_credentials, enrollment_tokens, servers CASCADE"); err != nil {
-		t.Fatalf("vaciar las tablas: %v", err)
-	}
+	pool := testdb.Setup(t)
+	testdb.Truncate(t, pool)
 
 	return store.New(pool), pool
 }
@@ -99,29 +71,24 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
 }
 
-func TestMigrationsAreApplied(t *testing.T) {
-	setup(t)
+// El esquema que dejan las migraciones es el que esperan las consultas: si
+// faltara una tabla, todo lo demás fallaría con errores confusos.
+func TestSchemaIsInPlace(t *testing.T) {
+	_, pool := setup(t)
 
-	db, err := sql.Open("pgx", os.Getenv("TEST_DATABASE_URL"))
-	if err != nil {
-		t.Fatalf("abrir la base: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	status, err := migrations.Status(t.Context(), db)
-	if err != nil {
-		t.Fatalf("consultar el estado de las migraciones: %v", err)
-	}
-	if len(status) == 0 {
-		t.Fatal("no se encontró ninguna migración embebida")
-	}
-	for _, migration := range status {
-		if migration.State != "applied" {
-			t.Errorf("la migración %v quedó en estado %q", migration.Source.Path, migration.State)
+	for _, table := range []string{"servers", "enrollment_tokens", "agent_credentials", "goose_db_version"} {
+		var exists bool
+		err := pool.QueryRow(t.Context(),
+			"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",
+			table).Scan(&exists)
+		if err != nil {
+			t.Fatalf("consultar por la tabla %s: %v", table, err)
+		}
+		if !exists {
+			t.Errorf("falta la tabla %s", table)
 		}
 	}
 }
-
 func TestServerLifecycle(t *testing.T) {
 	queries, _ := setup(t)
 	ctx := t.Context()
