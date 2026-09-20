@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/JuanBaez77/status-sv/server/internal/config"
+	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 )
 
@@ -24,19 +25,25 @@ const readyTimeout = 2 * time.Second
 
 // Server tiene lo que necesitan los handlers.
 type Server struct {
-	cfg     config.Config
-	pool    *pgxpool.Pool
-	queries *store.Queries
-	log     *slog.Logger
+	cfg           config.Config
+	pool          *pgxpool.Pool
+	queries       *store.Queries
+	log           *slog.Logger
+	enrollment    *enrollment.Service
+	hub           *hub
+	enrollLimiter *ipLimiter
 }
 
 // New arma el servidor de la API.
 func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 	return &Server{
-		cfg:     cfg,
-		pool:    pool,
-		queries: store.New(pool),
-		log:     log,
+		cfg:           cfg,
+		pool:          pool,
+		queries:       store.New(pool),
+		log:           log,
+		enrollment:    enrollment.NewService(pool, cfg.EnrollmentTTL, log),
+		hub:           newHub(),
+		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 	}
 }
 
@@ -45,8 +52,28 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
+	mux.HandleFunc("POST /v1/agents/enroll", s.handleEnroll)
 
-	return s.recoverPanic(s.logRequests(http.MaxBytesHandler(mux, maxBodyBytes)))
+	// El WebSocket va fuera del límite de tamaño por pedido: ese límite es para
+	// cuerpos HTTP, y acá el tamaño se controla por mensaje con SetReadLimit.
+	limited := http.MaxBytesHandler(mux, maxBodyBytes)
+
+	root := http.NewServeMux()
+	root.Handle("/", limited)
+	root.HandleFunc("GET /v1/agents/connect", s.handleAgentConnect)
+
+	return s.recoverPanic(s.logRequests(root))
+}
+
+// CloseAgents cierra las conexiones de los agents. Se llama al apagar, para que
+// cada agent se entere y reconecte con backoff en vez de quedarse esperando.
+func (s *Server) CloseAgents(reason string) {
+	s.hub.closeAll(reason)
+}
+
+// ConnectedAgents dice cuántos agents hay conectados en este momento.
+func (s *Server) ConnectedAgents() int {
+	return s.hub.count()
 }
 
 // handleHealthz dice si el proceso está vivo. No toca la base a propósito: es lo

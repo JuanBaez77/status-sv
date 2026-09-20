@@ -44,9 +44,11 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	defer pool.Close()
 
+	apiServer := api.New(cfg, pool, log)
+
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           api.New(cfg, pool, log).Handler(),
+		Handler:           apiServer.Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		// Sin ReadTimeout ni WriteTimeout globales a propósito: el WebSocket de
 		// los agents queda abierto indefinidamente. Los límites van por pedido
@@ -67,7 +69,10 @@ func runServe(ctx context.Context, args []string) error {
 	case err := <-errs:
 		return err
 	case <-ctx.Done():
-		log.InfoContext(ctx, "apagando", "espera", cfg.ShutdownGrace)
+		log.InfoContext(ctx, "apagando", "espera", cfg.ShutdownGrace, "agents_conectados", apiServer.ConnectedAgents())
+		// Se les avisa a los agents antes de cortar, así reconectan con
+		// backoff en vez de esperar a que se les caiga el canal.
+		apiServer.CloseAgents("el control plane se está apagando")
 	}
 
 	// El contexto de apagado no puede ser el que acaba de cancelarse: hay que

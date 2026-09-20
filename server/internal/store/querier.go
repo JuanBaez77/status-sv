@@ -25,11 +25,20 @@ type Querier interface {
 	// hash y solo devuelve la credencial si no fue revocada.
 	GetActiveCredentialByHash(ctx context.Context, secretHash []byte) (AgentCredential, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
+	// GetEnrollmentTokenByHashForUpdate bloquea la fila del token hasta el final de
+	// la transacción. Es lo que hace que dos enrolamientos simultáneos con el mismo
+	// token no compitan: el segundo espera y encuentra el token ya consumido.
+	GetEnrollmentTokenByHashForUpdate(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
 	GetServerByID(ctx context.Context, id uuid.UUID) (Server, error)
 	GetServerByName(ctx context.Context, name string) (Server, error)
 	ListCredentialsForServer(ctx context.Context, serverID uuid.UUID) ([]AgentCredential, error)
 	ListPendingEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
 	ListServers(ctx context.Context) ([]Server, error)
+	// LockServerName toma un lock consultivo sobre el nombre del servidor, que se
+	// suelta al terminar la transacción. Sin esto, dos enrolamientos simultáneos de
+	// un servidor que todavía no existe intentan crearlo los dos y el segundo choca
+	// contra el índice único.
+	LockServerName(ctx context.Context, name string) error
 	RevokeActiveCredentialsForServer(ctx context.Context, arg RevokeActiveCredentialsForServerParams) (int64, error)
 	RevokeAgentCredential(ctx context.Context, arg RevokeAgentCredentialParams) (AgentCredential, error)
 	TouchCredentialLastUsed(ctx context.Context, id uuid.UUID) error

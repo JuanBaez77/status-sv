@@ -116,6 +116,31 @@ func (q *Queries) GetEnrollmentTokenByHash(ctx context.Context, tokenHash []byte
 	return i, err
 }
 
+const getEnrollmentTokenByHashForUpdate = `-- name: GetEnrollmentTokenByHashForUpdate :one
+SELECT id, token_hash, server_name, expires_at, created_by, created_at, used_at, server_id FROM enrollment_tokens
+WHERE token_hash = $1
+FOR UPDATE
+`
+
+// GetEnrollmentTokenByHashForUpdate bloquea la fila del token hasta el final de
+// la transacción. Es lo que hace que dos enrolamientos simultáneos con el mismo
+// token no compitan: el segundo espera y encuentra el token ya consumido.
+func (q *Queries) GetEnrollmentTokenByHashForUpdate(ctx context.Context, tokenHash []byte) (EnrollmentToken, error) {
+	row := q.db.QueryRow(ctx, getEnrollmentTokenByHashForUpdate, tokenHash)
+	var i EnrollmentToken
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.ServerName,
+		&i.ExpiresAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UsedAt,
+		&i.ServerID,
+	)
+	return i, err
+}
+
 const listPendingEnrollmentTokens = `-- name: ListPendingEnrollmentTokens :many
 SELECT id, token_hash, server_name, expires_at, created_by, created_at, used_at, server_id FROM enrollment_tokens
 WHERE used_at IS NULL AND expires_at > now()

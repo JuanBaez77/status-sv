@@ -31,3 +31,10 @@ RETURNING *;
 
 -- name: DeleteServer :execrows
 DELETE FROM servers WHERE id = $1;
+
+-- LockServerName toma un lock consultivo sobre el nombre del servidor, que se
+-- suelta al terminar la transacción. Sin esto, dos enrolamientos simultáneos de
+-- un servidor que todavía no existe intentan crearlo los dos y el segundo choca
+-- contra el índice único.
+-- name: LockServerName :exec
+SELECT pg_advisory_xact_lock(hashtext(sqlc.arg('name')));
