@@ -1,0 +1,49 @@
+# --- Secretos y configuración local ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+agent.credential
+credentials.json
+
+# --- Go ---
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+vendor/
+
+# --- Node y front ---
+node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# --- Playwright ---
+worker-smoke/test-results/
+worker-smoke/playwright-report/
+worker-smoke/.cache/
+
+# --- Editores y sistema operativo ---
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Datos locales ---
+/tmp/
+*.log
+postgres-data/
