@@ -1,0 +1,38 @@
+# Configuración de golangci-lint (formato v2).
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose      # respuestas HTTP sin cerrar
+    - contextcheck   # funciones de I/O que pierden el context
+    - errorlint      # errores comparados sin errors.Is o errors.As
+    - gosec          # patrones inseguros
+    - nilerr         # devolver nil cuando err no es nil
+    - noctx          # peticiones HTTP sin context
+    - revive         # estilo idiomático de Go
+    - rowserrcheck   # filas de SQL sin revisar Err()
+    - sqlclosecheck  # sentencias y filas de SQL sin cerrar
+    - unconvert      # conversiones de tipo redundantes
+    - wastedassign   # asignaciones que nunca se leen
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable:
+        - shadow
+  exclusions:
+    rules:
+      # En los tests se permite lo que en producción no: datos de prueba con
+      # valores fijos y llamadas sin context.
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt

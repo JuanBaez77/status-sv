@@ -27,6 +27,7 @@ status-sv/
 │   ├── cmd/server/
 │   ├── internal/     # api, mcp, auth, store, metrics, approvals
 │   └── migrations/   # SQL versionado
+├── internal/         # Go: código compartido por agent y server (buildinfo)
 ├── web/              # React + Vite + TypeScript
 ├── proto/            # contratos agent <-> server
 ├── worker-smoke/     # Playwright, a demanda
@@ -45,6 +46,34 @@ status-sv/
 
 El agent es **solo Linux**: lee `/proc` y el socket de Docker. En Windows y macOS se compila y se
 corren los tests unitarios, pero se ejecuta en un contenedor o en un VPS.
+
+## Comandos
+
+Con `make` (Linux, macOS o CI):
+
+| Comando | Qué hace |
+| --- | --- |
+| `make help` | Lista los targets disponibles |
+| `make test` | Tests unitarios |
+| `make test-race` | Tests con detector de carreras y orden aleatorio |
+| `make lint` | `golangci-lint` |
+| `make build` | Compila agent y server en `bin/` |
+| `make build-linux` | Compila para `linux/amd64` en `bin/linux-amd64/` |
+| `make size-check` | Verifica la meta de 15 MB del binario del agent |
+| `make ci` | Todo lo que corre el CI |
+
+En Windows no hay `make`; los equivalentes directos son:
+
+```bash
+gofmt -l .
+go vet ./...
+go test ./...
+go build -o bin/ ./agent/cmd/agent ./server/cmd/server
+golangci-lint run
+```
+
+`go test -race` necesita un compilador de C, así que en Windows conviene dejar el detector de
+carreras para el CI y correr `go test ./...` a secas.
 
 ## Documentación
 
