@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "error",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "code": "invalid_token",
+    "message": "el token no existe o ya se usó",
+    "in_reply_to": "01924f9c-0000-7000-8000-000000000001"
+  }
+}

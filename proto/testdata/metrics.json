@@ -1,0 +1,42 @@
+{
+  "v": 1,
+  "type": "metrics",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "samples": [
+      {
+        "ts": "2026-09-20T12:00:00Z",
+        "cpu": {
+          "used_percent": 12.5,
+          "cores": 4
+        },
+        "memory": {
+          "total_bytes": 8589934592,
+          "used_bytes": 3221225472,
+          "swap_total_bytes": 2147483648,
+          "swap_used_bytes": 0
+        },
+        "load": {
+          "load1": 0.31,
+          "load5": 0.22,
+          "load15": 0.18
+        },
+        "disks": [
+          {
+            "mountpoint": "/",
+            "total_bytes": 85899345920,
+            "used_bytes": 22548578304
+          }
+        ],
+        "networks": [
+          {
+            "interface": "eth0",
+            "rx_bytes": 981234567,
+            "tx_bytes": 123456789
+          }
+        ]
+      }
+    ]
+  }
+}
