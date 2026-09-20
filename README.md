@@ -138,6 +138,17 @@ poder revisarlas antes de tocar producción.
 El token de enrolamiento se imprime **una sola vez**: la base guarda nada más que su hash. Si se
 pierde, se genera otro.
 
+Endpoints de agents:
+
+| Ruta | Qué hace |
+| --- | --- |
+| `POST /v1/agents/enroll` | Canjea un token de un solo uso por la credencial propia del agent. Límite de frecuencia por IP. |
+| `GET /v1/agents/connect` | Canal permanente por WebSocket, autenticado con `Authorization: Bearer <credencial>`. |
+
+Los dos hablan el mismo formato que define [`proto/`](proto/): un envelope con versión. Si se
+enrola un servidor que ya existía (una reinstalación, por ejemplo), se reutiliza el registro y se
+revoca la credencial anterior, así no quedan duplicados ni dos credenciales válidas.
+
 Chequeos de salud:
 
 | Ruta | Qué dice | Para qué |

@@ -136,6 +136,19 @@ func (q *Queries) ListServers(ctx context.Context) ([]Server, error) {
 	return items, nil
 }
 
+const lockServerName = `-- name: LockServerName :exec
+SELECT pg_advisory_xact_lock(hashtext($1))
+`
+
+// LockServerName toma un lock consultivo sobre el nombre del servidor, que se
+// suelta al terminar la transacción. Sin esto, dos enrolamientos simultáneos de
+// un servidor que todavía no existe intentan crearlo los dos y el segundo choca
+// contra el índice único.
+func (q *Queries) LockServerName(ctx context.Context, name string) error {
+	_, err := q.db.Exec(ctx, lockServerName, name)
+	return err
+}
+
 const touchServer = `-- name: TouchServer :one
 UPDATE servers
 SET last_seen_at  = now(),

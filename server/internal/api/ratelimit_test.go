@@ -1,0 +1,156 @@
+package api
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
+
+func TestIPLimiterAllowsBurstThenBlocks(t *testing.T) {
+	limiter := newIPLimiter(60, 3, limiterTTL) // 1 por segundo, ráfaga de 3
+
+	for i := range 3 {
+		if !limiter.allow("10.0.0.1") {
+			t.Fatalf("el pedido %d de la ráfaga fue rechazado", i+1)
+		}
+	}
+	if limiter.allow("10.0.0.1") {
+		t.Fatal("el cuarto pedido inmediato debería haberse rechazado")
+	}
+
+	// Otra IP arranca con su propia ráfaga.
+	if !limiter.allow("10.0.0.2") {
+		t.Fatal("una IP distinta no debería verse afectada")
+	}
+}
+
+func TestIPLimiterRecoversOverTime(t *testing.T) {
+	limiter := newIPLimiter(60, 1, limiterTTL) // 1 por segundo
+
+	if !limiter.allow("10.0.0.1") {
+		t.Fatal("el primer pedido fue rechazado")
+	}
+	if limiter.allow("10.0.0.1") {
+		t.Fatal("el segundo pedido inmediato debería haberse rechazado")
+	}
+
+	// rate.Limiter usa el reloj real, así que se espera lo mínimo indispensable.
+	time.Sleep(1100 * time.Millisecond)
+
+	if !limiter.allow("10.0.0.1") {
+		t.Fatal("después de esperar, el pedido debería pasar")
+	}
+}
+
+func TestIPLimiterForgetsInactiveIPs(t *testing.T) {
+	limiter := newIPLimiter(60, 1, time.Minute)
+
+	now := time.Now()
+	limiter.now = func() time.Time { return now }
+
+	limiter.allow("10.0.0.1")
+	if len(limiter.visitors) != 1 {
+		t.Fatalf("se esperaba 1 visitante, hay %d", len(limiter.visitors))
+	}
+
+	// Pasa el tiempo suficiente como para olvidarla, y llega otra IP.
+	now = now.Add(2 * time.Minute)
+	limiter.allow("10.0.0.2")
+
+	if _, existe := limiter.visitors["10.0.0.1"]; existe {
+		t.Error("la IP inactiva debería haberse olvidado")
+	}
+	if len(limiter.visitors) != 1 {
+		t.Errorf("quedaron %d visitantes, se esperaba 1", len(limiter.visitors))
+	}
+}
+
+// X-Forwarded-For solo vale si el pedido viene del proxy local: si no, cualquiera
+// podría poner la IP que quiera y saltarse el límite de frecuencia.
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		forwarded  string
+		want       string
+	}{
+		{
+			name:       "sin proxy",
+			remoteAddr: "203.0.113.7:54321",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "detrás del proxy local",
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "cadena de proxies locales",
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "203.0.113.7, 198.51.100.2",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "encabezado falsificado desde afuera",
+			remoteAddr: "203.0.113.7:54321",
+			forwarded:  "10.0.0.1",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "encabezado vacío desde el proxy",
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "   ",
+			want:       "127.0.0.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/agents/enroll", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.forwarded != "" {
+				req.Header.Set("X-Forwarded-For", tt.forwarded)
+			}
+
+			if got := clientIP(req); got != tt.want {
+				t.Errorf("clientIP() = %q, se esperaba %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBearerCredential(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		wantOK bool
+		want   string
+	}{
+		{name: "sin encabezado", wantOK: false},
+		{name: "credencial normal", header: "Bearer svagt_abc123", wantOK: true, want: "svagt_abc123"},
+		{name: "prefijo en minúsculas", header: "bearer svagt_abc123", wantOK: true, want: "svagt_abc123"},
+		{name: "con espacios de más", header: "Bearer   svagt_abc123  ", wantOK: true, want: "svagt_abc123"},
+		{name: "otro esquema", header: "Basic dXNlcjpwYXNz", wantOK: false},
+		{name: "sin valor", header: "Bearer ", wantOK: false},
+		{name: "solo el esquema", header: "Bearer", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v1/agents/connect", nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+
+			secret, ok := bearerCredential(req)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, se esperaba %v", ok, tt.wantOK)
+			}
+			if ok && secret.Reveal() != tt.want {
+				t.Errorf("credencial = %q, se esperaba %q", secret.Reveal(), tt.want)
+			}
+		})
+	}
+}

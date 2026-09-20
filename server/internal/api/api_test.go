@@ -15,8 +15,10 @@ import (
 // newTestServer arma un servidor sin base: alcanza para todo lo que no la toca.
 func newTestServer() *Server {
 	return &Server{
-		cfg: config.Config{},
-		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cfg:           config.Config{},
+		log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		hub:           newHub(),
+		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 	}
 }
 
@@ -97,8 +99,10 @@ func TestRecoverPanic(t *testing.T) {
 func TestRequestLogOmitsHeadersAndBody(t *testing.T) {
 	var logged strings.Builder
 	server := &Server{
-		cfg: config.Config{},
-		log: slog.New(slog.NewTextHandler(&logged, nil)),
+		hub:           newHub(),
+		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
+		cfg:           config.Config{},
+		log:           slog.New(slog.NewTextHandler(&logged, nil)),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", strings.NewReader("cuerpo-secreto"))

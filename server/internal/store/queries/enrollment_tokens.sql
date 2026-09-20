@@ -27,3 +27,11 @@ ORDER BY created_at DESC;
 -- name: DeleteExpiredEnrollmentTokens :execrows
 DELETE FROM enrollment_tokens
 WHERE used_at IS NULL AND expires_at <= now();
+
+-- GetEnrollmentTokenByHashForUpdate bloquea la fila del token hasta el final de
+-- la transacción. Es lo que hace que dos enrolamientos simultáneos con el mismo
+-- token no compitan: el segundo espera y encuentra el token ya consumido.
+-- name: GetEnrollmentTokenByHashForUpdate :one
+SELECT * FROM enrollment_tokens
+WHERE token_hash = $1
+FOR UPDATE;

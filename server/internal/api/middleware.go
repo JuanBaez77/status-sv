@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"time"
 )
@@ -52,4 +55,29 @@ func (s *Server) recoverPanic(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Unwrap le permite a http.ResponseController llegar al ResponseWriter real.
+// Sin esto, el handshake del WebSocket falla con 501: envolver el writer le
+// esconde a la librería la capacidad de tomar la conexión.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+// Hijack delega en el ResponseWriter real, para los clientes que hacen la
+// aserción de tipo directamente en vez de usar http.ResponseController.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("el ResponseWriter no soporta Hijack: %T", r.ResponseWriter)
+	}
+	return hijacker.Hijack()
+}
+
+// Flush delega en el ResponseWriter real, para las respuestas que se mandan de a
+// pedazos.
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
