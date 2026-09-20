@@ -1,0 +1,36 @@
+# Entorno de desarrollo: solo PostgreSQL.
+# El control plane se corre desde el repositorio con `go run ./server/cmd/server`.
+# El compose que levanta servidor, base y agent juntos llega en el PR 7 del Sprint 0.
+#
+#   docker compose -f deploy/docker-compose.dev.yml up -d
+#   docker compose -f deploy/docker-compose.dev.yml down        # conserva los datos
+#   docker compose -f deploy/docker-compose.dev.yml down -v     # borra los datos
+
+name: status-sv-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-statussv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-statussv}
+      POSTGRES_DB: ${POSTGRES_DB:-statussv}
+      # Acelera el arranque en desarrollo; en producción no se usa este compose.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      # Solo escucha en localhost: la base de desarrollo no se expone a la red.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-statussv} -d ${POSTGRES_DB:-statussv}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # La base de desarrollo no necesita más de esto y así se parece al VPS.
+    shm_size: 128mb
+
+volumes:
+  postgres-data:

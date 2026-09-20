@@ -75,6 +75,48 @@ golangci-lint run
 `go test -race` necesita un compilador de C, así que en Windows conviene dejar el detector de
 carreras para el CI y correr `go test ./...` a secas.
 
+## Base de datos de desarrollo
+
+```bash
+cp .env.example .env    # ajustar la contraseña
+make db-up              # PostgreSQL 17 en 127.0.0.1:5433
+make db-down            # apaga y conserva los datos
+make db-reset           # apaga y borra los datos
+```
+
+El puerto por defecto es **5433**, no 5432: así no choca con otros PostgreSQL que ya estén
+corriendo en la máquina, y en Windows evita el rango de puertos que reserva el sistema. Se puede
+cambiar con `POSTGRES_PORT` en el `.env`. La base solo escucha en `127.0.0.1`.
+
+Las herramientas que generan y migran el esquema se instalan una vez:
+
+```bash
+go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+go install github.com/pressly/goose/v3/cmd/goose@latest
+```
+
+Compilar sqlc desde fuente tarda varios minutos. La alternativa, sin instalar nada, es la imagen
+oficial:
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.31.1 generate
+```
+
+El esquema vive en `server/migrations/`, versionado con goose y embebido en el binario del
+servidor. El código de acceso a datos se genera con sqlc a partir de `server/internal/store/queries/`:
+
+```bash
+make sqlc          # regenera el código
+make sqlc-check    # falla si el código generado quedó desactualizado
+```
+
+Los tests de integración necesitan una base de verdad y se saltean si no encuentran
+`TEST_DATABASE_URL`:
+
+```bash
+TEST_DATABASE_URL='postgres://statussv:...@127.0.0.1:5433/statussv_test?sslmode=disable' make test-integration
+```
+
 ## Documentación
 
 - [docs/DISENO.md](docs/DISENO.md) — diseño, modelo de datos, protocolo, seguridad y roadmap.

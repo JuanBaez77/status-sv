@@ -3,6 +3,9 @@ version: "2"
 
 run:
   timeout: 5m
+  # Para que el linter también revise los tests de integración.
+  build-tags:
+    - integration
 
 linters:
   default: standard
@@ -19,11 +22,10 @@ linters:
     - unconvert      # conversiones de tipo redundantes
     - wastedassign   # asignaciones que nunca se leen
   settings:
+    # shadow de govet queda apagado a propósito: marca el patrón idiomático
+    # "if _, err := f(); err != nil", que usamos en todos lados.
     errcheck:
       check-type-assertions: true
-    govet:
-      enable:
-        - shadow
   exclusions:
     rules:
       # En los tests se permite lo que en producción no: datos de prueba con

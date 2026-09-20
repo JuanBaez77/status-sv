@@ -29,7 +29,7 @@ func TestShortCommit(t *testing.T) {
 	}
 }
 
-func TestBuildDateSinInyectar(t *testing.T) {
+func TestBuildDateWithoutInjectedValue(t *testing.T) {
 	original := Date
 	t.Cleanup(func() { Date = original })
 
@@ -39,16 +39,16 @@ func TestBuildDateSinInyectar(t *testing.T) {
 	}
 }
 
-func TestLineIncluyeNombreYVersion(t *testing.T) {
+func TestLineIncludesNameAndVersion(t *testing.T) {
 	originalVersion, originalCommit := Version, Commit
 	t.Cleanup(func() { Version, Commit = originalVersion, originalCommit })
 
 	Version, Commit = "1.2.3", "aeddbdc1234567890"
 
 	line := Line("status-sv-agent")
-	for _, quiero := range []string{"status-sv-agent", "1.2.3", "aeddbdc"} {
-		if !strings.Contains(line, quiero) {
-			t.Errorf("Line() = %q, no contiene %q", line, quiero)
+	for _, want := range []string{"status-sv-agent", "1.2.3", "aeddbdc"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("Line() = %q, no contiene %q", line, want)
 		}
 	}
 }
