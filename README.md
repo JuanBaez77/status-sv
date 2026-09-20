@@ -22,7 +22,7 @@ arbitraria, y toda escritura sobre producción pasa por una aprobación humana a
 status-sv/
 ├── agent/            # Go: binario que corre en cada VPS
 │   ├── cmd/agent/
-│   └── internal/     # collector, docker, systemd, deploy, ws
+│   └── internal/     # config, state, selfstat, ws; después collector, docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
 │   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
@@ -155,6 +155,31 @@ Chequeos de salud:
 | --- | --- | --- |
 | `GET /healthz` | El proceso está vivo. No toca la base. | Lo mira el supervisor para decidir si reiniciar |
 | `GET /readyz` | La base responde. Devuelve 503 si no. | Lo mira el balanceador antes de mandar tráfico |
+
+## Agent
+
+El agent se enrola una vez y después mantiene el canal abierto. El token viaja por variable de
+entorno y no por argumento, porque los argumentos de un proceso los puede leer cualquier usuario
+del sistema con `ps`:
+
+```bash
+export STATUSSV_SERVER_URL=https://status.example.com
+export STATUSSV_ENROLL_TOKEN=svenr_...
+go run ./agent/cmd/agent enroll
+go run ./agent/cmd/agent run
+```
+
+La credencial queda en `/var/lib/status-sv/agent.json` con permisos `0600`, y es el único lugar
+donde existe: el control plane guarda solo su hash. Si se pierde el archivo, hay que enrolar de
+nuevo con un token nuevo.
+
+El agent **nunca se rinde**: si el control plane se cae, si la red se corta o si la credencial fue
+revocada, espera con backoff exponencial (de 1 s a 1 minuto, con dispersión) y vuelve a intentar.
+Cada lectura tiene plazo, así que un canal que quedó mudo sin cerrarse también termina en una
+reconexión.
+
+El agent es **solo Linux** en producción: la memoria y el CPU propios se leen de `/proc`. En
+Windows y macOS compila y corre para desarrollar, con una medición aproximada.
 
 ## Documentación
 
