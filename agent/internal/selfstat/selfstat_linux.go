@@ -4,6 +4,7 @@ package selfstat
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -54,7 +55,13 @@ func readResidentMemory() (uint64, error) {
 //
 // Los dos vienen en "ticks" del reloj del kernel, que en Linux moderno son
 // siempre 100 por segundo para el espacio de usuario.
-const ticksPerSecond = 100
+const (
+	ticksPerSecond = 100
+	// tickDuration es cuánto vale un tick: 10 ms.
+	tickDuration = time.Second / ticksPerSecond
+	// maxTicks es el tope antes de que la conversión a time.Duration desborde.
+	maxTicks = uint64(math.MaxInt64) / uint64(tickDuration)
+)
 
 func readCPUTime() (time.Duration, error) {
 	raw, err := os.ReadFile("/proc/self/stat")
@@ -90,5 +97,12 @@ func readCPUTime() (time.Duration, error) {
 	}
 
 	ticks := utime + stime
-	return time.Duration(ticks) * time.Second / ticksPerSecond, nil
+
+	// Un proceso necesitaría siglos de CPU para llegar a este número, pero
+	// convertir sin mirar es un desborde esperando a pasar.
+	if ticks > maxTicks {
+		return 0, fmt.Errorf("el tiempo de CPU leído no tiene sentido: %d ticks", ticks)
+	}
+
+	return time.Duration(ticks) * tickDuration, nil
 }
