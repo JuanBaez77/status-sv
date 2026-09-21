@@ -1,0 +1,74 @@
+# Unidad de systemd del agent de status-sv.
+#
+# La instala deploy/install-agent.sh. El agent corre con un usuario propio y sin
+# privilegios, y todo lo que no necesita está cerrado: si alguien lo
+# comprometiera, no podría escribir fuera de su directorio de estado, cargar
+# módulos del kernel ni ganar privilegios.
+#
+# Cuando en el Sprint 2 el agent necesite hablar con Docker, habrá que sumarlo al
+# grupo docker y revisar varias de estas restricciones. Queda anotado en
+# docs/mas-adelante.md.
+
+[Unit]
+Description=Agent de status-sv
+Documentation=https://github.com/JuanBaez77/status-sv/blob/main/docs/runbook-despliegue.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=statussv
+Group=statussv
+ExecStart=/usr/local/bin/statussv-agent run
+
+Environment=STATUSSV_STATE_FILE=/var/lib/status-sv/agent.json
+Environment=STATUSSV_LOG_FORMAT=json
+
+# El agent ya reintenta solo cuando se cae el canal; esto cubre el caso de que el
+# proceso mismo muera.
+Restart=always
+RestartSec=5
+
+# systemd crea /var/lib/status-sv con dueño statussv y permisos 0700. Es lo único
+# en todo el sistema de archivos donde el agent puede escribir.
+StateDirectory=status-sv
+StateDirectoryMode=0700
+UMask=0077
+
+# --- Límites de recursos ---
+# La meta es menos de 30 MB. Este techo es una red de seguridad: si el agent
+# tuviera una fuga, lo corta systemd antes de que afecte a los proyectos del
+# cliente que corren en el mismo servidor.
+MemoryMax=64M
+TasksMax=64
+
+# --- Endurecimiento ---
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# Solo IP para hablar con el control plane, y unix para la resolución de nombres.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# ProtectProc=invisible queda afuera a propósito: el descubrimiento de procesos
+# del Sprint 2 necesita ver los procesos del sistema.
+
+[Install]
+WantedBy=multi-user.target

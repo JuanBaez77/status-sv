@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 	"time"
 )
@@ -66,61 +67,6 @@ func TestIPLimiterForgetsInactiveIPs(t *testing.T) {
 	}
 }
 
-// X-Forwarded-For solo vale si el pedido viene del proxy local: si no, cualquiera
-// podría poner la IP que quiera y saltarse el límite de frecuencia.
-func TestClientIP(t *testing.T) {
-	tests := []struct {
-		name       string
-		remoteAddr string
-		forwarded  string
-		want       string
-	}{
-		{
-			name:       "sin proxy",
-			remoteAddr: "203.0.113.7:54321",
-			want:       "203.0.113.7",
-		},
-		{
-			name:       "detrás del proxy local",
-			remoteAddr: "127.0.0.1:44321",
-			forwarded:  "203.0.113.7",
-			want:       "203.0.113.7",
-		},
-		{
-			name:       "cadena de proxies locales",
-			remoteAddr: "127.0.0.1:44321",
-			forwarded:  "203.0.113.7, 198.51.100.2",
-			want:       "203.0.113.7",
-		},
-		{
-			name:       "encabezado falsificado desde afuera",
-			remoteAddr: "203.0.113.7:54321",
-			forwarded:  "10.0.0.1",
-			want:       "203.0.113.7",
-		},
-		{
-			name:       "encabezado vacío desde el proxy",
-			remoteAddr: "127.0.0.1:44321",
-			forwarded:  "   ",
-			want:       "127.0.0.1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/v1/agents/enroll", nil)
-			req.RemoteAddr = tt.remoteAddr
-			if tt.forwarded != "" {
-				req.Header.Set("X-Forwarded-For", tt.forwarded)
-			}
-
-			if got := clientIP(req); got != tt.want {
-				t.Errorf("clientIP() = %q, se esperaba %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBearerCredential(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -150,6 +96,100 @@ func TestBearerCredential(t *testing.T) {
 			}
 			if ok && secret.Reveal() != tt.want {
 				t.Errorf("credencial = %q, se esperaba %q", secret.Reveal(), tt.want)
+			}
+		})
+	}
+}
+
+// X-Forwarded-For solo vale si el pedido viene de un proxy de confianza: si no,
+// cualquiera podría poner la IP que quiera y saltarse el límite de frecuencia.
+func TestClientIP(t *testing.T) {
+	loopback := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128")}
+	// La red interna de Docker donde corre Caddy en el VPS.
+	dockerNet := []netip.Prefix{netip.MustParsePrefix("172.30.0.0/24")}
+
+	tests := []struct {
+		name       string
+		trusted    []netip.Prefix
+		remoteAddr string
+		forwarded  string
+		want       string
+	}{
+		{
+			name:       "sin proxy",
+			trusted:    loopback,
+			remoteAddr: "203.0.113.7:54321",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "detrás del proxy local",
+			trusted:    loopback,
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "cadena de proxies",
+			trusted:    loopback,
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "203.0.113.7, 198.51.100.2",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "encabezado falsificado desde afuera",
+			trusted:    loopback,
+			remoteAddr: "203.0.113.7:54321",
+			forwarded:  "10.0.0.1",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "encabezado vacío desde el proxy",
+			trusted:    loopback,
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "   ",
+			want:       "127.0.0.1",
+		},
+		{
+			name:       "IPv4 escrita como IPv6",
+			trusted:    loopback,
+			remoteAddr: "[::ffff:127.0.0.1]:44321",
+			forwarded:  "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		// La topología del VPS: Caddy en otro contenedor, en la red interna.
+		{
+			name:       "Caddy desde la red de Docker",
+			trusted:    dockerNet,
+			remoteAddr: "172.30.0.5:40000",
+			forwarded:  "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "otro contenedor fuera de la red de confianza",
+			trusted:    dockerNet,
+			remoteAddr: "172.31.0.9:40000",
+			forwarded:  "203.0.113.7",
+			want:       "172.31.0.9",
+		},
+		{
+			name:       "con la red de Docker configurada, loopback deja de ser de confianza",
+			trusted:    dockerNet,
+			remoteAddr: "127.0.0.1:44321",
+			forwarded:  "203.0.113.7",
+			want:       "127.0.0.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/agents/enroll", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.forwarded != "" {
+				req.Header.Set("X-Forwarded-For", tt.forwarded)
+			}
+
+			if got := clientIP(req, tt.trusted); got != tt.want {
+				t.Errorf("clientIP() = %q, se esperaba %q", got, tt.want)
 			}
 		})
 	}

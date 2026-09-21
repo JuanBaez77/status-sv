@@ -59,16 +59,17 @@ func runEnrollToken(ctx context.Context, args []string) error {
 Vence el %s (en %s) y sirve una sola vez.
 No vuelve a mostrarse: si se pierde, generá otro.
 
-En el VPS:
+En el VPS, como root, con el binario del agent ya copiado:
 
-  statussv-agent enroll --server-url https://<control-plane> --token %s
+  STATUSSV_SERVER_URL=https://<control-plane> ./install-agent.sh ./statussv-agent
+
+y pegá el token cuando lo pida. No lo pases como argumento: quedaría visible en ps.
 
 `,
 		token.ServerName,
 		secret.Reveal(),
 		token.ExpiresAt.Local().Format(time.RFC1123),
 		time.Until(token.ExpiresAt).Round(time.Second),
-		secret.Reveal(),
 	)
 
 	return nil

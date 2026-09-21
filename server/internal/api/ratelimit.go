@@ -3,6 +3,7 @@ package api
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -82,18 +83,20 @@ func (l *ipLimiter) collectGarbage(now time.Time) {
 
 // clientIP devuelve la IP a la que cobrarle el pedido.
 //
-// X-Forwarded-For se acepta únicamente si la conexión viene de loopback, que es
-// el caso de nuestro despliegue: Caddy corre en el mismo host y es el único que
-// puede alcanzar al control plane. Desde cualquier otro origen el encabezado se
-// ignora, porque lo puede escribir cualquiera.
-func clientIP(r *http.Request) string {
+// X-Forwarded-For se acepta únicamente si la conexión viene de un proxy de
+// confianza, que en el VPS es Caddy desde la red interna de Docker. Desde
+// cualquier otro origen el encabezado se ignora: lo puede escribir cualquiera, y
+// aceptarlo sería regalar una forma de saltarse el límite de frecuencia.
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" && isLoopback(host) {
-		// El primero de la lista es el cliente original.
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" && isTrusted(host, trusted) {
+		// El primero de la lista es el cliente original. Caddy pisa el
+		// encabezado que manda un cliente no confiable, así que ese primer
+		// valor lo escribió el proxy y no quien hizo el pedido.
 		if comma := strings.Index(forwarded, ","); comma >= 0 {
 			forwarded = forwarded[:comma]
 		}
@@ -105,7 +108,20 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func isLoopback(host string) bool {
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+// isTrusted dice si la dirección está dentro de alguna de las redes de confianza.
+func isTrusted(host string, trusted []netip.Prefix) bool {
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	// Una IPv4 puede llegar escrita como IPv6 (::ffff:127.0.0.1); sin esto no
+	// coincidiría con 127.0.0.0/8.
+	addr = addr.Unmap()
+
+	for _, prefix := range trusted {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }

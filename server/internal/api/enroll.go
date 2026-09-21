@@ -21,7 +21,7 @@ import (
 // usado o vencido: distinguirlos le daría pistas a quien esté probando.
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 
 	if !s.enrollLimiter.allow(ip) {
 		s.log.WarnContext(ctx, "enrolamiento rechazado por límite de frecuencia", "ip", ip)

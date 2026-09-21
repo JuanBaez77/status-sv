@@ -169,3 +169,60 @@ func TestRedactedDatabaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestTrustedProxies(t *testing.T) {
+	t.Run("por defecto, solo loopback", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", testDSN)
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("cargar la configuración: %v", err)
+		}
+		if len(cfg.TrustedProxies) != 2 {
+			t.Fatalf("se esperaban las dos redes de loopback, hay %v", cfg.TrustedProxies)
+		}
+	})
+
+	t.Run("lista de redes", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", testDSN)
+		t.Setenv("STATUSSV_TRUSTED_PROXIES", " 172.30.0.0/24 , 10.0.0.0/8 ")
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("cargar la configuración: %v", err)
+		}
+
+		got := make([]string, 0, len(cfg.TrustedProxies))
+		for _, prefix := range cfg.TrustedProxies {
+			got = append(got, prefix.String())
+		}
+		if strings.Join(got, ",") != "172.30.0.0/24,10.0.0.0/8" {
+			t.Errorf("redes leídas: %v", got)
+		}
+	})
+
+	t.Run("normaliza la red", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", testDSN)
+		// Una IP con máscara en vez de la dirección de red: se acepta y se normaliza.
+		t.Setenv("STATUSSV_TRUSTED_PROXIES", "172.30.0.7/24")
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("cargar la configuración: %v", err)
+		}
+		if cfg.TrustedProxies[0].String() != "172.30.0.0/24" {
+			t.Errorf("la red quedó como %v", cfg.TrustedProxies[0])
+		}
+	})
+
+	for _, invalid := range []string{"172.30.0.0", "no-es-una-red", "172.30.0.0/99", " , "} {
+		t.Run("rechaza "+invalid, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", testDSN)
+			t.Setenv("STATUSSV_TRUSTED_PROXIES", invalid)
+
+			if _, err := config.Load(); err == nil {
+				t.Errorf("se aceptó %q como lista de redes", invalid)
+			}
+		})
+	}
+}

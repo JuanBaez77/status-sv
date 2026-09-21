@@ -38,9 +38,17 @@ const setupTimeout = 30 * time.Second
 func Setup(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	adminDSN := envOrSkip(t)
+	baseDSN := envOrSkip(t)
 
-	name, dsn, err := uniqueDatabaseName(adminDSN)
+	// CREATE y DROP DATABASE se hacen conectado a "postgres", la base de
+	// mantenimiento que existe siempre. Así la base que nombra TEST_DATABASE_URL
+	// no tiene que existir: su nombre se usa solo como prefijo.
+	adminDSN, err := maintenanceDSN(baseDSN)
+	if err != nil {
+		t.Fatalf("armar la conexión de mantenimiento: %v", err)
+	}
+
+	name, dsn, err := uniqueDatabaseName(baseDSN)
 	if err != nil {
 		t.Fatalf("armar el nombre de la base de prueba: %v", err)
 	}
@@ -155,4 +163,14 @@ func dropDatabase(t *testing.T, adminDSN, name string) {
 	if _, err := admin.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoted+" WITH (FORCE)"); err != nil {
 		t.Logf("no se pudo borrar la base de prueba %s: %v", name, err)
 	}
+}
+
+// maintenanceDSN devuelve la misma conexión pero apuntada a la base "postgres".
+func maintenanceDSN(dsn string) (string, error) {
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("leer TEST_DATABASE_URL: %w", err)
+	}
+	parsed.Path = "/postgres"
+	return parsed.String(), nil
 }

@@ -1,0 +1,26 @@
+# Caddy termina TLS y le pasa el tráfico al control plane por la red interna.
+#
+# El certificado lo pide solo a Let's Encrypt la primera vez que arranca, así
+# que el dominio tiene que apuntar a este servidor y los puertos 80 y 443 tienen
+# que estar abiertos antes de levantarlo.
+
+{$STATUSSV_DOMAIN} {
+	# El WebSocket de los agents pasa por acá sin configuración extra: Caddy
+	# detecta el Upgrade y deja el canal abierto.
+	reverse_proxy server:8080
+
+	header {
+		# Solo HTTPS de acá en adelante, para el dominio y sus subdominios.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# No anunciar qué software atiende.
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

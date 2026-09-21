@@ -110,3 +110,15 @@ func writeJSON(ctx context.Context, w http.ResponseWriter, status int, body any)
 		slog.ErrorContext(ctx, "no se pudo escribir la respuesta", "error", err)
 	}
 }
+
+// clientIP devuelve la IP real del cliente, mirando X-Forwarded-For solo si el
+// pedido viene de un proxy de confianza.
+func (s *Server) clientIP(r *http.Request) string {
+	trusted := s.cfg.TrustedProxies
+	if len(trusted) == 0 {
+		// Una configuración armada a mano, como la de los tests, puede no traer
+		// la lista: en ese caso vale el valor por defecto, que es solo loopback.
+		trusted = config.DefaultTrustedProxies()
+	}
+	return clientIP(r, trusted)
+}

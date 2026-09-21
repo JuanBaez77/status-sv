@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -48,6 +49,11 @@ type Config struct {
 	// LogLevel y LogJSON controlan el registro.
 	LogLevel slog.Level
 	LogJSON  bool
+	// TrustedProxies son las redes desde las que se acepta X-Forwarded-For. Es
+	// donde está el proxy que termina TLS: en el VPS, la red interna de Docker
+	// donde corre Caddy. Desde cualquier otro origen el encabezado se ignora,
+	// porque lo puede escribir cualquiera.
+	TrustedProxies []netip.Prefix
 }
 
 // Load arma la configuración desde el entorno y la valida.
@@ -64,6 +70,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.OfflineAfter, err = envDuration("STATUSSV_OFFLINE_AFTER", DefaultOfflineAfter); err != nil {
+		return Config{}, err
+	}
+	if cfg.TrustedProxies, err = envPrefixes("STATUSSV_TRUSTED_PROXIES", DefaultTrustedProxies()); err != nil {
 		return Config{}, err
 	}
 	if cfg.LogLevel, err = envLevel("STATUSSV_LOG_LEVEL", slog.LevelInfo); err != nil {
@@ -151,4 +160,39 @@ func envLevel(key string, fallback slog.Level) (slog.Level, error) {
 		return 0, fmt.Errorf("%s no es un nivel de log válido (%q): usar debug, info, warn o error", key, raw)
 	}
 	return level, nil
+}
+
+// DefaultTrustedProxies es solo loopback: sirve cuando el proxy corre en el
+// mismo host que el control plane, fuera de Docker.
+func DefaultTrustedProxies() []netip.Prefix {
+	return []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
+	}
+}
+
+// envPrefixes lee una lista de redes en notación CIDR separadas por comas.
+func envPrefixes(key string, fallback []netip.Prefix) ([]netip.Prefix, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+
+	var prefixes []netip.Prefix
+	for part := range strings.SplitSeq(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil {
+			return nil, fmt.Errorf("%s tiene una red inválida (%q): se espera notación CIDR, como 172.30.0.0/24", key, part)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+
+	if len(prefixes) == 0 {
+		return nil, fmt.Errorf("%s no tiene ninguna red", key)
+	}
+	return prefixes, nil
 }
