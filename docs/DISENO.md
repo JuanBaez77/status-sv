@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-09-20
+Última actualización: 2026-09-21
 
 ## Visión y alcance
 
@@ -87,7 +87,7 @@ Go en agent y servidor, PostgreSQL como base, y React con Vite para el panel. La
 | Estado del front | TanStack Query + WebSocket | Datos en vivo sin polling. |
 | Contratos | JSON versionado en `proto/` ([ADR-003](adr/ADR-003-contratos-json-versionado.md)) | Un solo origen para los mensajes agent ↔ servidor, legible al depurar. |
 | Smoke tests | Playwright | En un worker aparte, porque el navegador es pesado. |
-| Despliegue propio | Docker Compose + Caddy | Caddy da HTTPS automático con Let's Encrypt. |
+| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; hoy corre detrás del nginx de un cliente ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)). |
 
 **Sobre PostgreSQL**
 
@@ -376,16 +376,23 @@ El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, y el Sprin
 
 Objetivo: un agent real conectado al servidor y visible en la base de datos.
 
-- [ ] Crear el monorepo con la estructura definida, README y `.gitignore`.
-- [ ] Configurar GitHub Actions con lint, tests y build de Go y del front.
-- [ ] Armar el Docker Compose de desarrollo con PostgreSQL y el servidor.
-- [ ] Escribir la primera migración: `servers`, `enrollment_tokens` y `agent_credentials`.
-- [ ] Levantar un servidor Go mínimo con `/healthz` y el endpoint WSS para agents.
-- [ ] Definir en `proto/` los mensajes `enroll`, `heartbeat` y `metrics`.
-- [ ] Programar un agent Go mínimo: enrolamiento con token y latido cada 15 s.
-- [ ] Escribir ADR-001 (Go y PostgreSQL) y ADR-002 (agent con conexión saliente).
+- [x] Crear el monorepo con la estructura definida, README y `.gitignore`.
+- [x] Configurar GitHub Actions con lint, tests y build de Go. El del front entra en el Sprint 1, con el front.
+- [x] Armar el Docker Compose de desarrollo con PostgreSQL y el servidor. El de desarrollo lleva PostgreSQL y el servidor se corre con `go run`; el de la prueba de punta a punta levanta todo junto.
+- [x] Escribir la primera migración: `servers`, `enrollment_tokens` y `agent_credentials`.
+- [x] Levantar un servidor Go mínimo con `/healthz` y el endpoint WSS para agents.
+- [x] Definir en `proto/` los mensajes `enroll`, `heartbeat` y `metrics`.
+- [x] Programar un agent Go mínimo: enrolamiento con token y latido cada 15 s.
+- [x] Escribir ADR-001 (Go y PostgreSQL) y ADR-002 (agent con conexión saliente).
 
 Terminado cuando el agent corre como servicio systemd en un VPS real y `servers.last_seen` se actualiza solo.
+
+**Cumplido el 2026-09-21**, en `cristales-baez-prod` y con el control plane en
+`status.extendsystem.com` ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)): el
+latido actualiza `last_seen` cada 15 s y sobrevive a un reinicio del control plane. El agent midió
+**12,3 MB de RAM** y **cero ticks de CPU en 60 s** en reposo, con un binario de 7,2 MB. Las metas de
+memoria y tamaño se cumplen; la de CPU apunta a cumplirse, pero su medición formal (promedio de 10
+minutos en CI) es del Sprint 1. Se entregó en diez PR, más ADR-003 a ADR-007.
 
 **Sprint 1 (2 semanas): métricas de un servidor**
 
