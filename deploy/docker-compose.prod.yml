@@ -1,0 +1,107 @@
+# Control plane en producción: PostgreSQL, el control plane y Caddy.
+#
+# Lo único que queda expuesto a internet es Caddy, en los puertos 80 y 443. La
+# base y el control plane viven en una red interna sin puertos publicados.
+#
+# Los secretos salen de deploy/.env, que se genera en el servidor y nunca se
+# commitea. El paso a paso está en docs/runbook-despliegue.md.
+
+name: status-sv
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: statussv
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en deploy/.env}
+      POSTGRES_DB: statussv
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U statussv -d statussv"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - internal
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: server
+      args:
+        VERSION: ${STATUSSV_VERSION:-dev}
+        COMMIT: ${STATUSSV_COMMIT:-unknown}
+    image: status-sv-server:${STATUSSV_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      # sslmode=disable es aceptable acá: el tráfico no sale de la red interna
+      # de Docker en este mismo host.
+      DATABASE_URL: postgres://statussv:${POSTGRES_PASSWORD}@postgres:5432/statussv?sslmode=disable
+      STATUSSV_LISTEN_ADDR: 0.0.0.0:8080
+      # Caddy llega desde esta red: es el único origen del que se acepta
+      # X-Forwarded-For para saber la IP real del cliente.
+      STATUSSV_TRUSTED_PROXIES: 172.30.0.0/24
+      STATUSSV_LOG_FORMAT: json
+      STATUSSV_LOG_LEVEL: ${STATUSSV_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    # El control plane no escribe en disco: todo va a la base.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      STATUSSV_DOMAIN: ${STATUSSV_DOMAIN:?falta STATUSSV_DOMAIN en deploy/.env}
+    ports:
+      - "${STATUSSV_HTTP_PORT:-80}:80"
+      - "${STATUSSV_HTTPS_PORT:-443}:443"
+      - "${STATUSSV_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Acá quedan los certificados: si se pierde este volumen, Caddy los vuelve
+      # a pedir, y Let's Encrypt limita cuántos se pueden pedir por semana.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - internal
+
+networks:
+  internal:
+    ipam:
+      config:
+        # Fija la red para que STATUSSV_TRUSTED_PROXIES pueda nombrarla.
+        - subnet: 172.30.0.0/24
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

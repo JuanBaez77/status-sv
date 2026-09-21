@@ -197,6 +197,7 @@ Windows y macOS compila y corre para desarrollar, con una medición aproximada.
 
 ## Documentación
 
+- [docs/runbook-despliegue.md](docs/runbook-despliegue.md) — cómo desplegar el control plane y el agent en un VPS.
 - [docs/DISENO.md](docs/DISENO.md) — diseño, modelo de datos, protocolo, seguridad y roadmap.
 - [docs/adr/](docs/adr/) — decisiones de arquitectura, una por archivo.
 - [docs/mas-adelante.md](docs/mas-adelante.md) — ideas fuera del alcance actual.

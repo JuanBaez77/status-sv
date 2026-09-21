@@ -42,7 +42,7 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 	server, err := s.enrollment.Authenticate(ctx, credential)
 	if err != nil {
 		if errors.Is(err, enrollment.ErrUnauthorized) {
-			s.log.WarnContext(ctx, "conexión de agent rechazada", "ip", clientIP(r))
+			s.log.WarnContext(ctx, "conexión de agent rechazada", "ip", s.clientIP(r))
 			s.writeProtoError(ctx, w, http.StatusUnauthorized, uuid.Nil,
 				proto.CodeUnauthorized, "credencial inválida o revocada")
 			return
