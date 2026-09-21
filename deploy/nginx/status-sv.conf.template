@@ -1,0 +1,72 @@
+# status-sv detrás de un nginx que ya existe, con Cloudflare adelante.
+#
+# Es un archivo aparte, con su propio server_name: no toca la configuración de
+# los otros sitios del servidor. Escucha solo en IPv4, igual que el resto de los
+# sitios, para no volverse el bloque por defecto de un socket IPv6 nuevo.
+#
+# Generado por deploy/nginx/render.sh. No editar a mano en el servidor.
+
+# HTTP: solo para renovar el certificado; todo lo demás va a HTTPS.
+server {
+    listen 80;
+    server_name __DOMAIN__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name __DOMAIN__;
+
+    ssl_certificate /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    # Los mismos parámetros TLS que usan los demás sitios del servidor: comparten
+    # el socket del 443, y nginx toma algunos de ellos del bloque por defecto.
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # IP real del cliente detrás de Cloudflare. Solo vale si la conexión viene de
+    # Cloudflare: a quien le pegue directo al servidor con el encabezado inventado,
+    # se lo ignora.
+    include /etc/nginx/snippets/statussv-cloudflare-realip.conf;
+
+    server_tokens off;
+    client_max_body_size 1m;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # Canal permanente de los agents, por WebSocket.
+    location = /v1/agents/connect {
+        proxy_pass http://__UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        # Se reemplaza, no se agrega: $proxy_add_x_forwarded_for le sumaría lo
+        # que mande el cliente, y el control plane lee el primer valor.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Varias veces el latido: el canal no se corta por estar callado.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_buffering off;
+    }
+
+    location / {
+        proxy_pass http://__UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

@@ -33,8 +33,11 @@ y `systemctl reload ssh`. **Con una segunda sesión abierta**, por si algo sale 
 levantar Caddy, porque el certificado se pide al arrancar:
 
 ```bash
-dig +short <DOMINIO>    # tiene que devolver <IP>
+dig +short <DOMINIO>
 ```
+
+Sin proxy, tiene que devolver `<IP>`. Con el proxy de Cloudflare activado devuelve IPs de
+Cloudflare, y es lo esperado: lo que importa es que el registro en Cloudflare apunte a `<IP>`.
 
 **Firewall.** Abiertos solo 22, 80 y 443. Si el VPS usa `ufw`, el orden importa: habilitarlo sin
 permitir el 22 corta la sesión SSH.
@@ -51,6 +54,12 @@ ufw enable
 distribución del VPS.
 
 ## 1. Control plane
+
+Hay dos formas de exponerlo, y el resto del despliegue es igual para las dos:
+
+- **Servidor dedicado:** Caddy toma los puertos 80 y 443 y pide el certificado solo.
+- **Servidor que ya tiene nginx** (por ejemplo, el de un cliente): el control plane queda en
+  `127.0.0.1` y nginx le pasa el tráfico desde un sitio propio, sin tocar los demás.
 
 ### Copiar el código
 
@@ -79,8 +88,9 @@ cp deploy/.env.prod.example deploy/.env
 chmod 600 deploy/.env
 ```
 
-En `deploy/.env`, completar `STATUSSV_DOMAIN` y `STATUSSV_COMMIT` (el commit de arriba), y generar
-la contraseña de la base **en el servidor**:
+En `deploy/.env`, completar `STATUSSV_DOMAIN` y `STATUSSV_COMMIT` (el commit de arriba), y si va
+detrás de nginx, elegir un `STATUSSV_LOCAL_PORT` libre (`ss -tln`). La contraseña de la base se
+genera **en el servidor**:
 
 ```bash
 sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 32)|" deploy/.env
@@ -95,21 +105,84 @@ cd /opt/status-sv/deploy
 docker compose -f docker-compose.prod.yml --env-file .env build
 docker compose -f docker-compose.prod.yml --env-file .env up -d postgres
 docker compose -f docker-compose.prod.yml --env-file .env run --rm server migrate up
-docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
 Las migraciones van en un paso aparte, antes de levantar el control plane: nunca corren solas.
+
+**Servidor dedicado** — con Caddy:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env --profile caddy up -d
+```
+
+Si el certificado no sale, `docker compose ... logs caddy`: casi siempre es el DNS todavía no
+propagado o el puerto 80 cerrado.
+
+**Detrás de nginx** — sin Caddy:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d
+curl -s http://127.0.0.1:8090/readyz    # {"status":"ready"}, con el puerto elegido
+```
+
+### Detrás de nginx: el sitio y el certificado
+
+La configuración sale de plantillas y la genera `deploy/nginx/render.sh`, que valida el dominio y
+el destino antes de escribir nada. Es un archivo propio en `sites-available`: los sitios que ya
+existen no se tocan.
+
+**Primero, una configuración provisoria** que solo atiende el desafío de Let's Encrypt, porque el
+bloque HTTPS no se puede declarar hasta que exista el certificado:
+
+```bash
+cd /opt/status-sv
+mkdir -p /var/www/certbot
+install -m 0644 deploy/nginx/statussv-cloudflare-realip.conf /etc/nginx/snippets/
+deploy/nginx/render.sh bootstrap <DOMINIO> 127.0.0.1:8090 > /etc/nginx/sites-available/status-sv
+ln -s /etc/nginx/sites-available/status-sv /etc/nginx/sites-enabled/status-sv
+nginx -t && systemctl reload nginx
+```
+
+`nginx -t` va **siempre** antes de recargar: si la configuración tiene un error, no se recarga y
+los demás sitios siguen como estaban. La recarga no corta conexiones.
+
+**El certificado**, con la cuenta de certbot que ya tenga el servidor:
+
+```bash
+certbot certonly --webroot -w /var/www/certbot -d <DOMINIO> \
+  --deploy-hook "systemctl reload nginx" --non-interactive
+```
+
+El `--deploy-hook` recarga nginx cada vez que el certificado se renueva; la renovación la hace el
+timer de certbot que ya existe.
+
+**La configuración definitiva**, que reemplaza a la provisoria:
+
+```bash
+deploy/nginx/render.sh final <DOMINIO> 127.0.0.1:8090 > /etc/nginx/sites-available/status-sv
+nginx -t && systemctl reload nginx
+```
+
+Con Cloudflare adelante, el registro DNS va **con el proxy activado**, igual que los demás sitios:
+así la IP del servidor sigue oculta. El archivo `statussv-cloudflare-realip.conf` hace que nginx
+tome la IP real del cliente del encabezado de Cloudflare, pero solo cuando la conexión viene de
+un rango de Cloudflare; a quien le pegue directo al servidor con ese encabezado inventado, se lo
+ignora.
+
+**Para quitarlo**, sin afectar a los demás sitios:
+
+```bash
+rm /etc/nginx/sites-enabled/status-sv
+nginx -t && systemctl reload nginx
+```
 
 ### Verificar
 
 ```bash
 curl -s https://<DOMINIO>/readyz              # {"status":"ready"}
-curl -sI https://<DOMINIO>/healthz | head -1   # HTTP/2 200
+curl -sI https://<DOMINIO>/healthz | head -1   # 200
 docker compose -f docker-compose.prod.yml --env-file .env ps
 ```
-
-Si el certificado no sale, mirar `docker compose ... logs caddy`: casi siempre es el DNS todavía
-no propagado o el puerto 80 cerrado.
 
 ## 2. Agent
 
