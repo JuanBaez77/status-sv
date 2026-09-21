@@ -1,7 +1,14 @@
-# Control plane en producción: PostgreSQL, el control plane y Caddy.
+# Control plane en producción: PostgreSQL, el control plane y, opcionalmente, Caddy.
 #
-# Lo único que queda expuesto a internet es Caddy, en los puertos 80 y 443. La
-# base y el control plane viven en una red interna sin puertos publicados.
+# Dos formas de exponerlo, según el servidor:
+#
+#   - Servidor dedicado: con el perfil "caddy", que toma los puertos 80 y 443 y
+#     pide el certificado solo.   docker compose --profile caddy up -d
+#   - Detrás de un nginx que ya existe: sin perfil. El control plane queda en
+#     127.0.0.1 y nginx le pasa el tráfico (ver deploy/nginx/).
+#
+# En los dos casos la base no tiene puertos en el host y el control plane no es
+# alcanzable desde afuera sin pasar por el proxy.
 #
 # Los secretos salen de deploy/.env, que se genera en el servidor y nunca se
 # commitea. El paso a paso está en docs/runbook-despliegue.md.
@@ -62,12 +69,17 @@ services:
       - /tmp
     cap_drop:
       - ALL
+    ports:
+      # Solo en loopback: lo alcanza el nginx del host, nunca internet.
+      - "127.0.0.1:${STATUSSV_LOCAL_PORT:-8090}:8080"
     security_opt:
       - no-new-privileges:true
     networks:
       - internal
 
   caddy:
+    profiles:
+      - caddy
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
