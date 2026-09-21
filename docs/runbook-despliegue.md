@@ -284,3 +284,18 @@ El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, u
 - **No borrar el volumen `caddy-data`.** Tiene los certificados, y Let's Encrypt limita cuántos se
   pueden pedir por semana.
 - **No commitear `deploy/.env`.** Ya está en `.gitignore`, pero conviene revisarlo en cada PR.
+
+## 7. Lecciones del primer despliegue
+
+Salieron al desplegar en `cristales-baez-prod` y cuestan tiempo si se redescubren:
+
+- **Crear el registro DNS antes de consultarlo.** Si alguien pregunta por el dominio cuando todavía
+  no existe, los resolvers guardan la respuesta negativa hasta el mínimo del SOA: en Cloudflare, 30
+  minutos. El resolver del proveedor del VPS lo hizo, y el agent no pudo resolver el dominio hasta
+  que venció. `dig @153.92.2.6 <DOMINIO> +noall +authority` muestra cuánto le falta.
+- **Por SSH con un script por la entrada estándar, `docker compose run` y `exec` van con `-T` y
+  `</dev/null`.** Si no, leen la entrada estándar y se tragan el resto del script, que termina en
+  silencio a la mitad. Interactivamente no pasa.
+- **Cloudflare responde 403 (`error code: 1000`) si el cliente manda su propio `CF-Connecting-IP`.**
+  Es esperado y es una protección más: ese encabezado lo escribe solo Cloudflare. Para probar la
+  falsificación de IP a través del proxy, alcanza con `X-Forwarded-For`.

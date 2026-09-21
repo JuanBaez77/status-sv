@@ -45,3 +45,7 @@ roadmap de [DISENO.md](DISENO.md).
   cierra casi todo.
 - **Revocar agents desde el panel.** Hoy se revoca con una sentencia SQL a mano (ver el runbook).
 - **Backups de PostgreSQL** del control plane, con un restore probado. Está en los riesgos del diseño.
+- **Mover el control plane a un VPS propio.** Hoy vive en el servidor de un cliente
+  ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)); tiene que salir de ahí antes de
+  las alertas, de un segundo cliente con agent o de las herramientas de escritura. El runbook ya
+  cubre el despliegue dedicado con Caddy.
