@@ -76,6 +76,34 @@ esperar "el control plane responde /readyz" \
 paso "aplicando las migraciones"
 "${COMPOSE[@]}" exec -T server /usr/local/bin/server migrate up
 
+# --- Usuario del panel ---
+
+# Sin terminal, user-add lee la contraseña de una línea de la entrada. Es solo
+# para esta prueba: en el VPS se escribe en la terminal, sin eco.
+paso "creando un usuario del panel e iniciando sesión"
+E2E_PASSWORD="contraseña-de-la-prueba-e2e"
+printf '%s\n' "${E2E_PASSWORD}" | "${COMPOSE[@]}" exec -T server /usr/local/bin/server user-add --username e2e
+
+# wget de busybox con -S deja los encabezados de la respuesta en stderr.
+SESION="$(
+  "${COMPOSE[@]}" exec -T server wget -S -q -O /dev/null \
+    --header 'Content-Type: application/json' \
+    --post-data "{\"username\":\"e2e\",\"password\":\"${E2E_PASSWORD}\"}" \
+    http://127.0.0.1:8080/v1/auth/login 2>&1 \
+    | grep -io '__Host-statussv_session=svses_[A-Za-z0-9_-]*' | head -1
+)"
+if [ -z "${SESION}" ]; then
+  rojo "el login no devolvió la cookie de sesión"
+  exit 1
+fi
+verde "ok: el login entregó la cookie de sesión"
+
+YO="$("${COMPOSE[@]}" exec -T server wget -q -O- --header "Cookie: ${SESION}" http://127.0.0.1:8080/v1/auth/me)"
+case "${YO}" in
+  *'"username":"e2e"'*) verde "ok: la sesión identifica al usuario" ;;
+  *) rojo "/v1/auth/me respondió: ${YO}"; exit 1 ;;
+esac
+
 # --- 2. Token de enrolamiento ---
 
 paso "generando el token de enrolamiento"

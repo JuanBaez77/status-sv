@@ -184,6 +184,23 @@ curl -sI https://<DOMINIO>/healthz | head -1   # 200
 docker compose -f docker-compose.prod.yml --env-file .env ps
 ```
 
+### Crear el usuario del panel
+
+Lo hace una persona por SSH, una sola vez. La contraseña se escribe en la terminal y no se ve; nunca
+va como argumento, porque quedaría en el historial y en `ps`. `-it` hace falta para que haya una
+terminal: sin ella, el comando lee una línea de la entrada, que es lo que usa la prueba de punta a
+punta.
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec -it server server user-add --username juan
+```
+
+Para cambiarla (cierra todas las sesiones abiertas de ese usuario):
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec -it server server user-password --username juan
+```
+
 ## 2. Agent
 
 ### Compilar y copiar el binario

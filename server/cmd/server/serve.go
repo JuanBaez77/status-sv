@@ -16,6 +16,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
+	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
 
 // readHeaderTimeout corta a quien abre una conexión y no manda los encabezados.
@@ -53,6 +54,10 @@ func runServe(ctx context.Context, args []string) error {
 	defer background.Wait()
 	partitions := metrics.NewPartitions(store.New(pool), log)
 	background.Go(func() { partitions.Run(ctx) })
+	// Las sesiones vencidas del panel ya no sirven; el barrido es para que la
+	// tabla no crezca.
+	sessions := users.NewService(pool, log)
+	background.Go(func() { sessions.RunCleanup(ctx) })
 
 	apiServer := api.New(cfg, pool, log)
 

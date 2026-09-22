@@ -143,6 +143,7 @@ go run ./server/cmd/server help              # todos los subcomandos
 go run ./server/cmd/server migrate up        # aplica las migraciones
 go run ./server/cmd/server migrate status    # qué está aplicado y qué no
 go run ./server/cmd/server enroll-token --server vps-01
+go run ./server/cmd/server user-add --username juan   # pide la contraseña sin mostrarla
 go run ./server/cmd/server serve             # levanta la API
 ```
 

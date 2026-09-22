@@ -40,11 +40,21 @@ type Querier interface {
 	// fila, así que un token no se puede usar dos veces ni aunque dos agents lo
 	// presenten a la vez.
 	ConsumeEnrollmentToken(ctx context.Context, arg ConsumeEnrollmentTokenParams) (EnrollmentToken, error)
+	CountUsers(ctx context.Context) (int64, error)
 	CreateAgentCredential(ctx context.Context, arg CreateAgentCredentialParams) (AgentCredential, error)
 	CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) (EnrollmentToken, error)
 	CreateServer(ctx context.Context, arg CreateServerParams) (Server, error)
+	// CreateSession abre una sesión. El instante lo pone la aplicación, igual que
+	// los vencimientos, para que los plazos se midan todos con el mismo reloj.
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredEnrollmentTokens(ctx context.Context) (int64, error)
+	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
 	DeleteServer(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
+	// DeleteUserSessions cierra todas las sesiones de un usuario, por ejemplo al
+	// cambiar la contraseña.
+	DeleteUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	// DropMetricPartitions borra las particiones que terminan antes de before_ts y
 	// devuelve cuántas borró.
 	DropMetricPartitions(ctx context.Context, arg DropMetricPartitionsParams) (int32, error)
@@ -55,6 +65,9 @@ type Querier interface {
 	// GetActiveCredentialByHash es la consulta de autenticación del agent: busca por
 	// hash y solo devuelve la credencial si no fue revocada.
 	GetActiveCredentialByHash(ctx context.Context, secretHash []byte) (AgentCredential, error)
+	// GetActiveSession busca la sesión de un token si sigue viva: ni pasó su
+	// vencimiento absoluto ni se usó por última vez antes de idle_cutoff.
+	GetActiveSession(ctx context.Context, arg GetActiveSessionParams) (GetActiveSessionRow, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
 	// GetEnrollmentTokenByHashForUpdate bloquea la fila del token hasta el final de
 	// la transacción. Es lo que hace que dos enrolamientos simultáneos con el mismo
@@ -62,6 +75,8 @@ type Querier interface {
 	GetEnrollmentTokenByHashForUpdate(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
 	GetServerByID(ctx context.Context, id uuid.UUID) (Server, error)
 	GetServerByName(ctx context.Context, name string) (Server, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	GetUserByUsername(ctx context.Context, username string) (User, error)
 	// InsertRawDisks guarda los discos de un lote, una fila por disco y por muestra.
 	InsertRawDisks(ctx context.Context, arg InsertRawDisksParams) (int64, error)
 	// InsertRawNetworks guarda las interfaces de un lote, una fila por interfaz y
@@ -85,10 +100,16 @@ type Querier interface {
 	LockServerName(ctx context.Context, name string) error
 	RevokeActiveCredentialsForServer(ctx context.Context, arg RevokeActiveCredentialsForServerParams) (int64, error)
 	RevokeAgentCredential(ctx context.Context, arg RevokeAgentCredentialParams) (AgentCredential, error)
+	// SetUserPassword cambia el hash. Lo usan el cambio de contraseña y la
+	// actualización silenciosa de parámetros de argon2id al iniciar sesión.
+	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error)
 	TouchCredentialLastUsed(ctx context.Context, id uuid.UUID) error
 	// TouchServer deja constancia de que el agent sigue vivo. Es lo que actualiza el
 	// latido cada 15 segundos, y de lo que se deriva el estado online u offline.
 	TouchServer(ctx context.Context, arg TouchServerParams) (Server, error)
+	// TouchSession renueva el uso de una sesión. Se llama como mucho una vez por
+	// minuto por sesión, para no escribir en cada pedido.
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateServerHostname(ctx context.Context, arg UpdateServerHostnameParams) (Server, error)
 }
 
