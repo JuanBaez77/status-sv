@@ -2,14 +2,18 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
 
+	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
 	"github.com/JuanBaez77/status-sv/agent/internal/selfstat"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
 	"github.com/JuanBaez77/status-sv/proto"
@@ -30,7 +34,23 @@ type Client struct {
 	version string
 	log     *slog.Logger
 
-	config  proto.AgentConfig
+	// config la escribe la lectura del canal cuando el control plane manda una
+	// nueva, y la leen el latido, el envío de métricas y el muestreo, cada uno
+	// en su goroutine: por eso va con candado.
+	configMu sync.Mutex
+	config   proto.AgentConfig
+
+	// buffer tiene las muestras que esperan confirmación. Vive más que cada
+	// sesión: lo que no se confirmó sale en el canal siguiente.
+	buffer *metrics.Buffer
+	// metricsRejected evita repetir el mismo aviso con cada lote rechazado. Solo
+	// lo usa la lectura del canal, y se reinicia con cada sesión.
+	metricsRejected bool
+	// metricsWake adelanta el próximo lote cuando llega un acuse y todavía hay
+	// muestras esperando: después de un corte, el buffer se vacía sin esperar
+	// un intervalo entero por cada lote.
+	metricsWake chan struct{}
+
 	sampler *selfstat.Sampler
 	backoff *Backoff
 	started time.Time
@@ -43,18 +63,45 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient arma el cliente con el estado guardado en disco.
-func NewClient(s state.State, version string, log *slog.Logger) *Client {
+// NewClient arma el cliente con el estado guardado en disco. Las métricas que
+// manda las toma de buffer, que llena el muestreo.
+func NewClient(s state.State, version string, log *slog.Logger, buffer *metrics.Buffer) *Client {
 	return &Client{
-		state:      s,
-		version:    version,
-		log:        log,
-		config:     proto.DefaultAgentConfig(),
-		sampler:    selfstat.NewSampler(),
-		backoff:    NewBackoff(),
-		started:    time.Now(),
-		httpClient: &http.Client{Timeout: dialTimeout},
+		state:       s,
+		version:     version,
+		log:         log,
+		config:      proto.DefaultAgentConfig(),
+		buffer:      buffer,
+		metricsWake: make(chan struct{}, 1),
+		sampler:     selfstat.NewSampler(),
+		backoff:     NewBackoff(),
+		started:     time.Now(),
+		httpClient:  &http.Client{Timeout: dialTimeout},
 	}
+}
+
+// MetricsInterval devuelve cada cuánto hay que tomar una muestra, según la
+// última configuración del control plane.
+func (c *Client) MetricsInterval() time.Duration {
+	return c.currentConfig().MetricsInterval()
+}
+
+func (c *Client) currentConfig() proto.AgentConfig {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
+	return c.config
+}
+
+// setConfig guarda la configuración nueva y dice si cambió algo.
+func (c *Client) setConfig(config proto.AgentConfig) bool {
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
+
+	if config == c.config {
+		return false
+	}
+	c.config = config
+	return true
 }
 
 // Run mantiene el canal abierto hasta que se cancele el contexto.
@@ -135,7 +182,7 @@ func (c *Client) session(ctx context.Context) error {
 	}
 	conn.SetReadLimit(maxMessageBytes)
 
-	// Este contexto corta las dos goroutines de la sesión en cuanto una termina.
+	// Este contexto corta las goroutines de la sesión en cuanto una termina.
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	defer cancelSession()
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "hasta luego") }()
@@ -145,10 +192,17 @@ func (c *Client) session(ctx context.Context) error {
 	c.log.InfoContext(ctx, "conectado al control plane",
 		"servidor", c.state.ServerName,
 		"url", c.state.ServerURL,
+		"metricas_pendientes", c.buffer.Len(),
 	)
 
-	errs := make(chan error, 2)
+	// La respuesta al lote que estaba en vuelo en el canal anterior no va a
+	// llegar: esas muestras salen de nuevo en este.
+	c.buffer.Restart()
+	c.metricsRejected = false
+
+	errs := make(chan error, 3)
 	go func() { errs <- c.heartbeatLoop(sessionCtx, conn) }()
+	go func() { errs <- c.metricsLoop(sessionCtx, conn) }()
 	go func() { errs <- c.readLoop(sessionCtx, conn) }()
 
 	return <-errs
@@ -162,18 +216,100 @@ func (c *Client) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error 
 		return err
 	}
 
-	ticker := time.NewTicker(c.config.Heartbeat())
-	defer ticker.Stop()
-
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if err := c.sendHeartbeat(ctx, conn); err != nil {
-				return err
-			}
+		// El intervalo se consulta en cada vuelta: si el control plane lo
+		// cambia, vale desde el latido siguiente.
+		if err := wait(ctx, c.currentConfig().Heartbeat(), nil); err != nil {
+			return err
 		}
+		if err := c.sendHeartbeat(ctx, conn); err != nil {
+			return err
+		}
+	}
+}
+
+// metricsLoop manda lotes de métricas con el intervalo que indicó el control
+// plane. El primero sale enseguida: después de un corte conviene vaciar el
+// buffer cuanto antes.
+func (c *Client) metricsLoop(ctx context.Context, conn *websocket.Conn) error {
+	for {
+		if err := c.sendMetrics(ctx, conn); err != nil {
+			return err
+		}
+		if err := wait(ctx, c.currentConfig().MetricsBatch(), c.metricsWake); err != nil {
+			return err
+		}
+	}
+}
+
+// sendMetrics manda el próximo lote, si hay uno y no hay otro esperando
+// respuesta.
+func (c *Client) sendMetrics(ctx context.Context, conn *websocket.Conn) error {
+	batch := c.buffer.Next(proto.MaxSamplesPerBatch, time.Now())
+	if len(batch.Samples) == 0 {
+		return nil
+	}
+
+	raw, id, n, err := encodeMetrics(batch.Samples)
+	if err != nil {
+		// No pasa con muestras del colector (hay un test que lo asegura), pero
+		// si pasara, la muestra trabaría la cola para siempre.
+		c.log.ErrorContext(ctx, "se descarta una muestra que no se puede mandar", "error", err)
+		c.buffer.DiscardOldest(1)
+		return nil
+	}
+
+	// Se registra antes de escribir: el acuse puede llegar antes de que Write
+	// termine de volver.
+	c.buffer.Sent(batch, n, id, time.Now())
+
+	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	if err := conn.Write(writeCtx, websocket.MessageText, raw); err != nil {
+		return fmt.Errorf("enviar métricas: %w", err)
+	}
+
+	c.log.DebugContext(ctx, "lote de métricas enviado", "muestras", n, "bytes", len(raw))
+	return nil
+}
+
+// encodeMetrics arma el mensaje con todas las muestras que entren en el tope
+// del contrato, empezando por las más viejas. Devuelve el mensaje, su ID y
+// cuántas muestras lleva.
+func encodeMetrics(samples []proto.Sample) ([]byte, uuid.UUID, int, error) {
+	n := len(samples)
+	for n > 0 {
+		envelope, err := proto.Encode(proto.Metrics{Samples: samples[:n]})
+		if err != nil {
+			return nil, uuid.Nil, 0, fmt.Errorf("armar el lote: %w", err)
+		}
+		raw, err := json.Marshal(envelope)
+		if err != nil {
+			return nil, uuid.Nil, 0, fmt.Errorf("serializar el lote: %w", err)
+		}
+		if len(raw) <= proto.MaxMessageBytes {
+			return raw, envelope.ID, n, nil
+		}
+
+		// Se achica en proporción a lo que sobró, y al menos en una muestra.
+		n = min(n-1, n*proto.MaxMessageBytes/len(raw))
+	}
+	return nil, uuid.Nil, 0, fmt.Errorf("una sola muestra supera el tope de %d bytes por mensaje", proto.MaxMessageBytes)
+}
+
+// wait espera d, o hasta que llegue algo por wake, o hasta que se cancele el
+// contexto. Con wake en nil espera el plazo entero.
+func wait(ctx context.Context, d time.Duration, wake <-chan struct{}) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	case <-wake:
+		return nil
 	}
 }
 
@@ -231,6 +367,8 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 		switch envelope.Type {
 		case proto.TypeHeartbeatAck:
 			c.handleHeartbeatAck(ctx, envelope)
+		case proto.TypeMetricsAck:
+			c.handleMetricsAck(ctx, envelope)
 		case proto.TypeError:
 			c.handleServerError(ctx, envelope)
 		default:
@@ -247,21 +385,60 @@ func (c *Client) handleHeartbeatAck(ctx context.Context, envelope proto.Envelope
 		return
 	}
 
-	if ack.Config != nil && *ack.Config != c.config {
+	if ack.Config != nil && c.setConfig(*ack.Config) {
 		c.log.InfoContext(ctx, "el control plane cambió la configuración",
 			"latido_segundos", ack.Config.HeartbeatSeconds,
 			"metricas_segundos", ack.Config.MetricsIntervalSeconds,
+			"lote_segundos", ack.Config.MetricsBatchSeconds,
 		)
-		c.config = *ack.Config
 	}
 }
 
-// handleServerError registra un rechazo del control plane.
+// handleMetricsAck suelta del buffer lo que el control plane ya guardó.
+func (c *Client) handleMetricsAck(ctx context.Context, envelope proto.Envelope) {
+	ack, err := proto.Decode[proto.MetricsAck](envelope)
+	if err != nil {
+		c.log.WarnContext(ctx, "acuse de métricas inválido", "error", err)
+		return
+	}
+
+	// Si no se guardó nada, no hay nada que soltar; pero el lote ya tuvo
+	// respuesta y puede salir el siguiente.
+	lastTS := ack.LastTS
+	if ack.Accepted == 0 {
+		lastTS = time.Time{}
+	}
+	released := c.buffer.Ack(lastTS)
+	c.metricsRejected = false
+
+	if c.buffer.Len() > 0 {
+		select {
+		case c.metricsWake <- struct{}{}:
+		default: // ya había un aviso pendiente
+		}
+	}
+
+	c.log.DebugContext(ctx, "métricas confirmadas",
+		"aceptadas", ack.Accepted,
+		"liberadas", released,
+		"pendientes", c.buffer.Len(),
+	)
+}
+
+// handleServerError registra un rechazo del control plane. Si el rechazo es de
+// un lote de métricas, el buffer decide si esas muestras vuelven a salir.
 func (c *Client) handleServerError(ctx context.Context, envelope proto.Envelope) {
 	message, err := proto.Decode[proto.ErrorMessage](envelope)
 	if err != nil {
 		c.log.WarnContext(ctx, "mensaje de error inválido", "error", err)
 		return
+	}
+
+	if message.InReplyTo != nil {
+		if discarded, matched := c.buffer.Reject(*message.InReplyTo, message.Retryable()); matched {
+			c.logMetricsRejection(ctx, message, discarded)
+			return
+		}
 	}
 
 	c.log.ErrorContext(ctx, "el control plane rechazó un mensaje",
@@ -271,6 +448,25 @@ func (c *Client) handleServerError(ctx context.Context, envelope proto.Envelope)
 	)
 }
 
+// logMetricsRejection avisa que el control plane rechazó un lote. Si rechaza
+// uno, suele rechazar todos (por ejemplo, un control plane que todavía no
+// guarda métricas), así que el aviso sale una vez por sesión y el resto va a
+// depuración.
+func (c *Client) logMetricsRejection(ctx context.Context, message proto.ErrorMessage, discarded int) {
+	attrs := []any{
+		"codigo", message.Code,
+		"detalle", message.Message,
+		"reintentable", message.Retryable(),
+		"descartadas", discarded,
+	}
+	if c.metricsRejected {
+		c.log.DebugContext(ctx, "el control plane rechazó otro lote de métricas", attrs...)
+		return
+	}
+	c.metricsRejected = true
+	c.log.WarnContext(ctx, "el control plane rechazó un lote de métricas", attrs...)
+}
+
 // silenceTimeout es cuánto se tolera no recibir nada del control plane antes de
 // dar el canal por muerto. Son tres latidos: uno perdido puede ser una demora,
 // tres seguidos no.
@@ -278,7 +474,7 @@ func (c *Client) silenceTimeout() time.Duration {
 	if c.silence > 0 {
 		return c.silence
 	}
-	heartbeat := c.config.Heartbeat()
+	heartbeat := c.currentConfig().Heartbeat()
 	if heartbeat <= 0 {
 		heartbeat = proto.DefaultAgentConfig().Heartbeat()
 	}
