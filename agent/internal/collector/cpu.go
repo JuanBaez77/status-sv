@@ -12,9 +12,21 @@ import (
 // cpuTimes son los contadores de la línea "cpu" de /proc/stat: cuánto tiempo
 // pasaron todos los núcleos juntos ocupados y ociosos desde que arrancó la
 // máquina, en ticks del kernel.
+//
+// busy incluye a steal e idle incluye a iowait; los dos se guardan además por
+// separado porque se informan aparte.
 type cpuTimes struct {
-	busy uint64
-	idle uint64
+	busy   uint64
+	idle   uint64
+	iowait uint64
+	steal  uint64
+}
+
+// cpuUsage es el uso entre dos lecturas, en porcentajes del tiempo total.
+type cpuUsage struct {
+	used   float64
+	iowait float64
+	steal  float64
 }
 
 // Posición de cada contador en la línea "cpu", en el orden en que los escribe
@@ -93,32 +105,50 @@ func parseCPULine(rest string) (cpuTimes, error) {
 		return cpuTimes{}, errors.New("los contadores no tienen sentido: la suma desborda")
 	}
 
-	return cpuTimes{busy: busy, idle: idle}, nil
+	return cpuTimes{
+		busy:   busy,
+		idle:   idle,
+		iowait: values[fieldIOWait],
+		steal:  values[fieldSteal],
+	}, nil
 }
 
-// usedPercent calcula qué parte del tiempo entre dos lecturas estuvo ocupada,
-// redondeada a dos decimales: el panel no muestra más y el JSON queda corto.
+// usage calcula qué parte del tiempo entre dos lecturas estuvo ocupada, en
+// espera de disco y robada por el hipervisor, redondeada a dos decimales: el
+// panel no muestra más y el JSON queda corto.
 //
 // Devuelve false si los contadores no avanzaron o retrocedieron. No pasa en un
 // kernel normal con lecturas separadas por segundos, pero sí con /proc
 // virtualizado (lxcfs) o con lecturas demasiado seguidas, y un porcentaje
 // inventado sería peor que no tenerlo.
-func usedPercent(prev, cur cpuTimes) (float64, bool) {
+func usage(prev, cur cpuTimes) (cpuUsage, bool) {
 	prevTotal, curTotal := prev.busy+prev.idle, cur.busy+cur.idle
 	if curTotal <= prevTotal {
-		return 0, false
+		return cpuUsage{}, false
 	}
 	elapsed := curTotal - prevTotal
 
-	// iowait puede retroceder (proc(5) lo advierte), así que la parte ociosa se
-	// acota para que el resultado quede siempre entre 0 y 100.
-	var idle uint64
-	if cur.idle > prev.idle {
-		idle = min(cur.idle-prev.idle, elapsed)
-	}
+	// iowait puede retroceder (proc(5) lo advierte), así que cada diferencia se
+	// acota para que los porcentajes queden siempre entre 0 y 100.
+	idle := delta(prev.idle, cur.idle, elapsed)
+	return cpuUsage{
+		used:   percentOf(elapsed-idle, elapsed),
+		iowait: percentOf(delta(prev.iowait, cur.iowait, elapsed), elapsed),
+		steal:  percentOf(delta(prev.steal, cur.steal, elapsed), elapsed),
+	}, true
+}
 
-	percent := float64(elapsed-idle) / float64(elapsed) * 100
-	return math.Round(percent*100) / 100, true
+// delta es cuánto avanzó un contador, entre cero y limit.
+func delta(prev, cur, limit uint64) uint64 {
+	if cur <= prev {
+		return 0
+	}
+	return min(cur-prev, limit)
+}
+
+// percentOf es part sobre total en porcentaje, redondeado a dos decimales.
+func percentOf(part, total uint64) float64 {
+	return math.Round(float64(part)/float64(total)*100*100) / 100
 }
 
 // sum suma sin desbordar; el segundo valor es false si la suma no entra.

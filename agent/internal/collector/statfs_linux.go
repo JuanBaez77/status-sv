@@ -23,7 +23,7 @@ func statfs(path string) (fsUsage, error) {
 		blockSize = stat.Bsize
 	}
 
-	usage, err := usageFromBlocks(stat.Blocks, stat.Bfree, blockSize)
+	usage, err := usageFromBlocks(stat.Blocks, stat.Bfree, stat.Bavail, blockSize)
 	if err != nil {
 		return fsUsage{}, fmt.Errorf("statfs %s: %w", path, err)
 	}
