@@ -54,6 +54,12 @@ type Buffer struct {
 	anySent    bool
 
 	dropped int
+
+	// added avisa que entró una muestra, para que el envío no tenga que
+	// esperar a su propio reloj: sin esto, una muestra podía quedar hasta un
+	// intervalo entero en el buffer, y la meta es que llegue al panel en menos
+	// de 2 segundos.
+	added chan struct{}
 }
 
 // entry es una muestra con su número de orden. El número, y no la marca de
@@ -82,7 +88,14 @@ func NewBuffer(maxAge time.Duration, maxSamples int) *Buffer {
 		maxAge:     maxAge,
 		maxSamples: max(maxSamples, 1),
 		ackTimeout: DefaultAckTimeout,
+		added:      make(chan struct{}, 1),
 	}
+}
+
+// Added avisa cada vez que entra una muestra. Si nadie escuchó el aviso
+// anterior, los avisos se juntan en uno.
+func (b *Buffer) Added() <-chan struct{} {
+	return b.added
 }
 
 // Add agrega una muestra. Si el buffer se pasa de antigüedad o de cantidad,
@@ -106,6 +119,11 @@ func (b *Buffer) Add(sample proto.Sample) int {
 	}
 	b.popFront(drop)
 	b.dropped += drop
+
+	select {
+	case b.added <- struct{}{}:
+	default: // ya había un aviso sin leer
+	}
 	return drop
 }
 

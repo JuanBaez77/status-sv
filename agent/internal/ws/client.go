@@ -219,7 +219,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error 
 	for {
 		// El intervalo se consulta en cada vuelta: si el control plane lo
 		// cambia, vale desde el latido siguiente.
-		if err := wait(ctx, c.currentConfig().Heartbeat(), nil); err != nil {
+		if err := sleep(ctx, c.currentConfig().Heartbeat()); err != nil {
 			return err
 		}
 		if err := c.sendHeartbeat(ctx, conn); err != nil {
@@ -228,26 +228,71 @@ func (c *Client) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error 
 	}
 }
 
-// metricsLoop manda lotes de métricas con el intervalo que indicó el control
-// plane. El primero sale enseguida: después de un corte conviene vaciar el
-// buffer cuanto antes.
+// metricsLoop manda lotes de métricas.
+//
+// El intervalo de lote se mide desde las muestras y no con un reloj propio:
+// sale en cuanto entra la muestra que lo completa. Con la configuración por
+// defecto (una muestra y un lote cada 10 s), cada muestra sale apenas se toma;
+// con dos relojes independientes podía esperar hasta 10 s en el buffer, y la
+// meta es que llegue al panel en menos de 2.
+//
+// Además sale un lote enseguida al conectar, para vaciar lo que se juntó
+// durante un corte, y al llegar un acuse si quedan muestras esperando. Si no
+// pasa nada de eso, al cumplirse el intervalo se reintenta lo que haya quedado
+// pendiente (un lote sin respuesta o un rechazo reintentable).
 func (c *Client) metricsLoop(ctx context.Context, conn *websocket.Conn) error {
+	var lastSent time.Time
 	for {
-		if err := c.sendMetrics(ctx, conn); err != nil {
+		sent, err := c.sendMetrics(ctx, conn)
+		if err != nil {
 			return err
 		}
-		if err := wait(ctx, c.currentConfig().MetricsBatch(), c.metricsWake); err != nil {
+		if sent {
+			lastSent = time.Now()
+		}
+		if err := c.waitForBatch(ctx, lastSent); err != nil {
 			return err
 		}
 	}
 }
 
+// waitForBatch espera el momento de intentar el próximo lote.
+func (c *Client) waitForBatch(ctx context.Context, lastSent time.Time) error {
+	config := c.currentConfig()
+	timer := time.NewTimer(config.MetricsBatch())
+	defer timer.Stop()
+	due := batchDue(lastSent, config)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		case <-c.metricsWake:
+			return nil
+		case <-c.buffer.Added():
+			if !time.Now().Before(due) {
+				return nil
+			}
+		}
+	}
+}
+
+// batchDue es desde cuándo una muestra nueva dispara el próximo lote. Lleva
+// medio intervalo de muestreo de tolerancia: la muestra que completa el
+// intervalo de lote llega con unos milisegundos de diferencia respecto del
+// envío anterior, y sin tolerancia se quedaría esperando al lote siguiente.
+func batchDue(lastSent time.Time, config proto.AgentConfig) time.Time {
+	return lastSent.Add(config.MetricsBatch() - config.MetricsInterval()/2)
+}
+
 // sendMetrics manda el próximo lote, si hay uno y no hay otro esperando
-// respuesta.
-func (c *Client) sendMetrics(ctx context.Context, conn *websocket.Conn) error {
+// respuesta. Devuelve si mandó algo.
+func (c *Client) sendMetrics(ctx context.Context, conn *websocket.Conn) (bool, error) {
 	batch := c.buffer.Next(proto.MaxSamplesPerBatch, time.Now())
 	if len(batch.Samples) == 0 {
-		return nil
+		return false, nil
 	}
 
 	raw, id, n, err := encodeMetrics(batch.Samples)
@@ -256,7 +301,7 @@ func (c *Client) sendMetrics(ctx context.Context, conn *websocket.Conn) error {
 		// si pasara, la muestra trabaría la cola para siempre.
 		c.log.ErrorContext(ctx, "se descarta una muestra que no se puede mandar", "error", err)
 		c.buffer.DiscardOldest(1)
-		return nil
+		return false, nil
 	}
 
 	// Se registra antes de escribir: el acuse puede llegar antes de que Write
@@ -266,11 +311,11 @@ func (c *Client) sendMetrics(ctx context.Context, conn *websocket.Conn) error {
 	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 	if err := conn.Write(writeCtx, websocket.MessageText, raw); err != nil {
-		return fmt.Errorf("enviar métricas: %w", err)
+		return false, fmt.Errorf("enviar métricas: %w", err)
 	}
 
 	c.log.DebugContext(ctx, "lote de métricas enviado", "muestras", n, "bytes", len(raw))
-	return nil
+	return true, nil
 }
 
 // encodeMetrics arma el mensaje con todas las muestras que entren en el tope
@@ -297,9 +342,8 @@ func encodeMetrics(samples []proto.Sample) ([]byte, uuid.UUID, int, error) {
 	return nil, uuid.Nil, 0, fmt.Errorf("una sola muestra supera el tope de %d bytes por mensaje", proto.MaxMessageBytes)
 }
 
-// wait espera d, o hasta que llegue algo por wake, o hasta que se cancele el
-// contexto. Con wake en nil espera el plazo entero.
-func wait(ctx context.Context, d time.Duration, wake <-chan struct{}) error {
+// sleep espera d o hasta que se cancele el contexto.
+func sleep(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 
@@ -307,8 +351,6 @@ func wait(ctx context.Context, d time.Duration, wake <-chan struct{}) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timer.C:
-		return nil
-	case <-wake:
 		return nil
 	}
 }

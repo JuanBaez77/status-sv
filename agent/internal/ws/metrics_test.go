@@ -216,3 +216,59 @@ func TestEncodeMetrics(t *testing.T) {
 		t.Errorf("salieron %d de %d muestras en %d bytes (tope %d)", n, len(big), len(raw), proto.MaxMessageBytes)
 	}
 }
+
+// Una muestra sale apenas entra al buffer, sin esperar el reloj del lote: la
+// meta es que llegue al panel en menos de 2 s, y el lote es cada 10.
+func TestClientSendsANewSampleRightAway(t *testing.T) {
+	fake := newFakeControlPlane(t)
+	client, buffer := newMetricsTestClient(t, fake)
+	runClient(t, client)
+
+	eventually(t, "la conexión", func() bool {
+		_, _, connections := fake.metricsStats()
+		return connections == 1
+	})
+	time.Sleep(50 * time.Millisecond) // que el primer intento, sin nada, ya haya pasado
+
+	added := time.Now()
+	buffer.Add(testSample(0))
+	eventually(t, "que llegue la muestra", func() bool {
+		samples, _, _ := fake.metricsStats()
+		return samples == 1
+	})
+	if elapsed := time.Since(added); elapsed > time.Second {
+		t.Errorf("la muestra tardó %v en salir; el lote es cada %v", elapsed, proto.DefaultAgentConfig().MetricsBatch())
+	}
+}
+
+func TestBatchDue(t *testing.T) {
+	last := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	config := func(interval, batch int) proto.AgentConfig {
+		return proto.AgentConfig{HeartbeatSeconds: 15, MetricsIntervalSeconds: interval, MetricsBatchSeconds: batch}
+	}
+
+	tests := []struct {
+		name    string
+		config  proto.AgentConfig
+		arrival time.Duration // cuándo llega la muestra, desde el último envío
+		want    bool
+	}{
+		// Una muestra y un lote cada 10 s: cada muestra dispara su lote, aunque
+		// llegue unos milisegundos antes de cumplirse el intervalo.
+		{name: "la siguiente muestra", config: config(10, 10), arrival: 10 * time.Second, want: true},
+		{name: "la siguiente, un poco antes", config: config(10, 10), arrival: 9990 * time.Millisecond, want: true},
+		// Lote cada 30 s con muestras cada 10: salen de a tres.
+		{name: "la primera de tres", config: config(10, 30), arrival: 10 * time.Second, want: false},
+		{name: "la segunda de tres", config: config(10, 30), arrival: 20 * time.Second, want: false},
+		{name: "la tercera de tres", config: config(10, 30), arrival: 29990 * time.Millisecond, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			due := batchDue(last, tt.config)
+			if got := !last.Add(tt.arrival).Before(due); got != tt.want {
+				t.Errorf("con la muestra a %v del último envío, ¿sale el lote? %v; se esperaba %v", tt.arrival, got, tt.want)
+			}
+		})
+	}
+}
