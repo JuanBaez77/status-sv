@@ -100,7 +100,15 @@ test-integration: ## Tests de integración; necesita TEST_DATABASE_URL
 	$(GO) test -tags=integration -count=1 ./...
 
 .PHONY: ci
-ci: fmt-check vet lint lint-linux sqlc-check test-race size-check ## Todo lo que corre el CI, menos los tests de integración
+ci: fmt-check vet lint lint-linux sqlc-check test-race size-check web-ci ## Todo lo que corre el CI, menos los tests de integración
+
+.PHONY: web-install
+web-install: ## Instala las dependencias del panel
+	cd web && npm ci
+
+.PHONY: web-ci
+web-ci: ## Lint, tipos, tests, build y meta de tamaño del panel
+	cd web && npm run ci
 
 .PHONY: clean
 clean: ## Borra los binarios compilados

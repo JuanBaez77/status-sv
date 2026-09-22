@@ -136,6 +136,18 @@ sobreviva a un reinicio del control plane.
 Se limpia sola al terminar, incluso si falla, y en ese caso imprime los registros del control
 plane y del agent. Es el mismo script que corre el CI.
 
+## Panel
+
+```bash
+cd web
+npm install
+npm run dev         # http://localhost:5173, con proxy a la API en 8080
+npm run ci          # lint, tipos, tests, build y meta de tamaño
+```
+
+El detalle está en [web/README.md](web/README.md). El panel se compila a estáticos y, desde el PR
+11 del Sprint 1, se embebe en el binario del control plane.
+
 ## Control plane
 
 ```bash
