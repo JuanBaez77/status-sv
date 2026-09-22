@@ -173,6 +173,7 @@ Endpoints del panel. Todos piden la cookie de sesión que entrega el login ([ADR
 | `GET /v1/auth/me` | Quién es el usuario de la sesión. |
 | `GET /v1/servers` | Todos los servidores con su estado (`online`, `offline`, `never_seen`) y su última muestra, con el disco más lleno. |
 | `GET /v1/servers/{id}/metrics` | Series de un servidor. Parámetros: `from` y `to` en RFC 3339 (por defecto, la última hora) y `resolution` (`raw` o `1m`). |
+| `GET /v1/panel/connect` | WebSocket con las métricas en vivo. El panel manda `{"type":"subscribe","server_ids":[…]}` y el control plane le confirma con `{"type":"subscribed",…}`; después recibe un `{"type":"sample",…}` por cada lote que guarda ese servidor. |
 
 La resolución se elige sola si no se pide: hasta 3 horas, las muestras crudas; más allá, el agregado
 por minuto, que es lo único que queda pasadas las 48 horas de retención del crudo. En `1m` cada

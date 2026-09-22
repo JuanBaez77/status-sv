@@ -64,6 +64,9 @@ func (s *Server) handleMetrics(ctx context.Context, conn *websocket.Conn, server
 		return nil
 	}
 
+	// Los paneles que estén mirando este servidor ven la muestra al instante.
+	s.publishSample(server.ID, batch.Samples)
+
 	s.log.DebugContext(ctx, "lote de métricas guardado",
 		"servidor", server.Name,
 		"muestras", result.Accepted,

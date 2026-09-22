@@ -67,6 +67,9 @@ type diskSeries struct {
 // diskPoint, en resolución 1m, es el peor momento del minuto: lo más usado y lo
 // menos disponible.
 type diskPoint struct {
+	// Mountpoint solo viaja en los mensajes en vivo del WebSocket: en las
+	// series de la API REST ya lo lleva diskSeries.
+	Mountpoint     string    `json:"mountpoint,omitempty"`
 	TS             time.Time `json:"ts"`
 	TotalBytes     int64     `json:"total_bytes"`
 	UsedBytes      int64     `json:"used_bytes"`
@@ -80,6 +83,8 @@ type networkSeries struct {
 
 // networkPoint son tasas, no contadores: el panel grafica bytes por segundo.
 type networkPoint struct {
+	// Interface, igual que Mountpoint en diskPoint, solo viaja en vivo.
+	Interface   string    `json:"interface,omitempty"`
 	TS          time.Time `json:"ts"`
 	RxPerSec    float64   `json:"rx_bytes_per_sec"`
 	RxMaxPerSec float64   `json:"rx_max_bytes_per_sec"`

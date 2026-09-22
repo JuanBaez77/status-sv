@@ -37,6 +37,8 @@ type Server struct {
 	enrollLimiter *ipLimiter
 	ingester      *metrics.Ingester
 	users         *users.Service
+	panels        *panelHub
+	counters      *counterCache
 	loginLimiter  *ipLimiter
 }
 
@@ -52,6 +54,8 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 		ingester:      metrics.NewIngester(pool),
 		users:         users.NewService(pool, log),
+		panels:        newPanelHub(),
+		counters:      newCounterCache(),
 		loginLimiter:  newIPLimiter(loginPerMinute, loginBurst, limiterTTL),
 	}
 }
@@ -81,6 +85,9 @@ func (s *Server) Handler() http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/", limited)
 	root.HandleFunc("GET /v1/agents/connect", s.handleAgentConnect)
+	// El WebSocket del panel también va fuera del límite por pedido, por lo
+	// mismo que el de los agents.
+	root.Handle("GET /v1/panel/connect", s.requireSession(http.HandlerFunc(s.handlePanelConnect)))
 
 	return s.recoverPanic(s.logRequests(root))
 }
@@ -88,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 // CloseAgents cierra las conexiones de los agents. Se llama al apagar, para que
 // cada agent se entere y reconecte con backoff en vez de quedarse esperando.
 func (s *Server) CloseAgents(reason string) {
+	s.panels.closeAll()
 	s.hub.closeAll(reason)
 }
 
