@@ -5,6 +5,7 @@
 //
 //	agent enroll --server-url URL    canjea un token por la credencial del agent
 //	agent run                        mantiene el canal abierto
+//	agent sample                     imprime una muestra de métricas, sin conectarse
 //	agent version                    imprime la versión
 package main
 
@@ -47,6 +48,8 @@ func run(ctx context.Context, args []string) error {
 		return runEnroll(ctx, args[1:])
 	case "run":
 		return runAgent(ctx, args[1:])
+	case "sample":
+		return runSample(ctx, args[1:])
 	case "version", "--version", "-version":
 		fmt.Println(buildinfo.Line(name))
 		return nil
@@ -65,6 +68,8 @@ func usage(out *os.File) {
 Uso:
   agent enroll --server-url URL     canjea un token por la credencial del agent
   agent run                         mantiene el canal abierto con el control plane
+  agent sample [--interval 1s]      imprime una muestra de métricas como JSON, sin
+                                    conectarse: sirve para ver qué lee el agent
   agent version                     imprime la versión
 
 Configuración (variables de entorno):
