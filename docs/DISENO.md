@@ -99,7 +99,7 @@ Tu stack fuerte hoy es Python, así que las primeras semanas van a ser de curva.
 
 ## Modelo de datos
 
-Doce tablas cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo.
+Doce entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
 
 | Tabla | Contenido | Notas |
 | --- | --- | --- |
@@ -108,8 +108,8 @@ Doce tablas cubren el MVP. Las métricas crudas y agregadas viven particionadas 
 | `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
 | `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno. | Nace del `project.yaml` declarado. |
 | `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
-| `metrics_raw` | Servidor, instante, CPU, RAM, disco, red, carga. | Partición diaria, retención 48 horas. |
-| `metrics_1m` | Mismas magnitudes agregadas por minuto. | Partición mensual, retención 30 días. |
+| `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
+| `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU y memoria, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
 | `metrics_1h` | Agregado por hora, con mínimo, promedio y máximo. | Retención 1 año. |
 | `audit_log` | Actor, tipo de actor (persona o LLM), acción, objetivo, resultado, IP. | Solo inserciones. |
 
@@ -123,7 +123,7 @@ Doce tablas cubren el MVP. Las métricas crudas y agregadas viven particionadas 
 
 - Los IDs son UUID v7, que se ordenan por tiempo y son buenos índices.
 - `audit_log` no admite UPDATE ni DELETE: se aplica con permisos del rol de la aplicación.
-- Un job interno agrega `metrics_raw` a `metrics_1m` y a `metrics_1h`, y elimina particiones vencidas.
+- Un job interno agrega `metrics_raw` a `metrics_1m` y a `metrics_1h`. Otro crea las particiones por adelantado y borra las vencidas, cada hora, con funciones de la migración que escapan los nombres ([ADR-008](adr/ADR-008-tablas-de-metricas.md)). Todos los cortes son en UTC y no hay partición por defecto.
 - Los estados de servidor (online, offline, degradado) se derivan del último contacto, no se escriben a mano.
 
 ## Protocolo agent ↔ control plane
@@ -407,9 +407,9 @@ Agent
 
 Servidor
 
-- [ ] Migración de `metrics_raw` (partición diaria) y `metrics_1m`.
+- [x] Migración de `metrics_raw` (partición diaria) y `metrics_1m`, con discos e interfaces en tablas aparte.
 - [ ] Recepción de lotes y escritura por `COPY` o inserción masiva.
-- [ ] Job de agregación de crudo a un minuto y borrado de particiones vencidas.
+- [ ] Job de agregación de crudo a un minuto y borrado de particiones vencidas. El mantenimiento de las particiones ya está; falta la agregación.
 - [ ] API `GET /servers` y `GET /servers/{id}/metrics?from&to`.
 - [ ] WebSocket para el panel con suscripción por servidor.
 

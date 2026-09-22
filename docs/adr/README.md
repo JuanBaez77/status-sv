@@ -36,3 +36,4 @@ Qué más se evaluó y por qué se descartó.
 | [005](ADR-005-alcance-single-tenant.md) | status-sv es una herramienta interna single-tenant | aceptada |
 | [006](ADR-006-autenticacion-de-agents.md) | Autenticación de agents con token de un solo uso y credencial propia | aceptada |
 | [007](ADR-007-control-plane-en-servidor-de-cliente.md) | El control plane vive en el servidor de un cliente, detrás de su nginx | aceptada |
+| [008](ADR-008-tablas-de-metricas.md) | Tablas de métricas, con discos e interfaces aparte, y particiones que maneja el control plane | aceptada |
