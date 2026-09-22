@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
 	"github.com/JuanBaez77/status-sv/server/internal/api"
 	"github.com/JuanBaez77/status-sv/server/internal/config"
+	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 )
 
@@ -43,6 +45,14 @@ func runServe(ctx context.Context, args []string) error {
 		return err
 	}
 	defer pool.Close()
+
+	// Las particiones de métricas se crean por adelantado y se borran al
+	// vencer. Se espera a que el mantenimiento termine antes de cerrar el pool
+	// (los defer corren en orden inverso).
+	var background sync.WaitGroup
+	defer background.Wait()
+	partitions := metrics.NewPartitions(store.New(pool), log)
+	background.Go(func() { partitions.Run(ctx) })
 
 	apiServer := api.New(cfg, pool, log)
 
