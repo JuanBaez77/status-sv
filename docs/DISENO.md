@@ -123,7 +123,7 @@ Doce entidades cubren el MVP. Las métricas crudas y agregadas viven particionad
 
 - Los IDs son UUID v7, que se ordenan por tiempo y son buenos índices.
 - `audit_log` no admite UPDATE ni DELETE: se aplica con permisos del rol de la aplicación.
-- Un job interno agrega `metrics_raw` a `metrics_1m` y a `metrics_1h`. Otro crea las particiones por adelantado y borra las vencidas, cada hora, con funciones de la migración que escapan los nombres ([ADR-008](adr/ADR-008-tablas-de-metricas.md)). Todos los cortes son en UTC y no hay partición por defecto.
+- La ingesta recalcula el agregado por minuto de los minutos que toca cada lote, en la misma transacción y siempre desde el crudo, así que las muestras que llegan tarde o repetidas no lo desarman ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)). El agregado por hora (`metrics_1h`, Sprint 3) sigue el mismo camino a partir de `metrics_1m`. Un job interno crea las particiones por adelantado y borra las vencidas, cada hora, con funciones de la migración que escapan los nombres ([ADR-008](adr/ADR-008-tablas-de-metricas.md)). Todos los cortes son en UTC y no hay partición por defecto.
 - Los estados de servidor (online, offline, degradado) se derivan del último contacto, no se escriben a mano.
 
 ## Protocolo agent ↔ control plane
@@ -409,7 +409,7 @@ Servidor
 
 - [x] Migración de `metrics_raw` (partición diaria) y `metrics_1m`, con discos e interfaces en tablas aparte.
 - [x] Recepción de lotes y escritura por `COPY` o inserción masiva. Es inserción masiva con `unnest` y `ON CONFLICT DO NOTHING`, idempotente ante reenvíos, en una transacción por lote.
-- [ ] Job de agregación de crudo a un minuto y borrado de particiones vencidas. El mantenimiento de las particiones ya está; falta la agregación.
+- [x] Agregación de crudo a un minuto y borrado de particiones vencidas. La agregación no es un job: la hace la ingesta en la transacción de cada lote ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)).
 - [ ] API `GET /servers` y `GET /servers/{id}/metrics?from&to`.
 - [ ] WebSocket para el panel con suscripción por servidor.
 

@@ -55,6 +55,11 @@ type IngestResult struct {
 // muestra nunca queda guardada a medias. Guardar dos veces el mismo lote no
 // duplica nada.
 //
+// En la misma transacción recalcula el agregado por minuto de los minutos que
+// tocó el lote (ADR-009): el agregado nunca queda atrás del crudo, aunque una
+// muestra llegue tarde. Si el lote no trajo nada nuevo, no hay nada que
+// recalcular.
+//
 // Si el lote es inválido devuelve un error que envuelve a ErrInvalidBatch; los
 // demás errores son de la base, y conviene que el agent reintente.
 func (i *Ingester) Ingest(ctx context.Context, serverID uuid.UUID, samples []proto.Sample) (IngestResult, error) {
@@ -75,14 +80,20 @@ func (i *Ingester) Ingest(ctx context.Context, serverID uuid.UUID, samples []pro
 	if err != nil {
 		return IngestResult{}, fmt.Errorf("guardar las muestras: %w", err)
 	}
+	var insertedDisks, insertedNetworks int64
 	if len(batch.disks.Ts) > 0 {
-		if _, err := q.InsertRawDisks(ctx, batch.disks); err != nil {
+		if insertedDisks, err = q.InsertRawDisks(ctx, batch.disks); err != nil {
 			return IngestResult{}, fmt.Errorf("guardar los discos: %w", err)
 		}
 	}
 	if len(batch.networks.Ts) > 0 {
-		if _, err := q.InsertRawNetworks(ctx, batch.networks); err != nil {
+		if insertedNetworks, err = q.InsertRawNetworks(ctx, batch.networks); err != nil {
 			return IngestResult{}, fmt.Errorf("guardar las interfaces: %w", err)
+		}
+	}
+	if inserted+insertedDisks+insertedNetworks > 0 {
+		if err := aggregateMinutes(ctx, q, serverID, batch.firstTS, batch.lastTS); err != nil {
+			return IngestResult{}, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -97,7 +108,10 @@ type columns struct {
 	samples  store.InsertRawSamplesParams
 	disks    store.InsertRawDisksParams
 	networks store.InsertRawNetworksParams
-	lastTS   time.Time
+	// firstTS y lastTS son la muestra más vieja y la más nueva del lote, que
+	// puede venir en desorden.
+	firstTS time.Time
+	lastTS  time.Time
 }
 
 // toColumns revisa el lote y lo pasa a columnas. Lo que revisa acá es lo que el
@@ -127,6 +141,9 @@ func toColumns(serverID uuid.UUID, samples []proto.Sample, now time.Time) (colum
 		}
 		if ts.After(c.lastTS) {
 			c.lastTS = ts
+		}
+		if i == 0 || ts.Before(c.firstTS) {
+			c.firstTS = ts
 		}
 
 		if err := appendSample(&c.samples, ts, sample); err != nil {

@@ -11,6 +11,30 @@ import (
 )
 
 type Querier interface {
+	// AggregateDisksByMinute guarda el peor momento de cada disco en el minuto: lo
+	// más usado y lo menos disponible.
+	AggregateDisksByMinute(ctx context.Context, arg AggregateDisksByMinuteParams) (int64, error)
+	// AggregateNetworksByMinute pasa los contadores acumulados a tasas en bytes por
+	// segundo. Cada par de muestras seguidas de una interfaz da una tasa, que
+	// cuenta para el minuto de la segunda. El promedio del minuto es el total de
+	// bytes sobre el total de segundos, y el pico, la tasa más alta de un par.
+	//
+	// Para el primer par hace falta la muestra anterior al minuto: por eso se lee
+	// desde prev_from_ts. Un par separado por más de max_gap_seconds (el agent
+	// estuvo caído) o con un contador que bajó (el servidor se reinició) no es una
+	// tasa, y se descarta.
+	AggregateNetworksByMinute(ctx context.Context, arg AggregateNetworksByMinuteParams) (int64, error)
+	// Agregado por minuto (ADR-009). Cada consulta recalcula, para un servidor,
+	// los minutos que empiezan entre from_ts y to_ts a partir de todo el crudo de
+	// esos minutos, y pisa lo que hubiera. Recalcular desde el crudo, en vez de
+	// sumar sobre lo ya agregado, es lo que permite que una muestra llegue tarde o
+	// dos veces sin que el minuto quede mal.
+	//
+	// Los minutos se cortan en UTC. LEAST protege las restricciones de la tabla
+	// (promedio ≤ máximo) de un redondeo de punto flotante: si una fila chocara, el
+	// lote entero fallaría y el agent lo reenviaría para siempre.
+	// AggregateSamplesByMinute agrega CPU, memoria y carga.
+	AggregateSamplesByMinute(ctx context.Context, arg AggregateSamplesByMinuteParams) (int64, error)
 	// ConsumeEnrollmentToken marca el token como usado y lo ata al servidor que creó.
 	// La condición used_at IS NULL hace que el segundo intento no devuelva ninguna
 	// fila, así que un token no se puede usar dos veces ni aunque dos agents lo

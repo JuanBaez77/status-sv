@@ -132,6 +132,9 @@ hay_metricas() {
 esperar "llegó una muestra a metrics_raw" hay_metricas metrics_raw
 esperar "llegaron sus interfaces a metrics_raw_networks" hay_metricas metrics_raw_networks
 verde "ok: discos guardados: $(metricas_de metrics_raw_disks) (en un contenedor son los archivos que monta Docker)"
+esperar "la ingesta agregó el minuto en metrics_1m" hay_metricas metrics_1m
+# La tasa de red necesita dos muestras seguidas: llega con el segundo lote.
+esperar "hay tasas de red en metrics_1m_networks" hay_metricas metrics_1m_networks
 
 # --- 5. Reconexión ---
 
