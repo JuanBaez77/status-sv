@@ -75,8 +75,9 @@ CREATE TABLE metrics_raw_networks (
 ) PARTITION BY RANGE (ts);
 
 -- Un minuto de muestras. bucket es el comienzo del minuto y samples cuántas
--- muestras crudas entraron. Además del promedio se guarda el máximo de CPU y
--- de memoria: un pico de un minuto no puede desaparecer en el promedio.
+-- muestras crudas entraron. Además del promedio se guarda el máximo de CPU, de
+-- iowait, de memoria y de swap: un pico de un minuto no puede desaparecer en el
+-- promedio.
 CREATE TABLE metrics_1m (
     server_id          uuid        NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     bucket             timestamptz NOT NULL,
@@ -84,6 +85,7 @@ CREATE TABLE metrics_1m (
     cpu_used_avg       real        NOT NULL,
     cpu_used_max       real        NOT NULL,
     cpu_iowait_avg     real        NOT NULL,
+    cpu_iowait_max     real        NOT NULL,
     cpu_steal_avg      real        NOT NULL,
     cpu_cores          smallint    NOT NULL,
     mem_total_bytes    bigint      NOT NULL,
@@ -91,6 +93,7 @@ CREATE TABLE metrics_1m (
     mem_used_max_bytes bigint      NOT NULL,
     swap_total_bytes   bigint      NOT NULL,
     swap_used_avg_bytes bigint     NOT NULL,
+    swap_used_max_bytes bigint     NOT NULL,
     load1_avg          real        NOT NULL,
     load5_avg          real        NOT NULL,
     load15_avg         real        NOT NULL,
@@ -100,12 +103,14 @@ CREATE TABLE metrics_1m (
         cpu_used_avg BETWEEN 0 AND 100
         AND cpu_used_max BETWEEN cpu_used_avg AND 100
         AND cpu_iowait_avg BETWEEN 0 AND 100
+        AND cpu_iowait_max BETWEEN cpu_iowait_avg AND 100
         AND cpu_steal_avg BETWEEN 0 AND 100
         AND cpu_cores >= 0),
     CONSTRAINT metrics_1m_memory_consistent CHECK (
         mem_used_avg_bytes BETWEEN 0 AND mem_used_max_bytes
         AND mem_used_max_bytes <= mem_total_bytes
-        AND swap_used_avg_bytes BETWEEN 0 AND swap_total_bytes),
+        AND swap_used_avg_bytes BETWEEN 0 AND swap_used_max_bytes
+        AND swap_used_max_bytes <= swap_total_bytes),
     CONSTRAINT metrics_1m_load_not_negative CHECK (load1_avg >= 0 AND load5_avg >= 0 AND load15_avg >= 0)
 ) PARTITION BY RANGE (bucket);
 

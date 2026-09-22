@@ -34,7 +34,10 @@ func netSample(ts time.Time, cpu float64, memUsedGiB, diskUsedGiB uint64, rx, tx
 type minuteRow struct {
 	samples            int
 	cpuAvg, cpuMax     float32
+	iowaitAvg          float32
+	iowaitMax          float32
 	memAvg, memMax     int64
+	swapAvg, swapMax   int64
 	diskUsedMax        int64
 	diskAvailMin       int64
 	rxAvg, rxMax       float64
@@ -48,9 +51,11 @@ func readMinute(t *testing.T, pool *pgxpool.Pool, serverID uuid.UUID, bucket tim
 
 	var r minuteRow
 	err := pool.QueryRow(ctx, `
-		SELECT samples, cpu_used_avg, cpu_used_max, mem_used_avg_bytes, mem_used_max_bytes
+		SELECT samples, cpu_used_avg, cpu_used_max, cpu_iowait_avg, cpu_iowait_max,
+		       mem_used_avg_bytes, mem_used_max_bytes, swap_used_avg_bytes, swap_used_max_bytes
 		FROM metrics_1m WHERE server_id = $1 AND bucket = $2`, serverID, bucket).
-		Scan(&r.samples, &r.cpuAvg, &r.cpuMax, &r.memAvg, &r.memMax)
+		Scan(&r.samples, &r.cpuAvg, &r.cpuMax, &r.iowaitAvg, &r.iowaitMax,
+			&r.memAvg, &r.memMax, &r.swapAvg, &r.swapMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, false
 	}
@@ -119,12 +124,21 @@ func TestIngestAggregatesByMinute(t *testing.T) {
 
 	// La primera muestra es del minuto anterior: solo sirve de punto de
 	// partida para la tasa de red del primer par.
-	ingest(t, ingester, server,
+	samples := []proto.Sample{
 		netSample(minute12.Add(-10*time.Second), 90, 7, 30, 0, 0),
 		netSample(minute12, 10, 1, 20, 1000, 100),
 		netSample(minute12.Add(10*time.Second), 20, 2, 25, 3000, 200),
 		netSample(minute12.Add(20*time.Second), 60, 3, 22, 4000, 300),
-	)
+	}
+	// Un pico de iowait y de swap en una sola muestra del minuto.
+	for i, s := range []struct {
+		iowait  float64
+		swapMiB uint64
+	}{{50, 900}, {1, 100}, {7, 400}, {1, 100}} {
+		samples[i].CPU.IOWaitPercent = s.iowait
+		samples[i].Memory.SwapUsedBytes = s.swapMiB << 20
+	}
+	ingest(t, ingester, server, samples...)
 
 	got := mustMinute(t, pool, server, minute12)
 	if got.samples != 3 {
@@ -135,6 +149,12 @@ func TestIngestAggregatesByMinute(t *testing.T) {
 	}
 	if got.memAvg != 2<<30 || got.memMax != 3<<30 {
 		t.Errorf("memoria = promedio %d, máximo %d; se esperaba 2 y 3 GiB", got.memAvg, got.memMax)
+	}
+	if got.iowaitAvg != 3 || got.iowaitMax != 7 {
+		t.Errorf("iowait = promedio %v, máximo %v; se esperaba 3 y 7", got.iowaitAvg, got.iowaitMax)
+	}
+	if got.swapAvg != 200<<20 || got.swapMax != 400<<20 {
+		t.Errorf("swap = promedio %d, máximo %d; se esperaba 200 y 400 MiB", got.swapAvg, got.swapMax)
 	}
 	// El peor momento del disco: lo más usado y lo menos disponible.
 	if !got.hasDisk || got.diskUsedMax != 25<<30 || got.diskAvailMin != 45<<30 {
