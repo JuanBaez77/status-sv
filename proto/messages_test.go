@@ -1,6 +1,8 @@
 package proto_test
 
 import (
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +167,29 @@ func TestNewErrorOmitsNilReply(t *testing.T) {
 	if msg.InReplyTo != nil {
 		t.Errorf("se guardó un ID de respuesta nulo: %v", msg.InReplyTo)
 	}
+}
+
+// La muestra más grande que acepta el contrato tiene que entrar sola en un
+// mensaje: si no, el agent no podría mandarla nunca y trabaría su buffer.
+func TestLargestValidSampleFitsInAMessage(t *testing.T) {
+	// "<" es el peor caso: encoding/json lo escapa como \u003c, seis bytes.
+	name := strings.Repeat("<", proto.MaxDeviceNameLen)
+	sample := validSample()
+	sample.Disks = make([]proto.DiskSample, proto.MaxDisksPerSample)
+	for i := range sample.Disks {
+		sample.Disks[i] = proto.DiskSample{Mountpoint: name, TotalBytes: math.MaxUint64, UsedBytes: math.MaxUint64}
+	}
+	sample.Networks = make([]proto.NetworkSample, proto.MaxNetworksPerSample)
+	for i := range sample.Networks {
+		sample.Networks[i] = proto.NetworkSample{Interface: name, RxBytes: math.MaxUint64, TxBytes: math.MaxUint64}
+	}
+
+	raw, err := proto.Marshal(proto.Metrics{Samples: []proto.Sample{sample}})
+	if err != nil {
+		t.Fatalf("serializar: %v", err)
+	}
+	if len(raw) > proto.MaxMessageBytes {
+		t.Errorf("la muestra más grande ocupa %d bytes y el tope es %d", len(raw), proto.MaxMessageBytes)
+	}
+	t.Logf("la muestra más grande ocupa %d bytes de %d", len(raw), proto.MaxMessageBytes)
 }

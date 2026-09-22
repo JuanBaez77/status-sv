@@ -17,13 +17,8 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 )
 
-const (
-	// maxAgentMessageBytes acota cada mensaje del agent. Un lote de métricas
-	// completo entra de sobra; más que esto es un error o un abuso.
-	maxAgentMessageBytes = 64 << 10 // 64 KiB
-	// writeTimeout limita lo que puede tardar una respuesta al agent.
-	writeTimeout = 5 * time.Second
-)
+// writeTimeout limita lo que puede tardar una respuesta al agent.
+const writeTimeout = 5 * time.Second
 
 // handleAgentConnect abre el canal permanente con un agent ya enrolado.
 //
@@ -61,7 +56,9 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 			"servidor", server.Name, "error", err)
 		return
 	}
-	conn.SetReadLimit(maxAgentMessageBytes)
+	// El tope es parte del contrato: el agent arma sus lotes para no pasarlo, y
+	// más que esto es un error o un abuso.
+	conn.SetReadLimit(proto.MaxMessageBytes)
 	defer closeQuietly(conn, websocket.StatusInternalError, "cerrando")
 
 	// Si quedó una conexión vieja de este mismo agent (corte de red, por

@@ -164,6 +164,7 @@ El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Desp
 
 - Cada comando lleva un ID y el agent responde con un acuse; los comandos son idempotentes.
 - Si se corta la conexión, el agent reconecta con backoff exponencial y acumula métricas en un buffer en memoria de hasta 10 minutos.
+- Las métricas viajan con un solo lote en vuelo: el siguiente sale cuando llega el acuse, que confirma hasta qué marca de tiempo se guardó. Si el acuse no llega en 30 s o se corta el canal, el lote se reenvía, así que el control plane guarda de forma idempotente. Ningún mensaje del agent pasa de 256 KiB: los lotes grandes salen partidos.
 - Un deploy en curso sigue aunque se corte el canal; el agent reporta el resultado al reconectar.
 - Un servidor sin heartbeat por más de 45 s pasa a offline.
 
@@ -401,8 +402,8 @@ Objetivo: ver CPU, RAM, disco y red de un servidor en el panel, en vivo.
 Agent
 
 - [x] Colector de CPU, RAM, disco, red y carga leyendo `/proc`.
-- [ ] Envío en lotes cada 10 s con buffer en memoria y reconexión con backoff.
-- [ ] Medición de la RAM y CPU propias del agent, expuestas en su latido.
+- [x] Envío en lotes cada 10 s con buffer en memoria y reconexión con backoff.
+- [x] Medición de la RAM y CPU propias del agent, expuestas en su latido. Ya venía del Sprint 0; la medición formal de 10 minutos en CI es parte de la prueba de carga.
 
 Servidor
 

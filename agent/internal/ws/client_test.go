@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -35,7 +36,24 @@ type fakeControlPlane struct {
 	// received se cierra al llegar el primer latido.
 	received  chan struct{}
 	closeOnce sync.Once
+
+	// metricsMode dice qué hacer con un lote de métricas: confirmarlo
+	// (el valor por defecto), rechazarlo o no contestar.
+	metricsMode metricsMode
+	// samples son todas las muestras recibidas, repetidas incluidas.
+	samples         []proto.Sample
+	metricsMessages int
 }
+
+type metricsMode int
+
+const (
+	metricsAck metricsMode = iota
+	// metricsReject contesta como el control plane del Sprint 0, que todavía
+	// no guarda métricas.
+	metricsReject
+	metricsSilent
+)
 
 func newFakeControlPlane(t *testing.T) *fakeControlPlane {
 	t.Helper()
@@ -62,6 +80,9 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = conn.Close(websocket.StatusInternalError, "") }()
+	// El mismo tope que el control plane de verdad: un mensaje más grande
+	// corta el canal.
+	conn.SetReadLimit(proto.MaxMessageBytes)
 
 	f.mu.Lock()
 	f.conns = append(f.conns, conn)
@@ -76,6 +97,12 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 
 		envelope, err := proto.ParseEnvelope(raw)
 		if err != nil {
+			continue
+		}
+		if envelope.Type == proto.TypeMetrics {
+			if err := f.handleMetrics(r.Context(), conn, envelope); err != nil {
+				return
+			}
 			continue
 		}
 		if envelope.Type != proto.TypeHeartbeat {
@@ -132,7 +159,7 @@ func newTestClient(t *testing.T, fake *fakeControlPlane) *Client {
 		ServerID:   uuid.MustParse("01924f9c-0000-7000-8000-0000000000aa"),
 		ServerName: "vps-01",
 		Credential: "svagt_credencial-de-prueba",
-	}, "0.1.0", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, "0.1.0", slog.New(slog.NewTextHandler(io.Discard, nil)), metrics.NewBuffer(metrics.DefaultMaxAge, metrics.DefaultMaxSamples))
 
 	client.httpClient = fake.srv.Client()
 	// Backoff corto para que los tests no tarden.
@@ -325,7 +352,7 @@ func TestClientGivesUpOnASilentControlPlane(t *testing.T) {
 		ServerID:   uuid.MustParse("01924f9c-0000-7000-8000-0000000000aa"),
 		ServerName: "vps-01",
 		Credential: "svagt_credencial-de-prueba",
-	}, "0.1.0", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, "0.1.0", slog.New(slog.NewTextHandler(io.Discard, nil)), metrics.NewBuffer(metrics.DefaultMaxAge, metrics.DefaultMaxSamples))
 
 	client.httpClient = mute.srv.Client()
 	client.backoff = &Backoff{Base: 10 * time.Millisecond, Max: 20 * time.Millisecond}
