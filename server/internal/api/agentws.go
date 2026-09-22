@@ -69,6 +69,9 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 		closeQuietly(previous, websocket.StatusPolicyViolation, "reemplazada por una conexión nueva")
 	}
 	defer s.hub.remove(server.ID, conn)
+	// Sin el agent, los contadores guardados envejecen: la próxima tasa tiene
+	// que salir de dos muestras nuevas.
+	defer s.counters.forget(server.ID)
 
 	s.log.InfoContext(ctx, "agent conectado",
 		"servidor", server.Name,
