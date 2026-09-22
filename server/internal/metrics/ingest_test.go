@@ -39,6 +39,9 @@ func TestToColumnsLaysOutEveryTable(t *testing.T) {
 	if !c.lastTS.Equal(second) {
 		t.Errorf("LastTS = %v, se esperaba la más nueva (%v)", c.lastTS, second)
 	}
+	if !c.firstTS.Equal(first) {
+		t.Errorf("firstTS = %v, se esperaba la más vieja (%v)", c.firstTS, first)
+	}
 	if got := len(c.samples.Ts); got != 2 {
 		t.Fatalf("%d filas de muestras, se esperaban 2", got)
 	}
