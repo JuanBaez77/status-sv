@@ -297,7 +297,7 @@ Un monorepo con un módulo Go compartido, el front y los contratos. Un solo repo
 status-sv/
 ├── agent/            # Go: binario que corre en cada VPS
 │   ├── cmd/agent/
-│   └── internal/     # config, state, selfstat, ws; después collector, docker, systemd, deploy
+│   └── internal/     # collector, config, state, selfstat, ws; después docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
 │   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
@@ -400,7 +400,7 @@ Objetivo: ver CPU, RAM, disco y red de un servidor en el panel, en vivo.
 
 Agent
 
-- [ ] Colector de CPU, RAM, disco, red y carga leyendo `/proc`.
+- [x] Colector de CPU, RAM, disco, red y carga leyendo `/proc`.
 - [ ] Envío en lotes cada 10 s con buffer en memoria y reconexión con backoff.
 - [ ] Medición de la RAM y CPU propias del agent, expuestas en su latido.
 

@@ -3,7 +3,7 @@
 Plataforma propia para **observar y operar servidores VPS**: un panel con métricas y estado en vivo,
 y un MCP remoto para que un LLM despliegue, reconstruya y verifique proyectos sin recibir acceso de shell.
 
-> Estado: **Sprint 0 (fundaciones)**. Todavía no hay binarios funcionales.
+> Estado: **Sprint 1 (métricas de un servidor)**. El Sprint 0 está cerrado: un agent real se enrola y manda su latido.
 > El diseño completo y el roadmap están en [docs/DISENO.md](docs/DISENO.md).
 
 ## Qué hace
@@ -22,7 +22,7 @@ arbitraria, y toda escritura sobre producción pasa por una aprobación humana a
 status-sv/
 ├── agent/            # Go: binario que corre en cada VPS
 │   ├── cmd/agent/
-│   └── internal/     # config, state, selfstat, ws; después collector, docker, systemd, deploy
+│   └── internal/     # collector, config, state, selfstat, ws; después docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
 │   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
