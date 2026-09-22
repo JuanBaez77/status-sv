@@ -25,7 +25,7 @@ const (
 // algo mayor, así que el agent arma sus lotes para no pasarse.
 //
 // Alcanza para una muestra con todos los límites al máximo y los nombres en el
-// peor caso de escape de JSON (unos 110 KB); lo verifica un test. Con muestras
+// peor caso de escape de JSON (unos 112 KB); lo verifica un test. Con muestras
 // normales, de medio kilobyte, entran cientos por lote.
 const MaxMessageBytes = 256 << 10
 
