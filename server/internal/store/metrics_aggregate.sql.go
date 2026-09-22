@@ -125,23 +125,25 @@ func (q *Queries) AggregateNetworksByMinute(ctx context.Context, arg AggregateNe
 const aggregateSamplesByMinute = `-- name: AggregateSamplesByMinute :execrows
 
 INSERT INTO metrics_1m (
-    server_id, bucket, samples, cpu_used_avg, cpu_used_max, cpu_iowait_avg, cpu_steal_avg,
+    server_id, bucket, samples, cpu_used_avg, cpu_used_max, cpu_iowait_avg, cpu_iowait_max, cpu_steal_avg,
     cpu_cores, mem_total_bytes, mem_used_avg_bytes, mem_used_max_bytes, swap_total_bytes,
-    swap_used_avg_bytes, load1_avg, load5_avg, load15_avg
+    swap_used_avg_bytes, swap_used_max_bytes, load1_avg, load5_avg, load15_avg
 )
 SELECT server_id,
        date_trunc('minute', ts, 'UTC'),
        LEAST(count(*), 32767)::smallint,
        LEAST(avg(cpu_used_percent), max(cpu_used_percent))::real,
        max(cpu_used_percent),
-       avg(cpu_iowait_percent)::real,
+       LEAST(avg(cpu_iowait_percent), max(cpu_iowait_percent))::real,
+       max(cpu_iowait_percent),
        avg(cpu_steal_percent)::real,
        max(cpu_cores),
        max(mem_total_bytes),
        LEAST(round(avg(mem_used_bytes)), max(mem_used_bytes))::bigint,
        max(mem_used_bytes),
        max(swap_total_bytes),
-       LEAST(round(avg(swap_used_bytes)), max(swap_total_bytes))::bigint,
+       LEAST(round(avg(swap_used_bytes)), max(swap_used_bytes))::bigint,
+       max(swap_used_bytes),
        avg(load1)::real,
        avg(load5)::real,
        avg(load15)::real
@@ -155,6 +157,7 @@ ON CONFLICT (server_id, bucket) DO UPDATE SET
     cpu_used_avg        = EXCLUDED.cpu_used_avg,
     cpu_used_max        = EXCLUDED.cpu_used_max,
     cpu_iowait_avg      = EXCLUDED.cpu_iowait_avg,
+    cpu_iowait_max      = EXCLUDED.cpu_iowait_max,
     cpu_steal_avg       = EXCLUDED.cpu_steal_avg,
     cpu_cores           = EXCLUDED.cpu_cores,
     mem_total_bytes     = EXCLUDED.mem_total_bytes,
@@ -162,6 +165,7 @@ ON CONFLICT (server_id, bucket) DO UPDATE SET
     mem_used_max_bytes  = EXCLUDED.mem_used_max_bytes,
     swap_total_bytes    = EXCLUDED.swap_total_bytes,
     swap_used_avg_bytes = EXCLUDED.swap_used_avg_bytes,
+    swap_used_max_bytes = EXCLUDED.swap_used_max_bytes,
     load1_avg           = EXCLUDED.load1_avg,
     load5_avg           = EXCLUDED.load5_avg,
     load15_avg          = EXCLUDED.load15_avg
