@@ -79,11 +79,11 @@ func TestValidate(t *testing.T) {
 func validSample() proto.Sample {
 	return proto.Sample{
 		TS:     time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
-		CPU:    proto.CPUSample{UsedPercent: 12.5, Cores: 4},
+		CPU:    proto.CPUSample{UsedPercent: 12.5, IOWaitPercent: 0.5, StealPercent: 1.25, Cores: 4},
 		Memory: proto.MemorySample{TotalBytes: 8 << 30, UsedBytes: 3 << 30, SwapTotalBytes: 2 << 30, SwapUsedBytes: 0},
 		Load:   proto.LoadSample{Load1: 0.31, Load5: 0.22, Load15: 0.18},
 		Disks: []proto.DiskSample{
-			{Mountpoint: "/", TotalBytes: 80 << 30, UsedBytes: 21 << 30},
+			{Mountpoint: "/", TotalBytes: 80 << 30, UsedBytes: 21 << 30, AvailableBytes: 55 << 30},
 		},
 		Networks: []proto.NetworkSample{
 			{Interface: "eth0", RxBytes: 981_234_567, TxBytes: 123_456_789},
@@ -106,11 +106,16 @@ func TestSampleValidation(t *testing.T) {
 	}{
 		{name: "sin marca de tiempo", mutate: func(s *proto.Sample) { s.TS = time.Time{} }},
 		{name: "cpu fuera de rango", mutate: func(s *proto.Sample) { s.CPU.UsedPercent = 101 }},
+		{name: "iowait negativo", mutate: func(s *proto.Sample) { s.CPU.IOWaitPercent = -0.5 }},
+		{name: "steal fuera de rango", mutate: func(s *proto.Sample) { s.CPU.StealPercent = 100.5 }},
 		{name: "memoria usada mayor que la total", mutate: func(s *proto.Sample) { s.Memory.UsedBytes = s.Memory.TotalBytes + 1 }},
 		{name: "swap usado mayor que el total", mutate: func(s *proto.Sample) { s.Memory.SwapUsedBytes = s.Memory.SwapTotalBytes + 1 }},
 		{name: "carga negativa", mutate: func(s *proto.Sample) { s.Load.Load5 = -1 }},
 		{name: "disco sin punto de montaje", mutate: func(s *proto.Sample) { s.Disks[0].Mountpoint = "" }},
 		{name: "disco con uso imposible", mutate: func(s *proto.Sample) { s.Disks[0].UsedBytes = s.Disks[0].TotalBytes + 1 }},
+		{name: "disco con más disponible que libre", mutate: func(s *proto.Sample) {
+			s.Disks[0].AvailableBytes = s.Disks[0].TotalBytes - s.Disks[0].UsedBytes + 1
+		}},
 		{name: "interfaz sin nombre", mutate: func(s *proto.Sample) { s.Networks[0].Interface = "" }},
 	}
 
@@ -175,9 +180,10 @@ func TestLargestValidSampleFitsInAMessage(t *testing.T) {
 	// "<" es el peor caso: encoding/json lo escapa como \u003c, seis bytes.
 	name := strings.Repeat("<", proto.MaxDeviceNameLen)
 	sample := validSample()
+	sample.CPU = proto.CPUSample{UsedPercent: 99.99, IOWaitPercent: 99.99, StealPercent: 99.99, Cores: math.MaxInt32}
 	sample.Disks = make([]proto.DiskSample, proto.MaxDisksPerSample)
 	for i := range sample.Disks {
-		sample.Disks[i] = proto.DiskSample{Mountpoint: name, TotalBytes: math.MaxUint64, UsedBytes: math.MaxUint64}
+		sample.Disks[i] = proto.DiskSample{Mountpoint: name, TotalBytes: math.MaxUint64, UsedBytes: math.MaxUint64 / 2, AvailableBytes: math.MaxUint64 / 2}
 	}
 	sample.Networks = make([]proto.NetworkSample, proto.MaxNetworksPerSample)
 	for i := range sample.Networks {

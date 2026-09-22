@@ -22,8 +22,8 @@ func TestParseStat(t *testing.T) {
 		wantCores int
 	}{
 		// busy = user + nice + system + irq + softirq + steal; idle = idle + iowait.
-		{fixture: "vps-ubuntu", wantTimes: cpuTimes{busy: 4705 + 356 + 5845 + 0 + 482 + 207, idle: 1623987 + 1541}, wantCores: 2},
-		{fixture: "docker-desktop", wantTimes: cpuTimes{busy: 69800 + 361 + 78022 + 0 + 11564 + 0, idle: 16622430 + 21021}, wantCores: 6},
+		{fixture: "vps-ubuntu", wantTimes: cpuTimes{busy: 4705 + 356 + 5845 + 0 + 482 + 207, idle: 1623987 + 1541, iowait: 1541, steal: 207}, wantCores: 2},
+		{fixture: "docker-desktop", wantTimes: cpuTimes{busy: 69800 + 361 + 78022 + 0 + 11564 + 0, idle: 16622430 + 21021, iowait: 21021}, wantCores: 6},
 	}
 
 	for _, tt := range tests {
@@ -88,16 +88,16 @@ func TestGuestTimeIsNotCountedTwice(t *testing.T) {
 		t.Fatalf("segunda lectura: %v", err)
 	}
 
-	got, ok := usedPercent(prev, cur)
+	got, ok := usage(prev, cur)
 	if !ok {
 		t.Fatal("los contadores avanzaron y no se calculó el uso")
 	}
-	if got != 12.5 {
-		t.Errorf("uso = %v%%, se esperaba 12.5%%", got)
+	if got.used != 12.5 {
+		t.Errorf("uso = %v%%, se esperaba 12.5%%", got.used)
 	}
 }
 
-func TestUsedPercent(t *testing.T) {
+func TestUsageUsedPercent(t *testing.T) {
 	base := cpuTimes{busy: 10_000, idle: 90_000}
 
 	tests := []struct {
@@ -118,13 +118,50 @@ func TestUsedPercent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := usedPercent(base, tt.cur)
+			got, ok := usage(base, tt.cur)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, se esperaba %v", ok, tt.wantOK)
 			}
-			if ok && got != tt.want {
-				t.Errorf("uso = %v%%, se esperaba %v%%", got, tt.want)
+			if ok && got.used != tt.want {
+				t.Errorf("uso = %v%%, se esperaba %v%%", got.used, tt.want)
 			}
 		})
+	}
+}
+
+// iowait y steal se informan aparte: steal es parte de lo usado, iowait no.
+func TestUsageBreaksDownIOWaitAndSteal(t *testing.T) {
+	prev, err := parseCPULine(" 1000 0 500 8000 100 0 0 50 0 0")
+	if err != nil {
+		t.Fatalf("primera lectura: %v", err)
+	}
+	// En 2000 ticks: 250 ocupados, de los cuales 40 robados por el hipervisor,
+	// y 100 de espera de disco dentro de los 1750 ociosos.
+	cur, err := parseCPULine(" 1150 0 560 9650 200 0 0 90 0 0")
+	if err != nil {
+		t.Fatalf("segunda lectura: %v", err)
+	}
+
+	got, ok := usage(prev, cur)
+	if !ok {
+		t.Fatal("los contadores avanzaron y no se calculó el uso")
+	}
+	if want := (cpuUsage{used: 12.5, iowait: 5, steal: 2}); got != want {
+		t.Errorf("uso = %+v, se esperaba %+v", got, want)
+	}
+}
+
+// iowait puede retroceder (proc(5) lo advierte): el porcentaje queda en cero,
+// no negativo.
+func TestUsageWithIOWaitGoingBack(t *testing.T) {
+	prev := cpuTimes{busy: 1000, idle: 9000, iowait: 500}
+	cur := cpuTimes{busy: 1100, idle: 9900, iowait: 480}
+
+	got, ok := usage(prev, cur)
+	if !ok {
+		t.Fatal("los contadores avanzaron y no se calculó el uso")
+	}
+	if got.iowait != 0 || got.used != 10 {
+		t.Errorf("uso = %+v, se esperaba iowait 0 y uso 10", got)
 	}
 }

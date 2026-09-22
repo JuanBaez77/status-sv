@@ -9,6 +9,8 @@
         "ts": "2026-09-20T12:00:00Z",
         "cpu": {
           "used_percent": 12.5,
+          "iowait_percent": 0.5,
+          "steal_percent": 1.25,
           "cores": 4
         },
         "memory": {
@@ -26,7 +28,8 @@
           {
             "mountpoint": "/",
             "total_bytes": 85899345920,
-            "used_bytes": 22548578304
+            "used_bytes": 22548578304,
+            "available_bytes": 59055800320
           }
         ],
         "networks": [

@@ -25,8 +25,9 @@ type mount struct {
 
 // fsUsage es el espacio de un sistema de archivos, en bytes.
 type fsUsage struct {
-	total uint64
-	used  uint64
+	total     uint64
+	used      uint64
+	available uint64
 }
 
 // parseMountinfo lee /proc/self/mountinfo. El formato está en proc(5):
@@ -212,12 +213,13 @@ func shorterPoint(a, b mount) bool {
 	return a.point < b.point
 }
 
-// usageFromBlocks pasa a bytes lo que devuelve statfs. Lo usado coincide con la
-// columna Used de df: todo lo que no está libre.
+// usageFromBlocks pasa a bytes lo que devuelve statfs. Lo usado y lo
+// disponible coinciden con las columnas Used y Avail de df: lo usado es todo lo
+// que no está libre, y lo disponible es lo libre menos la reserva para root.
 //
 // Es genérica porque el tamaño de bloque es int64 en amd64 y arm64 pero int32
 // en las arquitecturas de 32 bits.
-func usageFromBlocks[T int32 | int64](blocks, free uint64, blockSize T) (fsUsage, error) {
+func usageFromBlocks[T int32 | int64](blocks, free, available uint64, blockSize T) (fsUsage, error) {
 	if blockSize <= 0 {
 		return fsUsage{}, fmt.Errorf("tamaño de bloque imposible: %d", blockSize)
 	}
@@ -230,6 +232,13 @@ func usageFromBlocks[T int32 | int64](blocks, free uint64, blockSize T) (fsUsage
 	if overflow != 0 {
 		return fsUsage{}, fmt.Errorf("el tamaño no entra en 64 bits: %d bloques de %d bytes", blocks, size)
 	}
-	// Lo usado es a lo sumo el total, que ya se sabe que entra.
-	return fsUsage{total: total, used: (blocks - free) * size}, nil
+
+	// Lo usado y lo disponible son a lo sumo el total, que ya se sabe que
+	// entra. Lo disponible se acota a lo libre: un sistema de archivos que
+	// informara más no puede romper el contrato.
+	return fsUsage{
+		total:     total,
+		used:      (blocks - free) * size,
+		available: min(available, free) * size,
+	}, nil
 }

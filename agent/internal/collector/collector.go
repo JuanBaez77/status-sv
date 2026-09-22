@@ -98,7 +98,7 @@ func (c *Collector) Collect(ctx context.Context) (proto.Sample, error) {
 	if err != nil {
 		return proto.Sample{}, err
 	}
-	cpuPercent, err := c.cpuUsage(times)
+	cpu, err := c.cpuUsage(times)
 	if err != nil {
 		return proto.Sample{}, err
 	}
@@ -122,8 +122,13 @@ func (c *Collector) Collect(ctx context.Context) (proto.Sample, error) {
 	}
 
 	sample := proto.Sample{
-		TS:     ts,
-		CPU:    proto.CPUSample{UsedPercent: cpuPercent, Cores: cores},
+		TS: ts,
+		CPU: proto.CPUSample{
+			UsedPercent:   cpu.used,
+			IOWaitPercent: cpu.iowait,
+			StealPercent:  cpu.steal,
+			Cores:         cores,
+		},
 		Memory: memory,
 		Load:   load,
 	}
@@ -149,18 +154,18 @@ func (c *Collector) Collect(ctx context.Context) (proto.Sample, error) {
 }
 
 // cpuUsage compara con la lectura anterior y la reemplaza por la actual.
-func (c *Collector) cpuUsage(times cpuTimes) (float64, error) {
+func (c *Collector) cpuUsage(times cpuTimes) (cpuUsage, error) {
 	prev, hadPrev := c.prevCPU, c.hasPrevCPU
 	c.prevCPU, c.hasPrevCPU = times, true
 
 	if !hadPrev {
-		return 0, ErrNoBaseline
+		return cpuUsage{}, ErrNoBaseline
 	}
-	percent, ok := usedPercent(prev, times)
+	result, ok := usage(prev, times)
 	if !ok {
-		return 0, fmt.Errorf("%w: los contadores de /proc/stat no avanzaron", ErrNoBaseline)
+		return cpuUsage{}, fmt.Errorf("%w: los contadores de /proc/stat no avanzaron", ErrNoBaseline)
 	}
-	return percent, nil
+	return result, nil
 }
 
 // disks mide los discos que elige selectDisks. Un disco que falla no tira abajo
@@ -201,15 +206,16 @@ func (c *Collector) disks(ctx context.Context) ([]proto.DiskSample, []error) {
 			continue
 		}
 
-		usage, err := c.statfs(m.point)
+		space, err := c.statfs(m.point)
 		if err != nil {
 			problems = append(problems, err)
 			continue
 		}
 		disks = append(disks, proto.DiskSample{
-			Mountpoint: m.point,
-			TotalBytes: usage.total,
-			UsedBytes:  usage.used,
+			Mountpoint:     m.point,
+			TotalBytes:     space.total,
+			UsedBytes:      space.used,
+			AvailableBytes: space.available,
 		})
 	}
 	return disks, problems

@@ -99,17 +99,32 @@ func (s Sample) Validate() error {
 }
 
 // CPUSample es el uso de CPU normalizado al total de la máquina.
+//
+// UsedPercent es todo lo que no es ocioso ni espera de disco, e incluye steal.
+// Los otros dos porcentajes son los que más dicen de un VPS:
+//
+//   - IOWaitPercent: tiempo ocioso esperando al disco. No cuenta como usado,
+//     pero alto dice que el disco es el cuello de botella.
+//   - StealPercent: tiempo que el hipervisor le dio a otra máquina virtual
+//     cuando esta quería correr. Es parte de lo usado; alto dice que el
+//     proveedor está sobrevendiendo el servidor físico.
 type CPUSample struct {
-	UsedPercent float64 `json:"used_percent"`
-	Cores       int     `json:"cores"`
+	UsedPercent   float64 `json:"used_percent"`
+	IOWaitPercent float64 `json:"iowait_percent"`
+	StealPercent  float64 `json:"steal_percent"`
+	Cores         int     `json:"cores"`
 }
 
-// Validate revisa el rango del porcentaje y la cantidad de núcleos.
+// Validate revisa el rango de los porcentajes y la cantidad de núcleos.
 func (c CPUSample) Validate() error {
-	if !isPercent(c.UsedPercent) {
+	switch {
+	case !isPercent(c.UsedPercent):
 		return fmt.Errorf("uso fuera de rango: %v", c.UsedPercent)
-	}
-	if c.Cores < 0 {
+	case !isPercent(c.IOWaitPercent):
+		return fmt.Errorf("iowait fuera de rango: %v", c.IOWaitPercent)
+	case !isPercent(c.StealPercent):
+		return fmt.Errorf("steal fuera de rango: %v", c.StealPercent)
+	case c.Cores < 0:
 		return errors.New("la cantidad de núcleos no puede ser negativa")
 	}
 	return nil
@@ -150,13 +165,20 @@ func (l LoadSample) Validate() error {
 }
 
 // DiskSample es el uso de un punto de montaje.
+//
+// AvailableBytes es lo que puede usar un proceso sin privilegios. Suele ser
+// menos que TotalBytes - UsedBytes, porque ext4 reserva un 5% para root: el
+// porcentaje de uso que muestra df, y el que importa para saber si un
+// proyecto se va a quedar sin disco, es Used / (Used + Available).
 type DiskSample struct {
-	Mountpoint string `json:"mountpoint"`
-	TotalBytes uint64 `json:"total_bytes"`
-	UsedBytes  uint64 `json:"used_bytes"`
+	Mountpoint     string `json:"mountpoint"`
+	TotalBytes     uint64 `json:"total_bytes"`
+	UsedBytes      uint64 `json:"used_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
 }
 
-// Validate revisa el nombre del montaje y que lo usado no supere lo total.
+// Validate revisa el nombre del montaje y que lo usado y lo disponible no
+// superen lo total.
 func (d DiskSample) Validate() error {
 	switch {
 	case d.Mountpoint == "":
@@ -165,6 +187,8 @@ func (d DiskSample) Validate() error {
 		return fmt.Errorf("el punto de montaje supera %d caracteres", MaxDeviceNameLen)
 	case d.UsedBytes > d.TotalBytes:
 		return fmt.Errorf("el espacio usado (%d) supera el total (%d)", d.UsedBytes, d.TotalBytes)
+	case d.AvailableBytes > d.TotalBytes-d.UsedBytes:
+		return fmt.Errorf("el espacio disponible (%d) supera el libre (%d)", d.AvailableBytes, d.TotalBytes-d.UsedBytes)
 	}
 	return nil
 }

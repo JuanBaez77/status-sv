@@ -170,17 +170,30 @@ func TestIsDiskFilesystem(t *testing.T) {
 }
 
 func TestUsageFromBlocks(t *testing.T) {
-	got, err := usageFromBlocks(1000, 250, int64(4096))
+	// 250 bloques libres, de los que 50 son la reserva para root.
+	got, err := usageFromBlocks(1000, 250, 200, int64(4096))
 	if err != nil {
 		t.Fatalf("usageFromBlocks: %v", err)
 	}
-	if want := (fsUsage{total: 1000 * 4096, used: 750 * 4096}); got != want {
+	if want := (fsUsage{total: 1000 * 4096, used: 750 * 4096, available: 200 * 4096}); got != want {
 		t.Errorf("uso = %+v, se esperaba %+v", got, want)
 	}
 
 	// En 32 bits el tamaño de bloque es int32.
-	if _, err := usageFromBlocks(1000, 250, int32(4096)); err != nil {
+	if _, err := usageFromBlocks(1000, 250, 200, int32(4096)); err != nil {
 		t.Errorf("con int32: %v", err)
+	}
+}
+
+// Un sistema de archivos que informara más disponible que libre no puede
+// armar una muestra que el control plane rechace.
+func TestUsageFromBlocksCapsAvailableToFree(t *testing.T) {
+	got, err := usageFromBlocks(1000, 250, 300, int64(4096))
+	if err != nil {
+		t.Fatalf("usageFromBlocks: %v", err)
+	}
+	if got.available != 250*4096 {
+		t.Errorf("disponible = %d, se esperaba lo libre (%d)", got.available, 250*4096)
 	}
 }
 
@@ -198,7 +211,7 @@ func TestUsageFromBlocksRejectsImpossibleValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := usageFromBlocks(tt.blocks, tt.free, tt.blockSize); err == nil {
+			if _, err := usageFromBlocks(tt.blocks, tt.free, tt.free, tt.blockSize); err == nil {
 				t.Fatal("se esperaba un error")
 			}
 		})

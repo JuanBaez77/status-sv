@@ -64,10 +64,10 @@ func (f *fakeDisks) statfs(p string) (fsUsage, error) {
 
 func vpsDisks() *fakeDisks {
 	return &fakeDisks{usage: map[string]fsUsage{
-		"/":                   {total: 80 << 30, used: 23 << 30},
-		"/boot":               {total: 881 << 20, used: 180 << 20},
-		"/boot/efi":           {total: 105 << 20, used: 6 << 20},
-		"/mnt/datos respaldo": {total: 500 << 30, used: 350 << 30},
+		"/":                   {total: 80 << 30, used: 23 << 30, available: 53 << 30},
+		"/boot":               {total: 881 << 20, used: 180 << 20, available: 640 << 20},
+		"/boot/efi":           {total: 105 << 20, used: 6 << 20, available: 99 << 20},
+		"/mnt/datos respaldo": {total: 500 << 30, used: 350 << 30, available: 150 << 30},
 	}}
 }
 
@@ -76,7 +76,8 @@ func newTestCollector(proc fs.FS, disks *fakeDisks) *Collector {
 }
 
 // advanceStat reemplaza la línea cpu, como si hubieran pasado 10 segundos en
-// una máquina de 2 núcleos (2000 ticks): 250 ocupados, un 12,5%.
+// una máquina de 2 núcleos (2000 ticks): 250 ocupados (12,5%), de los cuales
+// 20 robados por el hipervisor (1%), y 10 de espera de disco (0,5%).
 func advanceStat(proc fstest.MapFS) {
 	stat := string(proc["stat"].Data)
 	_, rest, _ := strings.Cut(stat, "\n")
@@ -104,7 +105,7 @@ func TestCollectFromVPSFixture(t *testing.T) {
 
 	want := proto.Sample{
 		TS:  time.Date(2026, 9, 21, 15, 0, 0, 123_000_000, time.UTC),
-		CPU: proto.CPUSample{UsedPercent: 12.5, Cores: 2},
+		CPU: proto.CPUSample{UsedPercent: 12.5, IOWaitPercent: 0.5, StealPercent: 1, Cores: 2},
 		Memory: proto.MemorySample{
 			TotalBytes:     8039548 * kib,
 			UsedBytes:      (8039548 - 5123456) * kib,
@@ -113,10 +114,10 @@ func TestCollectFromVPSFixture(t *testing.T) {
 		},
 		Load: proto.LoadSample{Load1: 0.42, Load5: 0.37, Load15: 0.31},
 		Disks: []proto.DiskSample{
-			{Mountpoint: "/", TotalBytes: 80 << 30, UsedBytes: 23 << 30},
-			{Mountpoint: "/boot", TotalBytes: 881 << 20, UsedBytes: 180 << 20},
-			{Mountpoint: "/boot/efi", TotalBytes: 105 << 20, UsedBytes: 6 << 20},
-			{Mountpoint: "/mnt/datos respaldo", TotalBytes: 500 << 30, UsedBytes: 350 << 30},
+			{Mountpoint: "/", TotalBytes: 80 << 30, UsedBytes: 23 << 30, AvailableBytes: 53 << 30},
+			{Mountpoint: "/boot", TotalBytes: 881 << 20, UsedBytes: 180 << 20, AvailableBytes: 640 << 20},
+			{Mountpoint: "/boot/efi", TotalBytes: 105 << 20, UsedBytes: 6 << 20, AvailableBytes: 99 << 20},
+			{Mountpoint: "/mnt/datos respaldo", TotalBytes: 500 << 30, UsedBytes: 350 << 30, AvailableBytes: 150 << 30},
 		},
 		Networks: []proto.NetworkSample{
 			{Interface: "ens3", RxBytes: 98123456789, TxBytes: 12345678901},
