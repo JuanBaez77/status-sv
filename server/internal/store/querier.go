@@ -6,6 +6,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -91,7 +92,31 @@ type Querier interface {
 	// filas eran nuevas.
 	InsertRawSamples(ctx context.Context, arg InsertRawSamplesParams) (int64, error)
 	ListCredentialsForServer(ctx context.Context, serverID uuid.UUID) ([]AgentCredential, error)
+	// Consultas del panel. El estado (online, offline) no se guarda: sale de
+	// last_seen_at al consultar, como define docs/DISENO.md.
+	// ListLatestSamples devuelve la última muestra de cada servidor que mandó algo
+	// desde since, para la lista del panel. El corte por since evita recorrer
+	// particiones viejas cuando un servidor está caído hace rato.
+	//
+	// Va aparte de la lista de servidores, y no como LEFT JOIN, porque un servidor
+	// puede no tener ninguna muestra: unir en Go es más simple que arrastrar una
+	// fila entera de columnas que pueden faltar.
+	ListLatestSamples(ctx context.Context, since time.Time) ([]MetricsRaw, error)
+	// ListLatestWorstDisks devuelve, por servidor, el disco más lleno de su última
+	// muestra. La fracción usada se calcula al armar la respuesta. Es lo que el
+	// panel muestra en la lista: si
+	// un disco se está llenando, se ve sin entrar al servidor.
+	ListLatestWorstDisks(ctx context.Context, since time.Time) ([]MetricsRawDisk, error)
+	ListMinuteDisks(ctx context.Context, arg ListMinuteDisksParams) ([]ListMinuteDisksRow, error)
+	ListMinuteNetworks(ctx context.Context, arg ListMinuteNetworksParams) ([]ListMinuteNetworksRow, error)
+	ListMinuteSamples(ctx context.Context, arg ListMinuteSamplesParams) ([]ListMinuteSamplesRow, error)
 	ListPendingEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
+	ListRawDisks(ctx context.Context, arg ListRawDisksParams) ([]ListRawDisksRow, error)
+	// ListRawNetworks trae los contadores acumulados. Las tasas se calculan al
+	// armar la respuesta, con las mismas reglas que el agregado por minuto: un
+	// contador que baja o un hueco largo no son una tasa.
+	ListRawNetworks(ctx context.Context, arg ListRawNetworksParams) ([]ListRawNetworksRow, error)
+	ListRawSamples(ctx context.Context, arg ListRawSamplesParams) ([]ListRawSamplesRow, error)
 	ListServers(ctx context.Context) ([]Server, error)
 	// LockServerName toma un lock consultivo sobre el nombre del servidor, que se
 	// suelta al terminar la transacción. Sin esto, dos enrolamientos simultáneos de

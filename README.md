@@ -164,6 +164,20 @@ Los dos hablan el mismo formato que define [`proto/`](proto/): un envelope con v
 enrola un servidor que ya existía (una reinstalación, por ejemplo), se reutiliza el registro y se
 revoca la credencial anterior, así no quedan duplicados ni dos credenciales válidas.
 
+Endpoints del panel. Todos piden la cookie de sesión que entrega el login ([ADR-010](docs/adr/ADR-010-usuarios-y-sesiones-del-panel.md)); sin ella responden 401:
+
+| Ruta | Qué hace |
+| --- | --- |
+| `POST /v1/auth/login` | Recibe `{"username","password"}` y deja la sesión en una cookie `HttpOnly`. 5 intentos por minuto por IP. |
+| `POST /v1/auth/logout` | Cierra la sesión y borra la cookie. |
+| `GET /v1/auth/me` | Quién es el usuario de la sesión. |
+| `GET /v1/servers` | Todos los servidores con su estado (`online`, `offline`, `never_seen`) y su última muestra, con el disco más lleno. |
+| `GET /v1/servers/{id}/metrics` | Series de un servidor. Parámetros: `from` y `to` en RFC 3339 (por defecto, la última hora) y `resolution` (`raw` o `1m`). |
+
+La resolución se elige sola si no se pide: hasta 3 horas, las muestras crudas; más allá, el agregado
+por minuto, que es lo único que queda pasadas las 48 horas de retención del crudo. En `1m` cada
+punto es el promedio del minuto y los campos `*_max` son el pico. El rango no puede pasar de 31 días.
+
 Chequeos de salud:
 
 | Ruta | Qué dice | Para qué |

@@ -189,6 +189,39 @@ verde "ok: la reconexión reutilizó la credencial existente"
 esperar "las métricas siguen llegando después de reconectar" \
   hay_metricas metrics_raw "${MUESTRAS_ANTES_DEL_CORTE}"
 
+# --- 6. API del panel ---
+
+paso "consultando la API del panel con la sesión"
+
+LISTA="$("${COMPOSE[@]}" exec -T server wget -q -O- --header "Cookie: ${SESION}" http://127.0.0.1:8080/v1/servers)"
+case "${LISTA}" in
+  *"\"name\":\"${SERVER_NAME}\""*) ;;
+  *) rojo "/v1/servers no trae al servidor: ${LISTA}"; exit 1 ;;
+esac
+case "${LISTA}" in
+  *'"status":"online"'*) verde "ok: el panel ve el servidor en línea" ;;
+  *) rojo "el servidor no figura en línea: ${LISTA}"; exit 1 ;;
+esac
+case "${LISTA}" in
+  *'"cpu_used_percent"'*) verde "ok: la lista trae la última muestra" ;;
+  *) rojo "la lista no trae la última muestra: ${LISTA}"; exit 1 ;;
+esac
+
+ID_SERVIDOR="$(psql_query "SELECT id FROM servers WHERE name = '${SERVER_NAME}'" | tr -d '[:space:]')"
+SERIES="$("${COMPOSE[@]}" exec -T server wget -q -O- --header "Cookie: ${SESION}" \
+  "http://127.0.0.1:8080/v1/servers/${ID_SERVIDOR}/metrics")"
+case "${SERIES}" in
+  *'"resolution":"raw"'*'"samples":[{'*) verde "ok: las series del servidor llegan con muestras" ;;
+  *) rojo "las series salieron vacías o con otra forma: ${SERIES}"; exit 1 ;;
+esac
+
+# Sin la cookie, la API del panel no contesta.
+if "${COMPOSE[@]}" exec -T server wget -q -O- http://127.0.0.1:8080/v1/servers >/dev/null 2>&1; then
+  rojo "/v1/servers contestó sin sesión"
+  exit 1
+fi
+verde "ok: sin sesión, la API del panel no contesta"
+
 paso "resumen"
 psql_query "SELECT name || ' | agent ' || agent_version || ' | último latido hace ' || round(extract(epoch from now() - last_seen_at)) || 's' FROM servers"
 psql_query "SELECT 'métricas guardadas: ' || count(*) || ' muestras' FROM metrics_raw"

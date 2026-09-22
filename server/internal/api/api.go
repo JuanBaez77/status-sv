@@ -71,6 +71,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/auth/login", panel.Handler(http.HandlerFunc(s.handleLogin)))
 	mux.Handle("POST /v1/auth/logout", panel.Handler(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
+	mux.Handle("GET /v1/servers", s.requireSession(http.HandlerFunc(s.handleListServers)))
+	mux.Handle("GET /v1/servers/{id}/metrics", s.requireSession(http.HandlerFunc(s.handleServerMetrics)))
 
 	// El WebSocket va fuera del límite de tamaño por pedido: ese límite es para
 	// cuerpos HTTP, y acá el tamaño se controla por mensaje con SetReadLimit.
