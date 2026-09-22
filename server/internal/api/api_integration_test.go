@@ -500,40 +500,6 @@ func TestConnectNeedsAuthorizationHeader(t *testing.T) {
 	}
 }
 
-// Las métricas todavía no se guardan: se contesta un error explícito en vez de
-// aceptarlas y tirarlas, para que el agent no crea que están a salvo.
-func TestMetricsAreRejectedUntilSprintOne(t *testing.T) {
-	f := setup(t)
-
-	ack := f.enrollOK(t, "vps-01", "203.0.113.34")
-
-	conn, _, err := f.dial(t, ack.Credential)
-	if err != nil {
-		t.Fatalf("abrir el canal: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	send(t, conn, proto.Metrics{Samples: []proto.Sample{{
-		TS:     time.Now().UTC(),
-		CPU:    proto.CPUSample{UsedPercent: 10, Cores: 2},
-		Memory: proto.MemorySample{TotalBytes: 1 << 30, UsedBytes: 1 << 29},
-	}}})
-
-	envelope := receive(t, conn)
-	if envelope.Type != proto.TypeError {
-		t.Fatalf("se recibió %q, se esperaba un error", envelope.Type)
-	}
-	if code := errorCode(t, envelope); code != proto.CodeInvalidMessage {
-		t.Errorf("código %q, se esperaba invalid_message", code)
-	}
-
-	// El canal sigue vivo después de un mensaje rechazado.
-	send(t, conn, proto.Heartbeat{AgentVersion: "0.1.0"})
-	if envelope := receive(t, conn); envelope.Type != proto.TypeHeartbeatAck {
-		t.Errorf("el canal no siguió funcionando: llegó %q", envelope.Type)
-	}
-}
-
 // El enrolamiento es el único endpoint que acepta un secreto sin autenticación
 // previa, así que tiene que frenar a quien pruebe tokens en serie.
 func TestEnrollIsRateLimited(t *testing.T) {
