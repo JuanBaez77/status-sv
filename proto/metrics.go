@@ -20,6 +20,15 @@ const (
 	MaxDeviceNameLen     = 128
 )
 
+// MaxMessageBytes es lo más grande que puede ser un mensaje del agent al
+// control plane, envelope incluido. El control plane corta el canal si recibe
+// algo mayor, así que el agent arma sus lotes para no pasarse.
+//
+// Alcanza para una muestra con todos los límites al máximo y los nombres en el
+// peor caso de escape de JSON (unos 110 KB); lo verifica un test. Con muestras
+// normales, de medio kilobyte, entran cientos por lote.
+const MaxMessageBytes = 256 << 10
+
 // Metrics es un lote de muestras. El agent manda lotes en vez de muestras
 // sueltas para gastar menos red y menos CPU, y acumula en memoria mientras no
 // hay conexión.

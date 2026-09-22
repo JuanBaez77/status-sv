@@ -45,6 +45,28 @@ Los códigos de error son `invalid_token`, `expired_token`, `unauthorized`,
 `unsupported_version`, `invalid_message`, `rate_limited` e `internal`. El agent decide qué hacer
 mirando el código, nunca el texto: `Retryable()` dice cuáles tiene sentido reintentar.
 
+## Métricas: un lote en vuelo
+
+El agent manda un lote de `metrics` y espera la respuesta antes de mandar el siguiente. Por eso
+`metrics_ack` no dice a qué lote responde: alcanza con `last_ts`, la marca de tiempo de la última
+muestra guardada. El agent suelta de su buffer lo que ya mandó hasta esa marca.
+
+| Respuesta del control plane | Qué hace el agent |
+| --- | --- |
+| `metrics_ack` | Suelta lo confirmado. Lo que quedó del lote sin confirmar sale en el próximo. |
+| `error` con `in_reply_to` del lote, reintentable | Vuelve a mandar esas muestras en el lote siguiente. |
+| `error` con `in_reply_to` del lote, definitivo | Las descarta: el control plane no las va a aceptar nunca. |
+| Nada en 30 s, o se corta el canal | Da el lote por perdido y lo vuelve a mandar. |
+
+Como un lote puede llegar dos veces, **el control plane guarda las muestras de forma
+idempotente**: una muestra repetida (mismo servidor y misma marca de tiempo) no se duplica. El
+agent trunca las marcas de tiempo al milisegundo para que sobrevivan intactas el viaje por
+PostgreSQL, que guarda microsegundos.
+
+**Tamaño:** ningún mensaje del agent pasa de `MaxMessageBytes` (256 KiB). El control plane corta
+el canal si recibe algo mayor, y el agent parte los lotes grandes para no pasarse. La muestra más
+grande que acepta el contrato ocupa unos 110 KB, así que siempre entra sola.
+
 ## Reglas de versionado
 
 - Agregar un campo opcional **no** cambia `v`. Quitar un campo o cambiar su significado, **sí**.

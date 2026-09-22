@@ -121,6 +121,16 @@ func (c AgentConfig) Heartbeat() time.Duration {
 	return time.Duration(c.HeartbeatSeconds) * time.Second
 }
 
+// MetricsInterval devuelve cada cuánto se toma una muestra.
+func (c AgentConfig) MetricsInterval() time.Duration {
+	return time.Duration(c.MetricsIntervalSeconds) * time.Second
+}
+
+// MetricsBatch devuelve cada cuánto se manda un lote de muestras.
+func (c AgentConfig) MetricsBatch() time.Duration {
+	return time.Duration(c.MetricsBatchSeconds) * time.Second
+}
+
 // Validate revisa que los intervalos estén en rango y sean coherentes entre sí.
 func (c AgentConfig) Validate() error {
 	switch {
