@@ -412,7 +412,7 @@ Servidor
 - [x] Recepción de lotes y escritura por `COPY` o inserción masiva. Es inserción masiva con `unnest` y `ON CONFLICT DO NOTHING`, idempotente ante reenvíos, en una transacción por lote.
 - [x] Agregación de crudo a un minuto y borrado de particiones vencidas. La agregación no es un job: la hace la ingesta en la transacción de cada lote ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)).
 - [x] Usuarios y sesiones del panel: argon2id, sesión en la base con cookie `HttpOnly`, `Secure` y `SameSite=Strict`, límite de intentos, y alta del primer usuario por SSH ([ADR-010](adr/ADR-010-usuarios-y-sesiones-del-panel.md)).
-- [ ] API `GET /servers` y `GET /servers/{id}/metrics?from&to`.
+- [x] API `GET /v1/servers` (con estado y última muestra) y `GET /v1/servers/{id}/metrics?from&to&resolution`, detrás de la sesión del panel.
 - [ ] WebSocket para el panel con suscripción por servidor.
 
 Panel
