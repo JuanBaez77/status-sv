@@ -239,6 +239,22 @@ docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
 
 `hace` tiene que quedar siempre por debajo de 15 segundos.
 
+### Qué métricas lee el agent
+
+`sample` toma una muestra y la imprime como JSON, sin conectarse al control plane. Sirve para
+comparar lo que va a mostrar el panel con lo que dicen `df`, `free` o `top`:
+
+```bash
+sudo -u statussv /usr/local/bin/statussv-agent sample
+```
+
+Los avisos (un disco que no se pudo medir, por ejemplo) salen por stderr.
+
+Hay una diferencia con lo que ve el servicio: la unidad lleva `ProtectHome=true`, y bajo systemd
+**un disco montado dentro de `/home` o `/root` no aparece** en la tabla de montajes del agent, así
+que no llega al panel. Se verificó con systemd 255. Si un servidor tiene un disco ahí, hay que
+decidir si se relaja esa protección.
+
 ## 3. Actualizar
 
 **Control plane:** copiar el nuevo commit igual que en el paso 1, actualizar `STATUSSV_COMMIT` y
