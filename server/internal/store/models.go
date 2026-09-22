@@ -115,3 +115,22 @@ type Server struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
+
+type Session struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	TokenHash  []byte
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+	Ip         string
+	UserAgent  string
+}
+
+type User struct {
+	ID                uuid.UUID
+	Username          string
+	PasswordHash      string
+	PasswordChangedAt time.Time
+	CreatedAt         time.Time
+}

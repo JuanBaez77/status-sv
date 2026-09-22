@@ -38,3 +38,4 @@ Qué más se evaluó y por qué se descartó.
 | [007](ADR-007-control-plane-en-servidor-de-cliente.md) | El control plane vive en el servidor de un cliente, detrás de su nginx | aceptada |
 | [008](ADR-008-tablas-de-metricas.md) | Tablas de métricas, con discos e interfaces aparte, y particiones que maneja el control plane | aceptada |
 | [009](ADR-009-agregado-por-minuto-en-la-ingesta.md) | El agregado por minuto se recalcula en la ingesta, no en un job | aceptada |
+| [010](ADR-010-usuarios-y-sesiones-del-panel.md) | Usuarios del panel con argon2id y sesiones en la base | aceptada |

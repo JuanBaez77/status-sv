@@ -115,7 +115,8 @@ Doce entidades cubren el MVP. Las métricas crudas y agregadas viven particionad
 
 **Tablas de acceso**
 
-- `users`: cuenta del panel con hash de contraseña (argon2id) y TOTP.
+- `users`: cuenta del panel con hash de contraseña (argon2id). El TOTP llega en el Sprint 3.
+- `sessions`: sesión del panel, guardada como hash del token que viaja en la cookie; vence a las 24 h sin uso o a los 7 días ([ADR-010](adr/ADR-010-usuarios-y-sesiones-del-panel.md)).
 - `api_tokens`: token del MCP con hash, scopes por proyecto y entorno, y vencimiento.
 - `approvals`: solicitud de aprobación humana con el deploy asociado, quién aprobó y cuándo.
 
@@ -410,6 +411,7 @@ Servidor
 - [x] Migración de `metrics_raw` (partición diaria) y `metrics_1m`, con discos e interfaces en tablas aparte.
 - [x] Recepción de lotes y escritura por `COPY` o inserción masiva. Es inserción masiva con `unnest` y `ON CONFLICT DO NOTHING`, idempotente ante reenvíos, en una transacción por lote.
 - [x] Agregación de crudo a un minuto y borrado de particiones vencidas. La agregación no es un job: la hace la ingesta en la transacción de cada lote ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)).
+- [x] Usuarios y sesiones del panel: argon2id, sesión en la base con cookie `HttpOnly`, `Secure` y `SameSite=Strict`, límite de intentos, y alta del primer usuario por SSH ([ADR-010](adr/ADR-010-usuarios-y-sesiones-del-panel.md)).
 - [ ] API `GET /servers` y `GET /servers/{id}/metrics?from&to`.
 - [ ] WebSocket para el panel con suscripción por servidor.
 

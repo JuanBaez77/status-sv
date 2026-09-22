@@ -1,5 +1,6 @@
 // Package auth genera y verifica los secretos del control plane: los tokens de
-// enrolamiento de un solo uso y las credenciales propias de cada agent.
+// enrolamiento de un solo uso, las credenciales propias de cada agent, las
+// sesiones del panel y los hashes de las contraseñas.
 //
 // Dos reglas que valen para todo el paquete:
 //
@@ -33,6 +34,7 @@ const HashLen = sha256.Size
 const (
 	EnrollmentTokenPrefix = "svenr_"
 	AgentCredentialPrefix = "svagt_"
+	SessionTokenPrefix    = "svses_"
 )
 
 // Secret es un secreto en claro.
@@ -43,6 +45,12 @@ type Secret struct {
 // NewEnrollmentToken crea el token de un solo uso que se le da a un agent nuevo.
 func NewEnrollmentToken() (Secret, error) {
 	return newSecret(EnrollmentTokenPrefix)
+}
+
+// NewSessionToken crea el token de una sesión del panel, el que viaja en la
+// cookie.
+func NewSessionToken() (Secret, error) {
+	return newSecret(SessionTokenPrefix)
 }
 
 // NewAgentCredential crea la credencial propia de un agent ya enrolado.

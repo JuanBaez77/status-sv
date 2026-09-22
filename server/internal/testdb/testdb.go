@@ -88,7 +88,7 @@ func Truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 
 	if _, err := pool.Exec(t.Context(),
-		"TRUNCATE agent_credentials, enrollment_tokens, servers CASCADE"); err != nil {
+		"TRUNCATE agent_credentials, enrollment_tokens, servers, users CASCADE"); err != nil {
 		t.Fatalf("vaciar las tablas: %v", err)
 	}
 }

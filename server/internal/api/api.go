@@ -1,5 +1,6 @@
 // Package api expone la API HTTP del control plane: los chequeos de salud, el
-// enrolamiento de agents y, más adelante, el WebSocket del panel y el MCP.
+// enrolamiento de agents, el login del panel y, más adelante, el WebSocket del
+// panel y el MCP.
 package api
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
+	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
 
 // maxBodyBytes acota lo que se lee de un pedido. Los mensajes del agent son
@@ -34,6 +36,8 @@ type Server struct {
 	hub           *hub
 	enrollLimiter *ipLimiter
 	ingester      *metrics.Ingester
+	users         *users.Service
+	loginLimiter  *ipLimiter
 }
 
 // New arma el servidor de la API.
@@ -47,6 +51,8 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		hub:           newHub(),
 		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 		ingester:      metrics.NewIngester(pool),
+		users:         users.NewService(pool, log),
+		loginLimiter:  newIPLimiter(loginPerMinute, loginBurst, limiterTTL),
 	}
 }
 
@@ -56,6 +62,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.HandleFunc("POST /v1/agents/enroll", s.handleEnroll)
+
+	// Rutas del panel. CrossOriginProtection rechaza los pedidos que cambian
+	// algo y vienen de otro sitio (Sec-Fetch-Site u Origin), además de lo que ya
+	// hace SameSite=Strict en la cookie. Las rutas de los agents quedan afuera:
+	// no son de un navegador.
+	panel := http.NewCrossOriginProtection()
+	mux.Handle("POST /v1/auth/login", panel.Handler(http.HandlerFunc(s.handleLogin)))
+	mux.Handle("POST /v1/auth/logout", panel.Handler(http.HandlerFunc(s.handleLogout)))
+	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
 
 	// El WebSocket va fuera del límite de tamaño por pedido: ese límite es para
 	// cuerpos HTTP, y acá el tamaño se controla por mensaje con SetReadLimit.

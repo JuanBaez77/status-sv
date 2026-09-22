@@ -6,6 +6,8 @@
 //	server serve                        levanta la API
 //	server migrate up|down|status       aplica o revierte migraciones
 //	server enroll-token --server NOMBRE crea un token de enrolamiento
+//	server user-add --username NOMBRE   da de alta a una persona del panel
+//	server user-password --username N   cambia su contraseña
 //	server version                      imprime la versión
 package main
 
@@ -48,6 +50,10 @@ func run(ctx context.Context, args []string) error {
 		return runServe(ctx, args[1:])
 	case "migrate":
 		return runMigrate(ctx, args[1:])
+	case "user-add":
+		return runUserAdd(ctx, args[1:])
+	case "user-password":
+		return runUserPassword(ctx, args[1:])
 	case "enroll-token":
 		return runEnrollToken(ctx, args[1:])
 	case "version", "--version", "-version":
@@ -71,6 +77,8 @@ Uso:
   server migrate down                    revierte la última migración
   server migrate status                  muestra el estado de cada migración
   server enroll-token --server NOMBRE    crea un token de enrolamiento
+  server user-add --username NOMBRE      da de alta a una persona del panel (pide la contraseña)
+  server user-password --username NOMBRE cambia la contraseña y cierra sus sesiones
   server version                         imprime la versión
 
 Configuración (variables de entorno, ver .env.example):
