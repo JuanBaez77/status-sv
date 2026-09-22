@@ -36,6 +36,9 @@ decisión de Juan.
 - Como una muestra que llega tarde parte en dos el par que la rodeaba, la red se recalcula también
   en los 10 minutos siguientes al lote.
 - Los minutos se cortan en UTC, igual que las particiones (ADR-008).
+- Además de lo que fija ADR-008 (promedio y máximo de CPU y memoria), `metrics_1m` guarda el
+  máximo de iowait y de swap, por decisión de Juan: un pico corto de disco lento o de swap se
+  diluye en el promedio del minuto.
 
 ## Consecuencias
 

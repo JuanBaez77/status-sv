@@ -109,7 +109,7 @@ Doce entidades cubren el MVP. Las métricas crudas y agregadas viven particionad
 | `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno. | Nace del `project.yaml` declarado. |
 | `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
 | `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
-| `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU y memoria, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
+| `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU, iowait, memoria y swap, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
 | `metrics_1h` | Agregado por hora, con mínimo, promedio y máximo. | Retención 1 año. |
 | `audit_log` | Actor, tipo de actor (persona o LLM), acción, objetivo, resultado, IP. | Solo inserciones. |
 

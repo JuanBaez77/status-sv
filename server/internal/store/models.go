@@ -38,6 +38,7 @@ type Metrics1m struct {
 	CpuUsedAvg       float32
 	CpuUsedMax       float32
 	CpuIowaitAvg     float32
+	CpuIowaitMax     float32
 	CpuStealAvg      float32
 	CpuCores         int16
 	MemTotalBytes    int64
@@ -45,6 +46,7 @@ type Metrics1m struct {
 	MemUsedMaxBytes  int64
 	SwapTotalBytes   int64
 	SwapUsedAvgBytes int64
+	SwapUsedMaxBytes int64
 	Load1Avg         float32
 	Load5Avg         float32
 	Load15Avg        float32
