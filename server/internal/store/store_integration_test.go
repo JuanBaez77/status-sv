@@ -76,7 +76,10 @@ func isUniqueViolation(err error) bool {
 func TestSchemaIsInPlace(t *testing.T) {
 	_, pool := setup(t)
 
-	for _, table := range []string{"servers", "enrollment_tokens", "agent_credentials", "goose_db_version"} {
+	for _, table := range []string{
+		"servers", "enrollment_tokens", "agent_credentials", "goose_db_version",
+		"metrics_raw", "metrics_raw_disks", "metrics_raw_networks", "metrics_1m", "metrics_1m_disks", "metrics_1m_networks",
+	} {
 		var exists bool
 		err := pool.QueryRow(t.Context(),
 			"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",

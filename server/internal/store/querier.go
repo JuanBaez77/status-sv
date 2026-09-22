@@ -21,6 +21,13 @@ type Querier interface {
 	CreateServer(ctx context.Context, arg CreateServerParams) (Server, error)
 	DeleteExpiredEnrollmentTokens(ctx context.Context) (int64, error)
 	DeleteServer(ctx context.Context, id uuid.UUID) (int64, error)
+	// DropMetricPartitions borra las particiones que terminan antes de before_ts y
+	// devuelve cuántas borró.
+	DropMetricPartitions(ctx context.Context, arg DropMetricPartitionsParams) (int32, error)
+	// EnsureMetricPartitions crea las particiones que falten para cubrir el rango y
+	// devuelve cuántas creó. La lógica vive en una función de la migración 00002,
+	// que escapa los nombres de las tablas: desde Go no se arma DDL con texto.
+	EnsureMetricPartitions(ctx context.Context, arg EnsureMetricPartitionsParams) (int32, error)
 	// GetActiveCredentialByHash es la consulta de autenticación del agent: busca por
 	// hash y solo devuelve la credencial si no fue revocada.
 	GetActiveCredentialByHash(ctx context.Context, secretHash []byte) (AgentCredential, error)
