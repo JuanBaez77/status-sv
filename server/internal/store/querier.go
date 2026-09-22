@@ -38,6 +38,19 @@ type Querier interface {
 	GetEnrollmentTokenByHashForUpdate(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
 	GetServerByID(ctx context.Context, id uuid.UUID) (Server, error)
 	GetServerByName(ctx context.Context, name string) (Server, error)
+	// InsertRawDisks guarda los discos de un lote, una fila por disco y por muestra.
+	InsertRawDisks(ctx context.Context, arg InsertRawDisksParams) (int64, error)
+	// InsertRawNetworks guarda las interfaces de un lote, una fila por interfaz y
+	// por muestra.
+	InsertRawNetworks(ctx context.Context, arg InsertRawNetworksParams) (int64, error)
+	// InsertRawSamples guarda un lote de muestras de un servidor, una fila por
+	// muestra. Cada columna llega como un arreglo, todos del mismo largo: una sola
+	// sentencia por lote, sin armar SQL con texto. PostgreSQL recorre los unnest
+	// en paralelo; si un arreglo fuera más corto, faltarían valores y la fila
+	// chocaría contra un NOT NULL, así que un error de armado no pasa en silencio.
+	// Lo que ya estaba (un lote reenviado) se ignora, y el resultado dice cuántas
+	// filas eran nuevas.
+	InsertRawSamples(ctx context.Context, arg InsertRawSamplesParams) (int64, error)
 	ListCredentialsForServer(ctx context.Context, serverID uuid.UUID) ([]AgentCredential, error)
 	ListPendingEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
 	ListServers(ctx context.Context) ([]Server, error)

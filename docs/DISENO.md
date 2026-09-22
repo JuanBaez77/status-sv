@@ -408,7 +408,7 @@ Agent
 Servidor
 
 - [x] Migración de `metrics_raw` (partición diaria) y `metrics_1m`, con discos e interfaces en tablas aparte.
-- [ ] Recepción de lotes y escritura por `COPY` o inserción masiva.
+- [x] Recepción de lotes y escritura por `COPY` o inserción masiva. Es inserción masiva con `unnest` y `ON CONFLICT DO NOTHING`, idempotente ante reenvíos, en una transacción por lote.
 - [ ] Job de agregación de crudo a un minuto y borrado de particiones vencidas. El mantenimiento de las particiones ya está; falta la agregación.
 - [ ] API `GET /servers` y `GET /servers/{id}/metrics?from&to`.
 - [ ] WebSocket para el panel con suscripción por servidor.

@@ -65,7 +65,16 @@ PostgreSQL, que guarda microsegundos.
 
 **Tamaño:** ningún mensaje del agent pasa de `MaxMessageBytes` (256 KiB). El control plane corta
 el canal si recibe algo mayor, y el agent parte los lotes grandes para no pasarse. La muestra más
-grande que acepta el contrato ocupa unos 110 KB, así que siempre entra sola.
+grande que acepta el contrato ocupa unos 112 KB, así que siempre entra sola.
+
+**Lo que además revisa el control plane**, porque el contrato no puede saberlo:
+
+- **La marca de tiempo:** entre las 48 h que se guardan y 10 minutos en el futuro. Fuera de esa
+  ventana el reloj del servidor está mal, y reenviar no lo arregla: el lote se rechaza con
+  `invalid_message` y el agent lo descarta.
+- **Que los valores entren en las columnas de PostgreSQL:** bytes hasta 2⁶³ − 1, por ejemplo.
+- **La frecuencia:** hasta 30 lotes seguidos y después uno por segundo, por canal. Pasado eso
+  contesta `rate_limited`, que es reintentable: el agent no pierde las muestras.
 
 ## Reglas de versionado
 

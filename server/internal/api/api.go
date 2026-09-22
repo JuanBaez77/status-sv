@@ -13,6 +13,7 @@ import (
 
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
+	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 )
 
@@ -32,6 +33,7 @@ type Server struct {
 	enrollment    *enrollment.Service
 	hub           *hub
 	enrollLimiter *ipLimiter
+	ingester      *metrics.Ingester
 }
 
 // New arma el servidor de la API.
@@ -44,6 +46,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		enrollment:    enrollment.NewService(pool, cfg.EnrollmentTTL, log),
 		hub:           newHub(),
 		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
+		ingester:      metrics.NewIngester(pool),
 	}
 }
 
