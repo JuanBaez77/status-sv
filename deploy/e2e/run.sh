@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 #
-# Prueba de punta a punta del Sprint 0: levanta PostgreSQL, el control plane y un
-# agent en contenedores, y verifica lo que define el criterio de terminado:
+# Prueba de punta a punta: levanta PostgreSQL, el control plane y un agent en
+# contenedores, y verifica el camino completo:
 #
 #   1. El agent se enrola solo con un token de un solo uso.
 #   2. El latido actualiza servers.last_seen.
-#   3. Si el control plane se cae, el agent reconecta y el latido se reanuda.
+#   3. Las métricas del agent llegan a la base, con sus discos e interfaces.
+#   4. Si el control plane se cae, el agent reconecta, y el latido y las
+#      métricas se reanudan.
 #
 # Se corre igual en local y en CI:
 #
@@ -113,10 +115,29 @@ PRIMER_LATIDO="$(psql_query "SELECT last_seen_at FROM servers WHERE name = '${SE
 esperar "llegó un latido posterior" \
   bash -c "[ \"\$(${COMPOSE[*]} exec -T postgres psql -U statussv -d statussv -tAc \"SELECT count(*) FROM servers WHERE name = '${SERVER_NAME}' AND last_seen_at > '${PRIMER_LATIDO}'\" | tr -d '[:space:]')\" = '1' ]"
 
-# --- 4. Reconexión ---
+# --- 4. Métricas ---
+
+# La primera muestra sale a los 10 s de arrancar el agent, que es lo que
+# tarda en tener dos lecturas de CPU para comparar.
+paso "verificando que las métricas llegan a la base"
+
+# metricas_de TABLA cuenta las filas del agent en una tabla de métricas.
+metricas_de() {
+  psql_query "SELECT count(*) FROM $1 m JOIN servers s ON s.id = m.server_id WHERE s.name = '${SERVER_NAME}'" | tr -d '[:space:]'
+}
+hay_metricas() {
+  [ "$(metricas_de "$1")" -gt "${2:-0}" ]
+}
+
+esperar "llegó una muestra a metrics_raw" hay_metricas metrics_raw
+esperar "llegaron sus interfaces a metrics_raw_networks" hay_metricas metrics_raw_networks
+verde "ok: discos guardados: $(metricas_de metrics_raw_disks) (en un contenedor son los archivos que monta Docker)"
+
+# --- 5. Reconexión ---
 
 paso "reiniciando el control plane para forzar una reconexión"
 ANTES_DEL_CORTE="$(psql_query "SELECT last_seen_at FROM servers WHERE name = '${SERVER_NAME}'")"
+MUESTRAS_ANTES_DEL_CORTE="$(metricas_de metrics_raw)"
 
 "${COMPOSE[@]}" restart server >/dev/null
 
@@ -134,7 +155,11 @@ if [ "${CREDENCIALES}" != "1" ]; then
 fi
 verde "ok: la reconexión reutilizó la credencial existente"
 
+esperar "las métricas siguen llegando después de reconectar" \
+  hay_metricas metrics_raw "${MUESTRAS_ANTES_DEL_CORTE}"
+
 paso "resumen"
 psql_query "SELECT name || ' | agent ' || agent_version || ' | último latido hace ' || round(extract(epoch from now() - last_seen_at)) || 's' FROM servers"
+psql_query "SELECT 'métricas guardadas: ' || count(*) || ' muestras' FROM metrics_raw"
 
 verde "la prueba de punta a punta pasó"
