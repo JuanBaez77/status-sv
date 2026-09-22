@@ -9,11 +9,15 @@ import (
 // Límites del lote de métricas. Con muestras cada 10 segundos, 360 muestras son
 // una hora: alcanza de sobra para vaciar el buffer después de una reconexión y
 // pone un techo a lo que el control plane tiene que procesar de una vez.
+//
+// Están exportados para que el colector del agent recorte con los mismos
+// números con los que valida el control plane: una muestra que no entra en el
+// contrato se descubre en el agent, no como un lote rechazado.
 const (
-	MaxSamplesPerBatch = 360
-	maxDisksPerSample  = 64
-	maxNetsPerSample   = 64
-	maxDeviceNameLen   = 128
+	MaxSamplesPerBatch   = 360
+	MaxDisksPerSample    = 64
+	MaxNetworksPerSample = 64
+	MaxDeviceNameLen     = 128
 )
 
 // Metrics es un lote de muestras. El agent manda lotes en vez de muestras
@@ -66,16 +70,16 @@ func (s Sample) Validate() error {
 	if err := s.Load.Validate(); err != nil {
 		return fmt.Errorf("carga: %w", err)
 	}
-	if len(s.Disks) > maxDisksPerSample {
-		return fmt.Errorf("la muestra trae %d discos y el máximo es %d", len(s.Disks), maxDisksPerSample)
+	if len(s.Disks) > MaxDisksPerSample {
+		return fmt.Errorf("la muestra trae %d discos y el máximo es %d", len(s.Disks), MaxDisksPerSample)
 	}
 	for i, disk := range s.Disks {
 		if err := disk.Validate(); err != nil {
 			return fmt.Errorf("disco %d: %w", i, err)
 		}
 	}
-	if len(s.Networks) > maxNetsPerSample {
-		return fmt.Errorf("la muestra trae %d interfaces y el máximo es %d", len(s.Networks), maxNetsPerSample)
+	if len(s.Networks) > MaxNetworksPerSample {
+		return fmt.Errorf("la muestra trae %d interfaces y el máximo es %d", len(s.Networks), MaxNetworksPerSample)
 	}
 	for i, network := range s.Networks {
 		if err := network.Validate(); err != nil {
@@ -148,8 +152,8 @@ func (d DiskSample) Validate() error {
 	switch {
 	case d.Mountpoint == "":
 		return errors.New("falta el punto de montaje")
-	case len(d.Mountpoint) > maxDeviceNameLen:
-		return fmt.Errorf("el punto de montaje supera %d caracteres", maxDeviceNameLen)
+	case len(d.Mountpoint) > MaxDeviceNameLen:
+		return fmt.Errorf("el punto de montaje supera %d caracteres", MaxDeviceNameLen)
 	case d.UsedBytes > d.TotalBytes:
 		return fmt.Errorf("el espacio usado (%d) supera el total (%d)", d.UsedBytes, d.TotalBytes)
 	}
@@ -170,8 +174,8 @@ func (n NetworkSample) Validate() error {
 	switch {
 	case n.Interface == "":
 		return errors.New("falta el nombre de la interfaz")
-	case len(n.Interface) > maxDeviceNameLen:
-		return fmt.Errorf("el nombre de la interfaz supera %d caracteres", maxDeviceNameLen)
+	case len(n.Interface) > MaxDeviceNameLen:
+		return fmt.Errorf("el nombre de la interfaz supera %d caracteres", MaxDeviceNameLen)
 	}
 	return nil
 }
