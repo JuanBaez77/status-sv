@@ -83,6 +83,40 @@ jobs:
           TEST_DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_test?sslmode=disable
         run: make test-integration
 
+  web:
+    name: "Panel: lint, tipos, tests, build y tamaño"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tipos
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # Meta de docs/DISENO.md: el panel no puede pasar de 300 KB comprimido.
+      - name: Meta de tamaño del bundle
+        run: npm run size-check
+
   e2e:
     name: "Punta a punta: control plane, base y agent en Docker"
     runs-on: ubuntu-latest

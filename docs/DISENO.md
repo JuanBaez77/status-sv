@@ -417,7 +417,7 @@ Servidor
 
 Panel
 
-- [ ] Scaffold con React, Vite, TypeScript, Tailwind y shadcn/ui.
+- [x] Scaffold con React, Vite, TypeScript y Tailwind, con componentes propios al estilo de shadcn/ui, router `wouter`, TanStack Query y CI del front con tope de 300 KB comprimido.
 - [ ] Login básico con sesión por cookie segura.
 - [ ] Lista de servidores con estado online u offline.
 - [ ] Vista de un servidor con gráficos uPlot en vivo y rango de tiempo.
