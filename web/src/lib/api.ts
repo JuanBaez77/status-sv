@@ -112,6 +112,81 @@ export type ServerSummary = {
   sample: LatestSample | null
 }
 
+/** Resolution es el detalle con el que vienen las series. */
+export type Resolution = 'raw' | '1m'
+
+/**
+ * SamplePoint es un punto de la serie de una muestra.
+ *
+ * En resolución `1m` los campos `*_max` son el pico del minuto y el resto es el
+ * promedio; en `raw` los dos son el mismo valor, el de la muestra.
+ */
+export type SamplePoint = {
+  ts: string
+  cpu_used_percent: number
+  cpu_used_max_percent: number
+  cpu_iowait_percent: number
+  cpu_iowait_max_percent: number
+  cpu_steal_percent: number
+  cpu_cores: number
+  mem_total_bytes: number
+  mem_used_bytes: number
+  mem_used_max_bytes: number
+  swap_total_bytes: number
+  swap_used_bytes: number
+  swap_used_max_bytes: number
+  load1: number
+  load5: number
+  load15: number
+}
+
+export type DiskPoint = {
+  /** mountpoint solo viene en los puntos en vivo; en las series lo lleva DiskSeries. */
+  mountpoint?: string
+  ts: string
+  total_bytes: number
+  used_bytes: number
+  available_bytes: number
+}
+
+export type DiskSeries = {
+  mountpoint: string
+  points: DiskPoint[]
+}
+
+/** NetworkPoint son tasas, no contadores: el panel grafica bytes por segundo. */
+export type NetworkPoint = {
+  /** interface solo viene en los puntos en vivo; en las series lo lleva NetworkSeries. */
+  interface?: string
+  ts: string
+  rx_bytes_per_sec: number
+  rx_max_bytes_per_sec: number
+  tx_bytes_per_sec: number
+  tx_max_bytes_per_sec: number
+}
+
+export type NetworkSeries = {
+  interface: string
+  points: NetworkPoint[]
+}
+
+export type ServerMetrics = {
+  server_id: string
+  resolution: Resolution
+  from: string
+  to: string
+  /** truncated dice que el rango tenía más puntos de los que entraron. */
+  truncated: boolean
+  samples: SamplePoint[]
+  disks: DiskSeries[]
+  networks: NetworkSeries[]
+}
+
 export const servers = {
   list: () => api.get<{ servers: ServerSummary[] }>('/v1/servers').then((body) => body.servers),
+
+  metrics: (id: string, from: Date, to: Date) => {
+    const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })
+    return api.get<ServerMetrics>(`/v1/servers/${encodeURIComponent(id)}/metrics?${query}`)
+  },
 }

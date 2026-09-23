@@ -5,7 +5,7 @@ import { UsageBar } from '@/components/usage-bar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useServers } from '@/hooks/use-servers'
 import type { ServerSummary } from '@/lib/api'
-import { bytes, since } from '@/lib/format'
+import { bytes, load, since } from '@/lib/format'
 
 /** ServersPage es la vista principal: todos los servidores de un vistazo. */
 export function ServersPage() {
@@ -84,7 +84,7 @@ function ServerCard({ server }: { server: ServerSummary }) {
             <UsageBar
               label="CPU"
               value={sample.cpu_used_percent}
-              detail={`${sample.cpu_cores} núcleos · carga ${sample.load1.toFixed(2)}`}
+              detail={`${sample.cpu_cores} núcleos · carga ${load(sample.load1)}`}
             />
             <UsageBar
               label="Memoria"
