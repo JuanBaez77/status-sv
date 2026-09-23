@@ -3,13 +3,10 @@ import { Route, Switch } from 'wouter'
 import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSession } from '@/hooks/use-session'
+import { LoginPage } from '@/pages/login'
+import { ServersPage } from '@/pages/servers'
 
-/**
- * App decide qué se ve: mientras no haya sesión, el panel no muestra nada.
- *
- * El formulario de login y la lista de servidores llegan en el PR siguiente;
- * esta versión deja armado el marco, el router y el cliente de la API.
- */
+/** App decide qué se ve: mientras no haya sesión, solo el login. */
 export default function App() {
   const { session, loading, unreachable } = useSession()
 
@@ -31,28 +28,28 @@ export default function App() {
   }
 
   if (!session) {
-    return (
-      <Centered>
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <CardTitle>Iniciá sesión</CardTitle>
-            <CardDescription>El formulario llega en el próximo cambio.</CardDescription>
-          </CardHeader>
-        </Card>
-      </Centered>
-    )
+    return <LoginPage />
   }
 
   return (
     <AppShell session={session}>
       <Switch>
-        <Route path="/">
-          <Card>
-            <CardHeader>
-              <CardTitle>Servidores</CardTitle>
-              <CardDescription>La lista llega en el próximo cambio.</CardDescription>
-            </CardHeader>
-          </Card>
+        <Route path="/" component={ServersPage} />
+
+        <Route path="/servers/:id">
+          {(params) => (
+            <Card>
+              <CardHeader>
+                <CardTitle>Servidor</CardTitle>
+                <CardDescription>
+                  Los gráficos de este servidor llegan en el próximo cambio.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="font-mono text-xs text-muted-foreground">{params.id}</p>
+              </CardContent>
+            </Card>
+          )}
         </Route>
 
         <Route>

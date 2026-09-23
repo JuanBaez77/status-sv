@@ -78,3 +78,40 @@ export const auth = {
     api.post<Session>('/v1/auth/login', { username, password }),
   logout: () => api.post<void>('/v1/auth/logout'),
 }
+
+/** ServerStatus es lo que devuelve la API, derivado del último latido. */
+export type ServerStatus = 'online' | 'offline' | 'never_seen'
+
+export type DiskUsage = {
+  mountpoint: string
+  total_bytes: number
+  used_bytes: number
+  available_bytes: number
+  used_percent: number
+}
+
+export type LatestSample = {
+  ts: string
+  cpu_used_percent: number
+  cpu_cores: number
+  mem_total_bytes: number
+  mem_used_bytes: number
+  load1: number
+  worst_disk: DiskUsage | null
+}
+
+export type ServerSummary = {
+  id: string
+  name: string
+  hostname: string
+  labels: Record<string, string>
+  agent_version: string
+  status: ServerStatus
+  last_seen_at: string | null
+  enrolled_at: string
+  sample: LatestSample | null
+}
+
+export const servers = {
+  list: () => api.get<{ servers: ServerSummary[] }>('/v1/servers').then((body) => body.servers),
+}
