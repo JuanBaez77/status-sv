@@ -11,3 +11,8 @@ web/dist/
 docs/
 *.md
 !README.md
+
+# El panel embebido lo compila la etapa de Node adentro de la imagen: lo que
+# haya quedado de un build local no entra, así no se cuelan archivos viejos.
+server/internal/panel/dist/*
+!server/internal/panel/dist/sin-panel.html

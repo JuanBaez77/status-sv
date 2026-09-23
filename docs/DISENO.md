@@ -302,7 +302,7 @@ status-sv/
 │   └── internal/     # collector, config, state, selfstat, ws; después docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
-│   ├── internal/     # api, auth, config, enrollment, store; después mcp, metrics, approvals
+│   ├── internal/     # api, auth, config, enrollment, metrics, panel, store; después mcp, approvals
 │   └── migrations/   # SQL versionado
 ├── internal/         # Go: código compartido por agent y server (buildinfo)
 ├── web/              # React + Vite + TypeScript
@@ -425,7 +425,7 @@ Panel
 Calidad
 
 - [ ] Prueba de carga con 10 agents simulados y verificación automática de las metas de RAM y CPU.
-- [ ] Embebido del front compilado en el binario del servidor.
+- [x] Embebido del front compilado en el binario del servidor, con `go:embed`: la raíz sirve el panel, las rutas del front devuelven el mismo index y los archivos con hash se cachean para siempre.
 
 Terminado cuando un VPS real muestra sus métricas en vivo en el panel, con el agent por debajo de 30 MB de RAM y 1% de CPU, y el CI verde.
 

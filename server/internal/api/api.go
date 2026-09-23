@@ -15,6 +15,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
+	"github.com/JuanBaez77/status-sv/server/internal/panel"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
@@ -71,12 +72,18 @@ func (s *Server) Handler() http.Handler {
 	// algo y vienen de otro sitio (Sec-Fetch-Site u Origin), además de lo que ya
 	// hace SameSite=Strict en la cookie. Las rutas de los agents quedan afuera:
 	// no son de un navegador.
-	panel := http.NewCrossOriginProtection()
-	mux.Handle("POST /v1/auth/login", panel.Handler(http.HandlerFunc(s.handleLogin)))
-	mux.Handle("POST /v1/auth/logout", panel.Handler(http.HandlerFunc(s.handleLogout)))
+	crossOrigin := http.NewCrossOriginProtection()
+	mux.Handle("POST /v1/auth/login", crossOrigin.Handler(http.HandlerFunc(s.handleLogin)))
+	mux.Handle("POST /v1/auth/logout", crossOrigin.Handler(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
 	mux.Handle("GET /v1/servers", s.requireSession(http.HandlerFunc(s.handleListServers)))
 	mux.Handle("GET /v1/servers/{id}/metrics", s.requireSession(http.HandlerFunc(s.handleServerMetrics)))
+
+	// Todo lo que no es API es el panel, que va último para no taparle ninguna
+	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si
+	// cayera en el panel, un error de integración devolvería una página HTML.
+	mux.HandleFunc("/v1/", s.handleUnknownAPI)
+	mux.Handle("/", panel.Handler(s.log))
 
 	// El WebSocket va fuera del límite de tamaño por pedido: ese límite es para
 	// cuerpos HTTP, y acá el tamaño se controla por mensaje con SetReadLimit.
@@ -102,6 +109,14 @@ func (s *Server) CloseAgents(reason string) {
 // ConnectedAgents dice cuántos agents hay conectados en este momento.
 func (s *Server) ConnectedAgents() int {
 	return s.hub.count()
+}
+
+// handleUnknownAPI contesta las rutas de /v1 que no existen.
+func (s *Server) handleUnknownAPI(w http.ResponseWriter, r *http.Request) {
+	writeJSON(r.Context(), w, http.StatusNotFound, errorResponse{
+		Error:   "not_found",
+		Message: "esa ruta no existe",
+	})
 }
 
 // handleHealthz dice si el proceso está vivo. No toca la base a propósito: es lo

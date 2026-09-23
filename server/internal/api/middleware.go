@@ -3,8 +3,10 @@ package api
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -28,7 +30,15 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 
 		next.ServeHTTP(recorder, r)
 
-		s.log.InfoContext(r.Context(), "pedido",
+		// Los archivos del panel se piden una vez por visita y no cuentan nada:
+		// a nivel debug, para que el registro siga siendo legible. Si alguno
+		// falla, eso sí se ve.
+		level := slog.LevelInfo
+		if recorder.status < 400 && strings.HasPrefix(r.URL.Path, "/assets/") {
+			level = slog.LevelDebug
+		}
+
+		s.log.Log(r.Context(), level, "pedido",
 			"metodo", r.Method,
 			"ruta", r.URL.Path,
 			"estado", recorder.status,

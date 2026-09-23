@@ -1,0 +1,6 @@
+# Acá adentro se copia el panel compilado (`make web-embed`) justo antes de
+# construir el binario, y de ahí lo toma go:embed. En el repositorio solo vive
+# la página de aviso: lo compilado no se versiona.
+*
+!.gitignore
+!sin-panel.html

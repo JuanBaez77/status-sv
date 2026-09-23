@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>status-sv · sin panel</title>
+    <style>
+      body {
+        margin: 0;
+        display: grid;
+        place-items: center;
+        min-height: 100dvh;
+        background: #14161a;
+        color: #e8eaed;
+        font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.6;
+      }
+      main {
+        max-width: 34rem;
+        padding: 1.5rem;
+      }
+      h1 {
+        font-size: 1.1rem;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        margin: 0 0 0.75rem;
+        color: #a8adb8;
+        font-size: 0.9rem;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 0.85rem;
+        color: #e8eaed;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Este binario se compiló sin el panel</h1>
+      <p>
+        La API funciona igual: los agents siguen mandando sus métricas y
+        <code>/v1</code> responde como siempre. Lo único que falta es el panel web,
+        que se compila aparte y se copia adentro del binario antes de construirlo.
+      </p>
+      <p>Para tenerlo: <code>make web-embed</code> y volver a compilar.</p>
+    </main>
+  </body>
+</html>

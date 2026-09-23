@@ -55,9 +55,8 @@ func TestRouting(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{name: "ruta inexistente", method: http.MethodGet, path: "/nada", want: http.StatusNotFound},
 		{name: "método equivocado", method: http.MethodPost, path: "/healthz", want: http.StatusMethodNotAllowed},
-		{name: "raíz", method: http.MethodGet, path: "/", want: http.StatusNotFound},
+		{name: "ruta de API que no existe", method: http.MethodGet, path: "/v1/no-existe", want: http.StatusNotFound},
 	}
 
 	for _, tt := range tests {
@@ -68,6 +67,50 @@ func TestRouting(t *testing.T) {
 
 			if rec.Code != tt.want {
 				t.Errorf("estado %d, se esperaba %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+// Una ruta de /v1 que no existe se contesta como API: quien la llamó espera
+// JSON, no la página del panel.
+func TestRutaDeAPIQueNoExisteContestaJSON(t *testing.T) {
+	server := newTestServer()
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/no-existe", nil))
+
+	if contentType := rec.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+		t.Fatalf("Content-Type = %q", contentType)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("la respuesta no es JSON: %v", err)
+	}
+	if body["error"] != "not_found" {
+		t.Errorf("cuerpo = %v", body)
+	}
+}
+
+// Todo lo que no es API lo contesta el panel. Según cómo se haya compilado el
+// binario será el panel mismo (200) o la página que avisa que falta (503), pero
+// nunca un 404 de API: las rutas del front las resuelve el navegador.
+func TestLoQueNoEsAPILoContestaElPanel(t *testing.T) {
+	server := newTestServer()
+
+	for _, path := range []string{"/", "/servers/01924f9c-0000-7000-8000-0000000000aa"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+			if rec.Code != http.StatusOK && rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("estado %d, se esperaba 200 con panel o 503 sin él", rec.Code)
+			}
+			if contentType := rec.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+				t.Errorf("Content-Type = %q", contentType)
+			}
+			if rec.Header().Get("Content-Security-Policy") == "" {
+				t.Error("la página del panel salió sin política de contenido")
 			}
 		})
 	}

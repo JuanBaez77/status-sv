@@ -222,6 +222,30 @@ if "${COMPOSE[@]}" exec -T server wget -q -O- http://127.0.0.1:8080/v1/servers >
 fi
 verde "ok: sin sesión, la API del panel no contesta"
 
+# --- 7. Panel embebido ---
+
+paso "verificando que el binario sirve el panel"
+
+PANEL="$("${COMPOSE[@]}" exec -T server wget -q -O- http://127.0.0.1:8080/)"
+case "${PANEL}" in
+  *'id="root"'*) verde "ok: la raíz devuelve el panel que lleva adentro el binario" ;;
+  *) rojo "la raíz no devolvió el panel: ${PANEL}"; exit 1 ;;
+esac
+
+# Una ruta del panel la resuelve el front, así que también devuelve el index.
+if ! "${COMPOSE[@]}" exec -T server wget -q -O- "http://127.0.0.1:8080/servers/${ID_SERVIDOR}" >/dev/null 2>&1; then
+  rojo "la ruta de un servidor no devolvió el panel"
+  exit 1
+fi
+verde "ok: las rutas del panel las resuelve el front"
+
+# Una ruta de la API que no existe se contesta como API, no con el panel.
+if "${COMPOSE[@]}" exec -T server wget -q -O- http://127.0.0.1:8080/v1/no-existe >/dev/null 2>&1; then
+  rojo "/v1/no-existe contestó 200"
+  exit 1
+fi
+verde "ok: una ruta de API que no existe no devuelve el panel"
+
 paso "resumen"
 psql_query "SELECT name || ' | agent ' || agent_version || ' | último latido hace ' || round(extract(epoch from now() - last_seen_at)) || 's' FROM servers"
 psql_query "SELECT 'métricas guardadas: ' || count(*) || ' muestras' FROM metrics_raw"
