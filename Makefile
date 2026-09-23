@@ -101,6 +101,10 @@ sqlc-check: ## Falla si el código generado no coincide con las queries
 test-e2e: ## Prueba de punta a punta con Docker: control plane, base y agent
 	./deploy/e2e/run.sh
 
+.PHONY: test-carga
+test-carga: ## Prueba de carga: 10 agents simulados y las metas de rendimiento
+	./deploy/carga/run.sh
+
 .PHONY: test-integration
 test-integration: ## Tests de integración; necesita TEST_DATABASE_URL
 	$(GO) test -tags=integration -count=1 ./...

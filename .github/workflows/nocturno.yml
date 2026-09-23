@@ -1,0 +1,39 @@
+name: Nocturno
+
+# La medición larga de rendimiento. En cada PR la prueba de carga corre dos
+# minutos, que alcanzan para ver un problema grueso sin hacer esperar a nadie;
+# acá corre los diez minutos completos contra main, que es el número que dice
+# docs/DISENO.md para el CPU del agent.
+
+on:
+  schedule:
+    # 04:00 UTC: la 1 de la mañana en Buenos Aires, con el runner tranquilo.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nocturno
+  cancel-in-progress: false
+
+jobs:
+  carga:
+    name: "Carga larga: 10 agents durante 10 minutos"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prueba de carga de diez minutos
+        env:
+          SEGUNDOS: 600
+        run: ./deploy/carga/run.sh
