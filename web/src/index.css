@@ -36,6 +36,16 @@
   --status-online: oklch(0.65 0.17 150);
   --status-offline: oklch(0.58 0.21 27);
   --status-unknown: oklch(0.65 0.02 260);
+
+  /* Líneas de los gráficos. Se distinguen por tono y no solo por brillo, así
+     siguen siendo cinco líneas distintas en una pantalla mal calibrada. */
+  --chart-1: oklch(0.55 0.16 250);
+  --chart-2: oklch(0.6 0.15 150);
+  --chart-3: oklch(0.65 0.14 70);
+  --chart-4: oklch(0.58 0.21 27);
+  --chart-5: oklch(0.55 0.16 300);
+  --chart-grid: oklch(0.91 0.006 260);
+  --chart-axis: oklch(0.52 0.012 260);
 }
 
 .dark {
@@ -62,6 +72,14 @@
   --status-online: oklch(0.72 0.17 150);
   --status-offline: oklch(0.65 0.19 27);
   --status-unknown: oklch(0.6 0.02 260);
+
+  --chart-1: oklch(0.7 0.14 250);
+  --chart-2: oklch(0.72 0.17 150);
+  --chart-3: oklch(0.78 0.14 70);
+  --chart-4: oklch(0.65 0.19 27);
+  --chart-5: oklch(0.7 0.15 300);
+  --chart-grid: oklch(0.3 0.012 260);
+  --chart-axis: oklch(0.7 0.015 260);
 }
 
 @theme inline {
@@ -119,5 +137,30 @@
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+/* uPlot trae sus propios estilos: esto solo los acerca al tema del panel. */
+@layer base {
+  .u-legend {
+    margin-top: 0.25rem;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+  }
+
+  .u-legend .u-marker {
+    width: 0.75em;
+    height: 0.25em;
+    border-radius: 9999px;
+  }
+
+  .u-legend .u-value {
+    color: var(--foreground);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .u-select {
+    background: color-mix(in oklch, var(--primary) 20%, transparent);
   }
 }

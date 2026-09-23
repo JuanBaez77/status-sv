@@ -53,3 +53,13 @@ export function since(iso: string | null, now: Date = new Date()): string {
   const days = Math.floor(hours / 24)
   return `hace ${days} d`
 }
+
+const loadFormat = new Intl.NumberFormat('es-AR', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+/** load formatea una carga del sistema con dos decimales, como uptime. */
+export function load(value: number): string {
+  return loadFormat.format(value)
+}

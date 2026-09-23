@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, auth, type Session } from '@/lib/api'
+import { panelSocket } from '@/lib/panel-socket'
 
 export const sessionKey = ['session'] as const
 
@@ -31,6 +32,9 @@ export function useLogout() {
   return useMutation({
     mutationFn: auth.logout,
     onSettled: () => {
+      // Sin sesión el canal en vivo no tiene con qué autenticarse, y lo que
+      // quedó en memoria es de quien acaba de salir.
+      panelSocket.close()
       client.clear()
     },
   })

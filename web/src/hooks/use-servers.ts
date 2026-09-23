@@ -7,9 +7,9 @@ export const serversKey = ['servers'] as const
 /**
  * useServers trae la lista de servidores.
  *
- * Mientras el panel no escuche el WebSocket (llega con la vista de un
- * servidor), la lista se refresca sola cada 10 segundos, que es el intervalo
- * con el que el agent manda sus muestras.
+ * Se refresca sola cada 10 segundos, que es cada cuánto manda el agent. El
+ * canal en vivo empuja muestras de los servidores suscriptos, pero todavía no
+ * avisa cuando uno pasa a caído: eso solo se ve preguntando de nuevo.
  */
 export function useServers() {
   return useQuery<ServerSummary[], ApiError>({

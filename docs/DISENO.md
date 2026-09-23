@@ -420,7 +420,7 @@ Panel
 - [x] Scaffold con React, Vite, TypeScript y Tailwind, con componentes propios al estilo de shadcn/ui, router `wouter`, TanStack Query y CI del front con tope de 300 KB comprimido.
 - [x] Login con sesión por cookie segura.
 - [x] Lista de servidores con estado, uso de CPU, memoria y el disco más lleno.
-- [ ] Vista de un servidor con gráficos uPlot en vivo y rango de tiempo.
+- [x] Vista de un servidor con gráficos uPlot en vivo y rango de tiempo. El rango en crudo (1 hora) avanza con las muestras del canal en vivo; los más largos se dibujan con el agregado por minuto y su pico.
 
 Calidad
 

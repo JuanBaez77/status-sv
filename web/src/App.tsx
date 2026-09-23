@@ -4,6 +4,7 @@ import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSession } from '@/hooks/use-session'
 import { LoginPage } from '@/pages/login'
+import { ServerPage } from '@/pages/server'
 import { ServersPage } from '@/pages/servers'
 
 /** App decide qué se ve: mientras no haya sesión, solo el login. */
@@ -36,21 +37,7 @@ export default function App() {
       <Switch>
         <Route path="/" component={ServersPage} />
 
-        <Route path="/servers/:id">
-          {(params) => (
-            <Card>
-              <CardHeader>
-                <CardTitle>Servidor</CardTitle>
-                <CardDescription>
-                  Los gráficos de este servidor llegan en el próximo cambio.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="font-mono text-xs text-muted-foreground">{params.id}</p>
-              </CardContent>
-            </Card>
-          )}
-        </Route>
+        <Route path="/servers/:id">{(params) => <ServerPage id={params.id} />}</Route>
 
         <Route>
           <Card>
