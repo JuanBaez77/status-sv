@@ -62,6 +62,7 @@ Con `make` (Linux, macOS o CI):
 | `make web-embed` | Compila el panel y lo deja adentro del paquete que lo embebe |
 | `make build-release` | El panel adentro y los binarios de linux, como en producción |
 | `make size-check` | Verifica la meta de 15 MB del binario del agent |
+| `make test-carga` | Prueba de carga con 10 agents simulados y las metas de rendimiento |
 | `make ci` | Todo lo que corre el CI |
 
 En Windows no hay `make`; los equivalentes directos son:
@@ -137,6 +138,22 @@ sobreviva a un reinicio del control plane.
 
 Se limpia sola al terminar, incluso si falla, y en ese caso imprime los registros del control
 plane y del agent. Es el mismo script que corre el CI.
+
+### Prueba de carga
+
+Diez agents simulados más uno de verdad contra el control plane, para las metas de rendimiento de
+[docs/DISENO.md](docs/DISENO.md): el control plane por debajo de 100 MB, el agent por debajo de
+30 MB y de 1% de CPU.
+
+```bash
+./deploy/carga/run.sh              # 2 minutos, lo que corre en cada PR
+SEGUNDOS=600 ./deploy/carga/run.sh # los 10 minutos del workflow nocturno
+```
+
+Los agents simulados no son un cliente aparte: son el mismo del agent de verdad, con un colector
+que inventa las lecturas en vez de leer `/proc`. Así la prueba recorre el camino completo
+(enrolamiento, canal, lotes, validación, ingesta y agregado) con la carga que habría en producción.
+El consumo del agent lo mide el agent mismo y viaja en su latido, que es de donde lo lee el script.
 
 ## Panel
 

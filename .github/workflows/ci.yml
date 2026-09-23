@@ -117,6 +117,24 @@ jobs:
       - name: Meta de tamaño del bundle
         run: npm run size-check
 
+  carga:
+    name: "Carga: 10 agents simulados y metas de rendimiento"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Dos minutos alcanzan para ver la memoria del control plane con diez
+      # agents y el consumo del agent de verdad. La medición larga, de diez
+      # minutos, la hace el workflow nocturno contra main.
+      - name: Prueba de carga
+        run: ./deploy/carga/run.sh
+
   e2e:
     name: "Punta a punta: control plane, base y agent en Docker"
     runs-on: ubuntu-latest

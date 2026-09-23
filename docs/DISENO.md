@@ -275,9 +275,9 @@ Las metas se verifican desde el Sprint 1 con pruebas automáticas; si una se rom
 
 | Métrica | Meta | Cómo se mide |
 | --- | --- | --- |
-| RAM del agent en reposo | Menos de 30 MB | `ps` o cgroup en CI con un agent real. |
-| CPU del agent en reposo | Menos de 1% | Promedio de 10 minutos con métricas cada 10 s. |
-| RAM del control plane con 10 agents | Menos de 100 MB | Prueba de carga con agents simulados. |
+| RAM del agent en reposo | Menos de 30 MB | El agent mide su propia memoria y la manda en el latido; la prueba de carga la verifica. |
+| CPU del agent en reposo | Menos de 1% | Promedio de los latidos: 2 minutos en cada PR y 10 en el workflow nocturno. |
+| RAM del control plane con 10 agents | Menos de 100 MB | Prueba de carga con agents simulados, que usan el cliente del agent de verdad. |
 | Latencia métrica → pantalla | Menos de 2 s | Marca de tiempo en el agent contra render en el front. |
 | Carga inicial del panel | Menos de 1 s en conexión normal | Lighthouse en CI. |
 | Tamaño del bundle del front | Menos de 300 KB comprimido | Análisis del build de Vite. |
@@ -298,7 +298,7 @@ Un monorepo con un módulo Go compartido, el front y los contratos. Un solo repo
 ```text
 status-sv/
 ├── agent/            # Go: binario que corre en cada VPS
-│   ├── cmd/agent/
+│   ├── cmd/agent/    # y cmd/loadtest: agents simulados para la prueba de carga
 │   └── internal/     # collector, config, state, selfstat, ws; después docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
@@ -424,7 +424,7 @@ Panel
 
 Calidad
 
-- [ ] Prueba de carga con 10 agents simulados y verificación automática de las metas de RAM y CPU.
+- [x] Prueba de carga con 10 agents simulados y verificación automática de las metas de RAM y CPU (deploy/carga/run.sh): 2 minutos en cada PR y 10 en el workflow nocturno, con la decisión de Juan sobre la medición de CPU.
 - [x] Embebido del front compilado en el binario del servidor, con `go:embed`: la raíz sirve el panel, las rutas del front devuelven el mismo index y los archivos con hash se cachean para siempre.
 
 Terminado cuando un VPS real muestra sus métricas en vivo en el panel, con el agent por debajo de 30 MB de RAM y 1% de CPU, y el CI verde.
