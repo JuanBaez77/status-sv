@@ -429,6 +429,13 @@ Calidad
 
 Terminado cuando un VPS real muestra sus métricas en vivo en el panel, con el agent por debajo de 30 MB de RAM y 1% de CPU, y el CI verde.
 
+**Cerrado el 2026-09-23** (commit `df06653`, desplegado en `cristales-baez-prod`): el panel muestra
+CPU, memoria, los tres discos reales y `eth0` del servidor, con los gráficos avanzando solos por el
+WebSocket. Medido ahí mismo: agent 6,5 MB de RAM y 0,1 s de CPU acumulados; control plane 5,5 MB.
+La prueba de carga con diez agents simulados da 20 MB para el control plane. Queda pendiente
+Cloudflare Access delante del panel (lo configura Juan) y la meta de Lighthouse, que solo tiene
+sentido medir contra el despliegue con compresión.
+
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |

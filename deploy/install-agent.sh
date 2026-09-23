@@ -62,6 +62,10 @@ paso "comprobando el sistema"
 command -v systemctl >/dev/null || error "no se encontró systemd"
 command -v runuser >/dev/null || error "no se encontró runuser (util-linux)"
 [ -f "${BINARY_SRC}" ] || error "no existe el binario: ${BINARY_SRC}"
+# Un binario copiado desde Windows llega sin el permiso de ejecución. Sin este
+# chequeo, el error sería "el binario no corre en este servidor", que manda a
+# buscar por el lado equivocado.
+[ -x "${BINARY_SRC}" ] || error "al binario le falta el permiso de ejecución: chmod +x ${BINARY_SRC}"
 [ -f "${UNIT_SRC}" ] || error "no se encontró la unidad de systemd en ${UNIT_SRC}"
 
 # Que el binario corra de verdad en esta máquina, antes de instalarlo.

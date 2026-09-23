@@ -201,6 +201,27 @@ Para cambiarla (cierra todas las sesiones abiertas de ese usuario):
 docker compose -f docker-compose.prod.yml --env-file .env exec -it server server user-password --username juan
 ```
 
+### Cloudflare Access delante del panel
+
+Hasta que llegue el segundo factor (Sprint 3), lo único que protege al panel es esa contraseña. Con
+Cloudflare adelante conviene sumarle Access, que pide identidad **antes** de que el pedido llegue al
+servidor.
+
+La aplicación de Access cubre `<DOMINIO>`, con una excepción que no se puede olvidar:
+
+| Ruta | Access |
+| --- | --- |
+| `/v1/agents/*` | **excluida** |
+| todo lo demás | protegida |
+
+Los agents mandan su propia credencial, no una sesión de navegador: si Access queda delante de
+`/v1/agents/enroll` o de `/v1/agents/connect`, **los agents dejan de conectarse**. El WebSocket del
+panel (`/v1/panel/connect`) sí va protegido, y funciona porque el navegador lleva la cookie de
+Cloudflare.
+
+Conviene activarlo **después** de verificar que el panel funciona sin él: si algo se rompe, se sabe
+qué lo rompió.
+
 ## 2. Agent
 
 ### Compilar y copiar el binario
@@ -286,8 +307,30 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d server
 Los agents se desconectan durante el reinicio y reconectan solos con backoff: no hace falta
 tocarlos.
 
+El panel viaja adentro del binario, así que una versión nueva del control plane trae el panel
+nuevo: no hay nada que copiar aparte. Lo que sí hay que mirar es si cambió la plantilla de nginx
+(`deploy/nginx/status-sv.conf.template`): si cambió, hay que volver a generar el sitio, porque el
+archivo que está en el servidor se generó con la plantilla vieja.
+
+```bash
+# Solo si cambió la plantilla. El respaldo primero, siempre.
+tar -czf /root/nginx-backup-$(date +%Y%m%d-%H%M%S).tar.gz /etc/nginx
+curl -sI https://<OTRO-SITIO-DEL-SERVIDOR> | head -1    # la línea de base, antes de tocar
+
+# A un archivo temporal y después install: si render.sh falla a mitad de camino,
+# el sitio que está en uso no queda truncado.
+/opt/status-sv/deploy/nginx/render.sh final <DOMINIO> 127.0.0.1:8090 > /tmp/status-sv.conf.nuevo
+install -m 0644 /tmp/status-sv.conf.nuevo /etc/nginx/sites-available/status-sv
+nginx -t && systemctl reload nginx
+
+curl -sI https://<OTRO-SITIO-DEL-SERVIDOR> | head -1    # tiene que seguir igual
+```
+
 **Agent:** copiar el binario nuevo y volver a correr `install-agent.sh`. Reemplaza el binario y
 reinicia el servicio **sin volver a enrolar**: la credencial se conserva.
+
+Un binario copiado desde Windows llega **sin permiso de ejecución**, y el instalador se planta
+antes de tocar nada: `chmod +x` al binario y de nuevo.
 
 ## 4. Volver atrás
 
@@ -318,9 +361,20 @@ El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, u
   pueden pedir por semana.
 - **No commitear `deploy/.env`.** Ya está en `.gitignore`, pero conviene revisarlo en cada PR.
 
-## 7. Lecciones del primer despliegue
+## 7. Lecciones de los despliegues
 
 Salieron al desplegar en `cristales-baez-prod` y cuestan tiempo si se redescubren:
+
+- **Un binario copiado desde Windows llega sin permiso de ejecución.** `scp` conserva los permisos
+  del origen, y NTFS no tiene el bit de ejecución: `chmod +x` antes de instalar. El instalador lo
+  verifica y lo dice, en vez de dejar creer que el binario no corre en ese servidor.
+- **El control plane acepta cinco enrolamientos por minuto desde la misma IP.** Los tokens son de un
+  solo uso y el límite los protege de la fuerza bruta. Cada agent viene de su propio VPS, así que no
+  molesta; pero enrolar varios desde la misma salida a internet lleva un par de minutos, y los
+  rechazos dicen `rate_limited`. Hay que esperar y reintentar, no generar tokens nuevos.
+- **Al actualizar, mirar si cambió la plantilla de nginx.** El sitio del servidor se generó con la
+  plantilla del día que se instaló: una `location` nueva (por ejemplo, la del WebSocket del panel)
+  no aparece sola. Sin ella el panel carga pero los gráficos no avanzan.
 
 - **Crear el registro DNS antes de consultarlo.** Si alguien pregunta por el dominio cuando todavía
   no existe, los resolvers guardan la respuesta negativa hasta el mínimo del SOA: en Cloudflare, 30
