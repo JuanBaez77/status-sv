@@ -1,7 +1,8 @@
 # Panel de status-sv
 
 React + Vite + TypeScript + Tailwind, compilado a estáticos. En producción no corre Node: el
-binario del control plane embebe `dist/` (eso llega en el PR 11 del Sprint 1).
+binario del control plane lleva `dist/` adentro (`make web-embed`, ver `server/internal/panel`) y lo
+sirve en la raíz del dominio.
 
 ## Comandos
 

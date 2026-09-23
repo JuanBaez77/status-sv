@@ -15,6 +15,12 @@ DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS := -s -w -X $(LDBASE).Version=$(VERSION) -X $(LDBASE).Commit=$(COMMIT) -X $(LDBASE).Date=$(DATE)
 
+# El panel compilado se copia acá antes de construir el binario: de ahí lo toma
+# go:embed (ver server/internal/panel).
+PANEL_DIST := server/internal/panel/dist
+# Deja dist/ con lo único que se versiona: el aviso y su .gitignore.
+PANEL_CLEAN := find $(PANEL_DIST) -mindepth 1 ! -name .gitignore ! -name sin-panel.html -delete
+
 # Meta de tamaño del binario del agent: 15 MB (ver docs/DISENO.md).
 AGENT_MAX_BYTES := 15728640
 
@@ -110,6 +116,19 @@ web-install: ## Instala las dependencias del panel
 web-ci: ## Lint, tipos, tests, build y meta de tamaño del panel
 	cd web && npm run ci
 
+.PHONY: web-embed
+web-embed: ## Compila el panel y lo deja adentro del paquete que lo embebe
+	cd web && npm run build
+	$(PANEL_CLEAN)
+	cp -R web/dist/. $(PANEL_DIST)/
+	# Los mapas de fuentes no viajan adentro del binario: son megabytes que el
+	# navegador solo pide si alguien abre las herramientas de desarrollo.
+	find $(PANEL_DIST) -name "*.map" -delete
+
+.PHONY: build-release
+build-release: web-embed build-linux ## Panel adentro y binarios para linux, como en producción
+
 .PHONY: clean
-clean: ## Borra los binarios compilados
+clean: ## Borra los binarios compilados y el panel embebido
 	rm -rf $(BIN)
+	$(PANEL_CLEAN)

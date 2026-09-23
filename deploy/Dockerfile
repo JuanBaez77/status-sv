@@ -7,6 +7,24 @@
 #   docker build -f deploy/Dockerfile --target server -t status-sv-server .
 #   docker build -f deploy/Dockerfile --target agent  -t status-sv-agent .
 
+# --- Panel web ---
+#
+# Node solo aparece acá: el panel se compila a archivos estáticos que el binario
+# del control plane se lleva adentro. En el servidor no corre Node.
+FROM node:22-alpine AS web
+
+WORKDIR /web
+
+# Las dependencias primero, por la caché de capas.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+# Los mapas de fuentes no viajan adentro del binario: son megabytes que el
+# navegador solo pide si alguien abre las herramientas de desarrollo.
+RUN npm run build && find dist -name "*.map" -delete
+
+# --- Binarios ---
 FROM golang:1.27-alpine AS builder
 
 WORKDIR /src
@@ -17,6 +35,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+# El panel compilado, en el lugar donde lo busca go:embed. Sin esto el binario
+# igual compila, pero la raíz devuelve la página de aviso.
+COPY --from=web /web/dist/ ./server/internal/panel/dist/
 
 ARG VERSION=dev
 ARG COMMIT=unknown

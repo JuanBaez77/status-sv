@@ -59,6 +59,8 @@ Con `make` (Linux, macOS o CI):
 | `make lint` | `golangci-lint` |
 | `make build` | Compila agent y server en `bin/` |
 | `make build-linux` | Compila para `linux/amd64` en `bin/linux-amd64/` |
+| `make web-embed` | Compila el panel y lo deja adentro del paquete que lo embebe |
+| `make build-release` | El panel adentro y los binarios de linux, como en producción |
 | `make size-check` | Verifica la meta de 15 MB del binario del agent |
 | `make ci` | Todo lo que corre el CI |
 
@@ -145,8 +147,13 @@ npm run dev         # http://localhost:5173, con proxy a la API en 8080
 npm run ci          # lint, tipos, tests, build y meta de tamaño
 ```
 
-El detalle está en [web/README.md](web/README.md). El panel se compila a estáticos y, desde el PR
-11 del Sprint 1, se embebe en el binario del control plane.
+El detalle está en [web/README.md](web/README.md).
+
+En producción no corre Node: el panel se compila a archivos estáticos y viaja **adentro del binario**
+del control plane, que los sirve en la raíz del dominio. Para que eso pase hay que copiarlos antes
+de compilar, que es lo que hacen `make web-embed` (o `make build-release`) y la etapa de Node de
+[deploy/Dockerfile](deploy/Dockerfile). Un binario compilado sin ese paso funciona igual como API, y
+la raíz avisa que le falta el panel en vez de devolver un 404 sin explicación.
 
 ## Control plane
 
@@ -190,6 +197,11 @@ Endpoints del panel. Todos piden la cookie de sesión que entrega el login ([ADR
 La resolución se elige sola si no se pide: hasta 3 horas, las muestras crudas; más allá, el agregado
 por minuto, que es lo único que queda pasadas las 48 horas de retención del crudo. En `1m` cada
 punto es el promedio del minuto y los campos `*_max` son el pico. El rango no puede pasar de 31 días.
+
+El panel web se sirve desde la raíz (`/`), con los archivos que el binario lleva adentro. Las
+rutas del front (`/servers/{id}`) devuelven el mismo `index.html`: las resuelve el navegador. Un
+archivo que no existe es 404, no el index, para que un despliegue a medias se note. Una ruta de
+`/v1` que no existe responde 404 en JSON.
 
 Chequeos de salud:
 
