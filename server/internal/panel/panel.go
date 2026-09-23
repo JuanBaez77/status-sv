@@ -1,10 +1,10 @@
 // Package panel sirve el panel web desde el mismo binario del control plane.
 //
 // El panel compilado se copia a dist/ antes de construir el binario (`make
-// web-embed`, o la etapa de Node de deploy/Dockerfile) y queda adentro con
-// go:embed: se despliega un solo archivo, sin Node ni archivos sueltos en el
-// servidor, y no hay forma de que el front y la API queden en versiones
-// distintas.
+// web-embed`, o la etapa de Node de deploy/Dockerfile) y de ahí lo toma la
+// directiva de embebido: se despliega un solo archivo, sin Node ni archivos
+// sueltos en el servidor, y no hay forma de que el front y la API queden en
+// versiones distintas.
 //
 // En el repositorio dist/ solo tiene una página de aviso: si el binario se
 // compiló sin pasar por ese paso, el panel lo dice en vez de devolver un 404
@@ -117,6 +117,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// path.Clean ya resolvió los ".." y fs.ValidPath rechaza lo que quede raro:
+	// de dist/ no se sale.
+	if !fs.ValidPath(name) {
+		http.NotFound(w, r)
+		return
+	}
 
 	if info, err := fs.Stat(h.files, name); err == nil && !info.IsDir() {
 		if strings.HasPrefix(name, "assets/") {
@@ -127,6 +133,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if contentType, ok := contentTypes[strings.ToLower(path.Ext(name))]; ok {
 			w.Header().Set("Content-Type", contentType)
 		}
+		//nolint:gosec // el nombre ya pasó por path.Clean y fs.ValidPath
 		http.ServeFileFS(w, r, h.files, name)
 		return
 	}
