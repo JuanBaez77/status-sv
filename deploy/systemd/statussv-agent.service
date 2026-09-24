@@ -5,9 +5,10 @@
 # comprometiera, no podría escribir fuera de su directorio de estado, cargar
 # módulos del kernel ni ganar privilegios.
 #
-# Cuando en el Sprint 2 el agent necesite hablar con Docker, habrá que sumarlo al
-# grupo docker y revisar varias de estas restricciones. Queda anotado en
-# docs/mas-adelante.md.
+# El acceso a Docker no está acá: lo agrega el instalador como drop-in
+# (10-docker.conf) solo si el servidor tiene el grupo docker, porque systemd no
+# arranca un servicio cuyo grupo suplementario no existe. El porqué de todo esto
+# está en docs/adr/ADR-011-acceso-a-docker-y-journald.md.
 
 [Unit]
 Description=Agent de status-sv
@@ -20,6 +21,11 @@ Type=simple
 User=statussv
 Group=statussv
 ExecStart=/usr/local/bin/statussv-agent run
+
+# systemd-journal da lectura del diario, que es lo que necesita `journalctl` para
+# traer los logs de un servicio (ADR-011). El grupo lo crea systemd, así que
+# existe en cualquier servidor con systemd.
+SupplementaryGroups=systemd-journal
 
 Environment=STATUSSV_STATE_FILE=/var/lib/status-sv/agent.json
 Environment=STATUSSV_LOG_FORMAT=json
@@ -38,7 +44,8 @@ UMask=0077
 # --- Límites de recursos ---
 # La meta es menos de 30 MB. Este techo es una red de seguridad: si el agent
 # tuviera una fuga, lo corta systemd antes de que afecte a los proyectos del
-# cliente que corren en el mismo servidor.
+# cliente que corren en el mismo servidor. El pedido de logs abre un `journalctl`
+# hijo, que vive adentro de este mismo techo y de TasksMax.
 MemoryMax=64M
 TasksMax=64
 
@@ -53,6 +60,8 @@ PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
+# ProtectControlGroups=true deja /sys/fs/cgroup de solo lectura, que es todo lo
+# que necesita el agent para medir el consumo de cada contenedor y servicio.
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
@@ -65,10 +74,11 @@ RemoveIPC=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
-# Solo IP para hablar con el control plane, y unix para la resolución de nombres.
+# AF_UNIX cubre tres cosas: la resolución de nombres, el socket de Docker
+# (/run/docker.sock) y el bus del sistema, por donde se leen los servicios.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 # ProtectProc=invisible queda afuera a propósito: el descubrimiento de procesos
-# del Sprint 2 necesita ver los procesos del sistema.
+# necesita ver los procesos del sistema.
 
 [Install]
 WantedBy=multi-user.target

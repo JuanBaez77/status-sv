@@ -259,6 +259,30 @@ STATUSSV_SERVER_URL=https://<DOMINIO> ./install-agent.sh ./statussv-agent
 El script crea el usuario `statussv` sin shell, instala el binario y la unidad endurecida, enrola
 el agent y arranca el servicio. Si algo falla, muestra los últimos registros.
 
+### Acceso a Docker y al diario
+
+Para ver los contenedores, el agent entra al grupo `docker`, y eso **equivale a darle root en ese
+servidor**: la decisión y sus límites están en
+[ADR-011](adr/ADR-011-acceso-a-docker-y-journald.md). Al diario entra por `systemd-journal`, que va
+en la unidad porque ese grupo existe en cualquier servidor con systemd.
+
+El grupo `docker` no va en la unidad: lo agrega el instalador como drop-in, y solo si el servidor
+tiene Docker. La razón es que systemd **no arranca** un servicio cuyo grupo suplementario no existe,
+así que ponerlo fijo rompería los VPS sin Docker.
+
+```bash
+# Qué quedó aplicado (la unidad y sus drop-ins):
+systemctl cat statussv-agent
+
+# Los grupos con los que corre el proceso:
+systemctl show statussv-agent -p SupplementaryGroups
+```
+
+Si instalás Docker **después** del agent, hay que correr `install-agent.sh` de nuevo (no vuelve a
+enrolar) para que aparezca el drop-in. Si desinstalás Docker, el mismo script lo saca: sin eso el
+servicio no arranca.
+
+
 ### Verificar
 
 ```bash
