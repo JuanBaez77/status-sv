@@ -91,6 +91,22 @@ enmascarado, así que un control plane comprometido tampoco ve secretos de los p
   en adelante usan v2 por defecto; si aparece uno con v1, el consumo por unidad queda vacío y el
   estado se sigue viendo.
 
+## Verificación
+
+Probado el 2026-09-24 con systemd 255 y cgroup v2, corriendo la unidad real bajo systemd y
+cambiando solo qué ejecuta ([`deploy/laboratorio/`](../../deploy/laboratorio/README.md)):
+
+| Comprobación | Resultado |
+| --- | --- |
+| Conectar a `/run/docker.sock` (modo 660, `root:docker`) con el drop-in puesto | funciona, con `ProtectSystem=strict` y todo lo demás como está |
+| Lo mismo **sin** el drop-in | no conecta, que es lo correcto en un servidor sin Docker |
+| Leer `/sys/fs/cgroup/cpu.stat` | funciona con `ProtectControlGroups=true` |
+| `ListUnits` por D-Bus del sistema | funciona |
+| `journalctl` de otra unidad, con el grupo `systemd-journal` | funciona |
+| Escribir en `/etc` | rechazado, como tiene que ser |
+| Escribir en `/var/lib/status-sv` | funciona |
+| Drop-in con un grupo que no existe | el servicio **no arranca** (`status=216/GROUP`), que es la razón de escribirlo solo si el grupo está |
+
 ## Alternativas consideradas
 
 - **Proxy del socket de Docker de solo lectura** (un contenedor que filtra los endpoints

@@ -278,6 +278,9 @@ systemctl cat statussv-agent
 systemctl show statussv-agent -p SupplementaryGroups
 ```
 
+Antes de tocar el endurecimiento de la unidad, la prueba va en [`deploy/laboratorio/`](../deploy/laboratorio/README.md),
+que corre la unidad real sin tocar ningún servidor.
+
 Si instalás Docker **después** del agent, hay que correr `install-agent.sh` de nuevo (no vuelve a
 enrolar) para que aparezca el drop-in. Si desinstalás Docker, el mismo script lo saca: sin eso el
 servicio no arranca.
