@@ -118,6 +118,29 @@ func TestIngestStoresEverything(t *testing.T) {
 	}
 }
 
+// Cómo terminó un servicio parado se guarda: es lo que le dice al panel si es
+// un problema.
+func TestIngestStoresServiceResult(t *testing.T) {
+	_, q, server, ingester := setup(t)
+
+	state := fullState(t0)
+	state.Services = append(state.Services, proto.Service{
+		Unit: "cloud-init-main.service", LoadState: "loaded", ActiveState: proto.ActiveInactive,
+		SubState: "dead", Result: "success",
+	})
+	if _, err := ingester.Ingest(t.Context(), server, state); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	got := units(t, q, server)
+	if r := got["service/cloud-init-main.service"].Result; r != "success" {
+		t.Errorf("result del servicio parado: %q", r)
+	}
+	if r := got["service/nginx.service"].Result; r != "" {
+		t.Errorf("un servicio corriendo no trae result: %q", r)
+	}
+}
+
 func TestIngestReplacesWhatChanged(t *testing.T) {
 	_, q, server, ingester := setup(t)
 	if _, err := ingester.Ingest(t.Context(), server, fullState(t0)); err != nil {

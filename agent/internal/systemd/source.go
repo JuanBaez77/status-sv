@@ -104,6 +104,12 @@ type detail struct {
 	mainPID      int
 	controlGroup string
 	activeSince  time.Time
+	// result es cómo terminó la última vez; solo de lo parado o caído.
+	result string
+	// conditionFailed es un servicio parado que ni arrancó porque su
+	// condición no se cumple en este servidor (un ConditionPathExists, por
+	// ejemplo): no está pensado para correr acá.
+	conditionFailed bool
 }
 
 // NewSource arma la fuente sobre el bus del sistema. exclude son patrones de
@@ -174,8 +180,9 @@ func (s *Source) list(ctx context.Context) ([]Unit, error) {
 	}
 
 	units := make([]Unit, 0, len(statuses))
-	// seen son los que se muestran; listed, todos los que existen. El tipo se
-	// recuerda también de los que se esconden, para no volver a preguntarlo.
+	// seen son los que pasaron el filtro y tienen sus detalles en caché;
+	// listed, todos los que existen. El tipo se recuerda también de los que se
+	// esconden, para no volver a preguntarlo.
 	seen := make(map[string]bool, len(statuses))
 	listed := make(map[string]bool, len(statuses))
 	for _, st := range statuses {
@@ -191,12 +198,16 @@ func (s *Source) list(ctx context.Context) ([]Unit, error) {
 		if err != nil {
 			s.log.DebugContext(ctx, "no se pudieron leer los detalles de un servicio", "unidad", st.Name, "error", err)
 		}
+		if d.conditionFailed {
+			continue
+		}
 		units = append(units, Unit{
 			Service: proto.Service{
 				Unit:        st.Name,
 				LoadState:   st.LoadState,
 				ActiveState: activeState(st.ActiveState),
 				SubState:    st.SubState,
+				Result:      d.result,
 				MainPID:     d.mainPID,
 				ActiveSince: d.activeSince,
 			},
@@ -224,12 +235,13 @@ func (s *Source) list(ctx context.Context) ([]Unit, error) {
 //   - lo que está corriendo o cambiando de estado;
 //   - lo que falló, siempre;
 //   - lo que está habilitado pero parado: arranca con el sistema y no está
-//     corriendo, que es justo lo que hay que ver.
+//     corriendo. Cómo terminó (Result) le dice al panel si es un problema.
 //
 // Se esconde el resto, que es ruido para quien mira los proyectos de un
 // servidor: los oneshot que ya terminaron (configuración de arranque, tareas
 // de apt), estén "active (exited)" o inactivos, y lo parado que no está
-// habilitado.
+// habilitado. Lo parado cuya condición no se cumple en este servidor se
+// esconde después, en list, porque saberlo cuesta un pedido por unidad.
 func (s *Source) shown(ctx context.Context, st dbus.UnitStatus, enabled map[string]bool) bool {
 	for _, pattern := range s.exclude {
 		if ok, _ := path.Match(pattern, st.Name); ok {
@@ -274,9 +286,10 @@ func (s *Source) oneshot(ctx context.Context, unit string) bool {
 	return serviceType == "oneshot"
 }
 
-// detailFor devuelve el PID principal, el cgroup y desde cuándo está activo,
-// del caché si el estado no cambió o preguntándole a systemd. Un servicio que
-// no está corriendo no tiene nada de eso, así que no se pregunta.
+// detailFor devuelve lo que no viene en la lista de unidades, del caché si el
+// estado no cambió o preguntándole a systemd. De lo que corre, el PID
+// principal, el cgroup y desde cuándo está activo; de lo parado o caído, cómo
+// terminó y, si está parado, si su condición no se cumple.
 func (s *Source) detailFor(ctx context.Context, st dbus.UnitStatus) (detail, error) {
 	s.mu.Lock()
 	cached, ok := s.details[st.Name]
@@ -286,7 +299,21 @@ func (s *Source) detailFor(ctx context.Context, st dbus.UnitStatus) (detail, err
 	}
 
 	d := detail{active: st.ActiveState, sub: st.SubState}
-	if st.ActiveState == "active" || st.ActiveState == "reloading" {
+	switch st.ActiveState {
+	case "inactive", "failed":
+		result, err := s.serviceProperty(ctx, st.Name, "Result")
+		if err != nil {
+			return detail{}, err
+		}
+		d.result, _ = result.(string)
+		if st.ActiveState == "inactive" {
+			failed, err := s.conditionFailed(ctx, st.Name)
+			if err != nil {
+				return detail{}, err
+			}
+			d.conditionFailed = failed
+		}
+	case "active", "reloading":
 		pid, err := s.serviceProperty(ctx, st.Name, "MainPID")
 		if err != nil {
 			return detail{}, err
@@ -325,6 +352,26 @@ func (s *Source) serviceProperty(ctx context.Context, unit, name string) (any, e
 		return nil, fmt.Errorf("leer %s de %s: %w", name, unit, err)
 	}
 	return prop.Value.Value(), nil
+}
+
+// conditionFailed dice si systemd miró las condiciones de la unidad y no se
+// cumplieron. ConditionResult solo, no alcanza: vale "no" también en una
+// unidad que todavía no se intentó arrancar (una que espera a otra que falló),
+// y esa sí hay que verla. Por eso cuenta solo si hay fecha de la revisión.
+func (s *Source) conditionFailed(ctx context.Context, unit string) (bool, error) {
+	checked, err := s.conn.GetUnitPropertyContext(ctx, unit, "ConditionTimestamp")
+	if err != nil {
+		return false, fmt.Errorf("leer ConditionTimestamp de %s: %w", unit, err)
+	}
+	if at, _ := checked.Value.Value().(uint64); at == 0 {
+		return false, nil
+	}
+	met, err := s.conn.GetUnitPropertyContext(ctx, unit, "ConditionResult")
+	if err != nil {
+		return false, fmt.Errorf("leer ConditionResult de %s: %w", unit, err)
+	}
+	ok, _ := met.Value.Value().(bool)
+	return !ok, nil
 }
 
 // Watch se suscribe a las señales de systemd y llama a changed cada vez que un

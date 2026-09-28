@@ -42,6 +42,11 @@ func newFakeBus() *fakeBus {
 			{Name: "gunicorn@cristales.service", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
 			// Habilitado pero parado: tiene que verse.
 			{Name: "cotizador.service", LoadState: "loaded", ActiveState: "inactive", SubState: "dead"},
+			// Habilitado y parado porque su condición no se cumple acá: ruido.
+			{Name: "ubuntu-advantage.service", LoadState: "loaded", ActiveState: "inactive", SubState: "dead"},
+			// Habilitado y parado sin que systemd haya mirado su condición
+			// (espera a otra unidad que falló): tiene que verse.
+			{Name: "worker.service", LoadState: "loaded", ActiveState: "inactive", SubState: "dead"},
 			// Tarea de una vez, parada y no habilitada: ruido.
 			{Name: "apt-daily.service", LoadState: "loaded", ActiveState: "inactive", SubState: "dead"},
 			// Maquinaria del sistema: excluida por patrón.
@@ -54,12 +59,26 @@ func newFakeBus() *fakeBus {
 		},
 		enabled: []string{
 			"/etc/systemd/system/cotizador.service",
+			"/lib/systemd/system/ubuntu-advantage.service",
+			"/etc/systemd/system/worker.service",
 			"/lib/systemd/system/nginx.service",
 			"/lib/systemd/system/e2scrub_reap.service",
 			"/lib/systemd/system/apparmor.service",
 		},
 		props: map[string]map[string]any{
-			"cotizador.service":    {"Type": "simple"},
+			"gunicorn@cristales.service": {"Result": "exit-code"},
+			"cotizador.service": {
+				"Type": "simple", "Result": "success",
+				"ConditionTimestamp": since, "ConditionResult": true,
+			},
+			"ubuntu-advantage.service": {
+				"Type": "simple", "Result": "success",
+				"ConditionTimestamp": since, "ConditionResult": false,
+			},
+			"worker.service": {
+				"Type": "simple", "Result": "success",
+				"ConditionTimestamp": uint64(0), "ConditionResult": false,
+			},
 			"e2scrub_reap.service": {"Type": "oneshot"},
 			"nginx.service": {
 				"MainPID":              uint32(812),
@@ -169,9 +188,16 @@ func TestSnapshotShowsWhatMatters(t *testing.T) {
 		t.Fatalf("fuente: %+v", src)
 	}
 
-	want := []string{"nginx.service", "gunicorn@cristales.service", "cotizador.service"}
+	want := []string{"nginx.service", "gunicorn@cristales.service", "cotizador.service", "worker.service"}
 	if got := names(units); !slices.Equal(got, want) {
 		t.Fatalf("servicios mostrados:\n obtuve   %v\n esperaba %v", got, want)
+	}
+
+	// Cómo terminó viaja solo en lo parado o caído.
+	for i, result := range []string{"", "exit-code", "success", "success"} {
+		if got := units[i].Service.Result; got != result {
+			t.Errorf("%s: result %q, esperaba %q", units[i].Service.Unit, got, result)
+		}
 	}
 
 	nginx := units[0]
@@ -203,6 +229,11 @@ func TestSnapshotCachesDetails(t *testing.T) {
 	source.Snapshot(ctx)
 	if n := bus.calls("nginx.service"); n != 3 {
 		t.Fatalf("sin cambios, esperaba las 3 propiedades una sola vez; hubo %d pedidos", n)
+	}
+	// Lo que se esconde por la condición también queda en caché: si no, se
+	// preguntaría de nuevo en cada foto. Tipo, resultado y las dos de la condición.
+	if n := bus.calls("ubuntu-advantage.service"); n != 4 {
+		t.Fatalf("esperaba 4 pedidos del servicio escondido por su condición, hubo %d", n)
 	}
 
 	bus.mu.Lock()

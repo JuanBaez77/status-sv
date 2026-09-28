@@ -133,6 +133,7 @@ type RuntimeUnit struct {
 	CpuPercent     pgtype.Float4
 	MemoryBytes    pgtype.Int8
 	SeenAt         time.Time
+	Result         string
 }
 
 type Server struct {

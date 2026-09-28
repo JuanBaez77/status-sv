@@ -171,6 +171,7 @@ func newColumns(n int) columns {
 		Health:         make([]string, 0, n),
 		LoadState:      make([]string, 0, n),
 		SubState:       make([]string, 0, n),
+		Result:         make([]string, 0, n),
 		Image:          make([]string, 0, n),
 		ComposeProject: make([]string, 0, n),
 		ComposeService: make([]string, 0, n),
@@ -185,7 +186,7 @@ func newColumns(n int) columns {
 
 // unit son los valores de una fila. Lo que no aplica queda en su cero.
 type unit struct {
-	key, name, state, health, loadState, subState, image, project, service, user, command string
+	key, name, state, health, loadState, subState, result, image, project, service, user, command string
 
 	pid       int
 	startedAt time.Time
@@ -199,6 +200,7 @@ func (c *columns) add(u unit) {
 	c.Health = append(c.Health, u.health)
 	c.LoadState = append(c.LoadState, u.loadState)
 	c.SubState = append(c.SubState, u.subState)
+	c.Result = append(c.Result, u.result)
 	c.Image = append(c.Image, u.image)
 	c.ComposeProject = append(c.ComposeProject, u.project)
 	c.ComposeService = append(c.ComposeService, u.service)
@@ -236,7 +238,7 @@ func serviceColumns(services []proto.Service) columns {
 	for _, s := range services {
 		c.add(unit{
 			key: s.Unit, name: s.Unit, state: string(s.ActiveState),
-			loadState: s.LoadState, subState: s.SubState,
+			loadState: s.LoadState, subState: s.SubState, result: s.Result,
 			pid: s.MainPID, startedAt: s.ActiveSince, usage: s.Usage,
 		})
 	}

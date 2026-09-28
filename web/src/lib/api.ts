@@ -228,6 +228,12 @@ export type RuntimeService = {
     | 'refreshing'
     | 'unknown'
   sub_state: string
+  /**
+   * result es cómo terminó la última vez, con los nombres de systemd
+   * ("success", "exit-code", "oom-kill"...). Vacío si está corriendo o si el
+   * agent es anterior y no lo manda.
+   */
+  result: string
   main_pid: number
   active_since: string | null
   usage: RuntimeUsage | null

@@ -35,6 +35,18 @@ func validService() proto.Service {
 	}
 }
 
+// stoppedService es un servicio habilitado que corrió y terminó bien: trae
+// cómo terminó, pero no PID ni consumo.
+func stoppedService() proto.Service {
+	return proto.Service{
+		Unit:        "cloud-init-main.service",
+		LoadState:   "loaded",
+		ActiveState: proto.ActiveInactive,
+		SubState:    "dead",
+		Result:      "success",
+	}
+}
+
 func validProcess() proto.Process {
 	return proto.Process{
 		PID:       4242,
@@ -56,7 +68,7 @@ func validRuntimeState() proto.RuntimeState {
 		TakenAt:    time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
 		Sources:    okSources(),
 		Containers: []proto.Container{validContainer()},
-		Services:   []proto.Service{validService()},
+		Services:   []proto.Service{validService(), stoppedService()},
 		Processes:  []proto.Process{validProcess()},
 	}
 }
@@ -197,6 +209,7 @@ func TestServiceValidate(t *testing.T) {
 		{name: "nombre con escape de systemd", mutate: func(s *proto.Service) { s.Unit = `srv-app\x2dweb.service` }},
 		{name: "caído", mutate: func(s *proto.Service) {
 			s.ActiveState, s.SubState, s.MainPID, s.Usage = proto.ActiveFailed, "failed", 0, nil
+			s.Result = "oom-kill"
 		}},
 		{name: "no es un servicio", mutate: func(s *proto.Service) { s.Unit = "nginx.socket" }, wantErr: true},
 		{name: "solo el sufijo", mutate: func(s *proto.Service) { s.Unit = ".service" }, wantErr: true},
@@ -204,6 +217,8 @@ func TestServiceValidate(t *testing.T) {
 		{name: "unidad con barra", mutate: func(s *proto.Service) { s.Unit = "../etc.service" }, wantErr: true},
 		{name: "estado inventado", mutate: func(s *proto.Service) { s.ActiveState = "dormido" }, wantErr: true},
 		{name: "sub_state con mayúsculas", mutate: func(s *proto.Service) { s.SubState = "Running" }, wantErr: true},
+		{name: "result con espacio", mutate: func(s *proto.Service) { s.Result = "exit code" }, wantErr: true},
+		{name: "result con mayúsculas", mutate: func(s *proto.Service) { s.Result = "Success" }, wantErr: true},
 		{name: "sin load_state", mutate: func(s *proto.Service) { s.LoadState = "" }, wantErr: true},
 		{name: "PID negativo", mutate: func(s *proto.Service) { s.MainPID = -1 }, wantErr: true},
 	}

@@ -64,6 +64,7 @@ type runtimeService struct {
 	LoadState   string        `json:"load_state"`
 	ActiveState string        `json:"active_state"`
 	SubState    string        `json:"sub_state"`
+	Result      string        `json:"result"`
 	MainPID     int32         `json:"main_pid"`
 	ActiveSince *time.Time    `json:"active_since"`
 	Usage       *runtimeUsage `json:"usage"`
@@ -153,7 +154,7 @@ func (s *Server) readRuntime(ctx context.Context, serverID uuid.UUID) (runtimeRe
 			})
 		case runstate.KindService:
 			out.Services = append(out.Services, runtimeService{
-				Unit: u.Name, LoadState: u.LoadState, ActiveState: u.State, SubState: u.SubState,
+				Unit: u.Name, LoadState: u.LoadState, ActiveState: u.State, SubState: u.SubState, Result: u.Result,
 				MainPID: u.Pid, ActiveSince: started, Usage: usage, SeenAt: u.SeenAt.UTC(),
 			})
 		case runstate.KindProcess:

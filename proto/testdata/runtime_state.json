@@ -44,6 +44,13 @@
           "cpu_percent": 0.1,
           "memory_bytes": 12582912
         }
+      },
+      {
+        "unit": "cloud-init-main.service",
+        "load_state": "loaded",
+        "active_state": "inactive",
+        "sub_state": "dead",
+        "result": "success"
       }
     ],
     "processes": [
