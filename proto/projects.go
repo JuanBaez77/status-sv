@@ -138,51 +138,55 @@ type Project struct {
 // Validate revisa cada campo. Son las mismas reglas que aplica el parser del
 // agent (ADR-012), escritas una sola vez: el agent arma el Project y lo valida
 // con esto.
+//
+// Los errores nombran el campo y la regla, nunca el valor: el agent los manda
+// al control plane como explicación de un archivo inválido, y de un archivo
+// no viaja su contenido.
 func (p Project) Validate() error {
 	switch {
 	case !ValidProjectName(p.Name):
-		return fmt.Errorf("nombre inválido %q: minúsculas, números y guiones, hasta %d", p.Name, MaxProjectNameLen)
+		return fmt.Errorf("name: tiene que ser de minúsculas, números y guiones, de hasta %d caracteres", MaxProjectNameLen)
 	case p.Environment != EnvProduction && p.Environment != EnvStaging:
-		return fmt.Errorf("entorno desconocido %q: production o staging", p.Environment)
+		return errors.New("environment: tiene que ser production o staging")
 	case !validName(p.Repo, maxRepoLen, isRepoRune):
-		return fmt.Errorf("repositorio inválido %q", p.Repo)
+		return errors.New("repo: vacío, demasiado largo o con caracteres no permitidos")
 	case !validBranch(p.Branch):
-		return fmt.Errorf("rama inválida %q", p.Branch)
+		return errors.New("branch: no es un nombre de rama válido")
 	case !validWorkdir(p.Workdir):
-		return fmt.Errorf("workdir inválido %q: tiene que ser una ruta absoluta, limpia y que no sea /", p.Workdir)
+		return errors.New("workdir: tiene que ser una ruta absoluta, limpia y que no sea /")
 	}
 
 	switch p.Runtime {
 	case RuntimeDocker:
 		switch {
 		case !validRelativePath(p.ComposeFile):
-			return fmt.Errorf("compose_file inválido %q: tiene que ser una ruta relativa dentro de workdir", p.ComposeFile)
+			return errors.New("compose_file: tiene que ser una ruta relativa dentro de workdir")
 		case !validName(p.ComposeProject, maxLabelLen, isDockerNameRune):
-			return fmt.Errorf("compose_project inválido %q", p.ComposeProject)
+			return errors.New("compose_project: vacío o con caracteres no permitidos")
 		case len(p.Units) > 0:
-			return errors.New("units es solo para proyectos de systemd")
+			return errors.New("units: es solo para proyectos de systemd")
 		}
 	case RuntimeSystemd:
 		switch {
 		case p.ComposeFile != "" || p.ComposeProject != "":
-			return errors.New("compose_file y compose_project son solo para proyectos de Docker")
+			return errors.New("compose_file y compose_project: son solo para proyectos de Docker")
 		case len(p.Units) == 0:
-			return errors.New("un proyecto de systemd necesita al menos un servicio en units")
+			return errors.New("units: un proyecto de systemd necesita al menos un servicio")
 		case len(p.Units) > MaxProjectUnits:
-			return fmt.Errorf("trae %d servicios en units y el máximo es %d", len(p.Units), MaxProjectUnits)
+			return fmt.Errorf("units: trae %d servicios y el máximo es %d", len(p.Units), MaxProjectUnits)
 		}
 		seen := make(map[string]bool, len(p.Units))
 		for _, unit := range p.Units {
 			if !validName(unit, MaxRuntimeNameLen, isUnitRune) || !strings.HasSuffix(unit, ".service") || unit == ".service" {
-				return fmt.Errorf("servicio inválido %q en units", unit)
+				return errors.New("units: cada una tiene que ser un servicio válido (terminado en .service)")
 			}
 			if seen[unit] {
-				return fmt.Errorf("el servicio %s está repetido en units", unit)
+				return errors.New("units: hay un servicio repetido")
 			}
 			seen[unit] = true
 		}
 	default:
-		return fmt.Errorf("runtime desconocido %q: docker o systemd", p.Runtime)
+		return errors.New("runtime: tiene que ser docker o systemd")
 	}
 
 	if p.Healthcheck != nil {
@@ -214,10 +218,10 @@ func (h HealthcheckSpec) Validate() error {
 		return err
 	}
 	if h.ExpectStatus < 100 || h.ExpectStatus > 599 {
-		return fmt.Errorf("expect_status fuera de rango: %d", h.ExpectStatus)
+		return errors.New("expect_status: tiene que estar entre 100 y 599")
 	}
 	if h.TimeoutSeconds < minHealthTimeoutSec || h.TimeoutSeconds > maxHealthTimeoutSec {
-		return fmt.Errorf("timeout_seconds tiene que estar entre %d y %d: %d", minHealthTimeoutSec, maxHealthTimeoutSec, h.TimeoutSeconds)
+		return fmt.Errorf("timeout_seconds: tiene que estar entre %d y %d", minHealthTimeoutSec, maxHealthTimeoutSec)
 	}
 	return nil
 }
@@ -335,21 +339,21 @@ func validRelativePath(p string) bool {
 
 func validHealthURL(raw string) error {
 	if raw == "" || len(raw) > maxURLLen || !isPrintable(raw) || strings.ContainsAny(raw, " \t") {
-		return fmt.Errorf("URL inválida %q", raw)
+		return errors.New("url: vacía, demasiado larga o con espacios")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("URL inválida %q: %w", raw, err)
+		return errors.New("url: no se puede leer")
 	}
 	switch {
 	case u.Scheme != "http" && u.Scheme != "https":
-		return fmt.Errorf("la URL %q tiene que ser http o https", raw)
+		return errors.New("url: tiene que ser http o https")
 	case u.Host == "" || u.Hostname() == "":
-		return fmt.Errorf("la URL %q no tiene servidor", raw)
+		return errors.New("url: no tiene servidor")
 	case u.User != nil:
-		return errors.New("la URL no puede llevar usuario ni contraseña")
+		return errors.New("url: no puede llevar usuario ni contraseña")
 	case u.Fragment != "":
-		return fmt.Errorf("la URL %q no puede llevar fragmento", raw)
+		return errors.New("url: no puede llevar fragmento")
 	}
 	return nil
 }

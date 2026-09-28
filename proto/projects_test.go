@@ -206,3 +206,35 @@ func TestProjectsStateAckValidate(t *testing.T) {
 		t.Errorf("un acuse válido no pasó: %v", err)
 	}
 }
+
+// Los errores de un proyecto viajan al control plane como explicación de un
+// archivo inválido: nombran el campo, nunca el valor (ADR-012).
+func TestProjectErrorsNeverIncludeTheValue(t *testing.T) {
+	const secret = "s3cr3t0"
+	mutations := map[string]func(*proto.Project){
+		"name":         func(p *proto.Project) { p.Name = "X" + secret },
+		"environment":  func(p *proto.Project) { p.Environment = secret },
+		"repo":         func(p *proto.Project) { p.Repo = "github.com/x " + secret },
+		"branch":       func(p *proto.Project) { p.Branch = secret + ".." },
+		"workdir":      func(p *proto.Project) { p.Workdir = "srv/" + secret },
+		"compose_file": func(p *proto.Project) { p.ComposeFile = "../" + secret },
+		"runtime":      func(p *proto.Project) { p.Runtime = secret },
+		"url": func(p *proto.Project) {
+			p.Healthcheck.URL = "https://juan:" + secret + "@example.com/health"
+		},
+		"url ftp": func(p *proto.Project) { p.Healthcheck.URL = "ftp://" + secret + "/x" },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			project := dockerProject()
+			mutate(&project)
+			err := project.Validate()
+			if err == nil {
+				t.Fatal("se aceptó un valor inválido")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("el error muestra el valor: %v", err)
+			}
+		})
+	}
+}
