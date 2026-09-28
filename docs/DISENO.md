@@ -471,8 +471,9 @@ Servidor
 
 Panel
 
-- [ ] Secciones de contenedores, servicios y procesos en la vista de un servidor, en vivo, con
-      listas largas virtualizadas.
+- [x] Secciones de contenedores, servicios y procesos en la vista de un servidor, en vivo, con lo que
+      tiene problemas primero y los contenedores detenidos escondidos hasta que se piden. Sin
+      virtualizar: con los topes del contrato (200 y 300) una lista común alcanza y no suma dependencias.
 - [ ] Pedido de logs por unidad, con los últimos N renglones.
 
 Logs a demanda

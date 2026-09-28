@@ -5,11 +5,13 @@ import { Link, useSearchParams } from 'wouter'
 import { Chart } from '@/components/chart'
 import { LiveIndicator } from '@/components/live-indicator'
 import { RangePicker } from '@/components/range-picker'
+import { RuntimeSections } from '@/components/runtime-sections'
 import { StatusBadge } from '@/components/status-badge'
 import { UsageBar } from '@/components/usage-bar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useLiveSamples } from '@/hooks/use-live-samples'
 import { useServerMetrics } from '@/hooks/use-server-metrics'
+import { useServerRuntime } from '@/hooks/use-server-runtime'
 import { useServers } from '@/hooks/use-servers'
 import type { ServerMetrics } from '@/lib/api'
 import { bytes, load, percent, perSecond, ratio, since } from '@/lib/format'
@@ -43,6 +45,7 @@ export function ServerPage({ id }: { id: string }) {
   const list = useServers()
   const metrics = useServerMetrics(id, range)
   const live = useLiveSamples(id)
+  const runtime = useServerRuntime(id)
 
   const server = list.data?.find((candidate) => candidate.id === id)
 
@@ -158,6 +161,11 @@ export function ServerPage({ id }: { id: string }) {
             ))}
           </CardContent>
         </Card>
+      )}
+
+      {runtime.data !== undefined && <RuntimeSections runtime={runtime.data} />}
+      {runtime.error !== null && (
+        <Message title="No se pudo traer lo que corre en el servidor" description={runtime.error.message} />
       )}
 
       <Charts series={series} loading={metrics.isPending} stale={metrics.isPlaceholderData} />
