@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-09-24
+Última actualización: 2026-09-28
 
 ## Visión y alcance
 
@@ -106,17 +106,17 @@ Catorce entidades cubren el MVP. Las métricas crudas y agregadas viven particio
 | `servers` | Nombre, host, estado, versión del agent, último contacto, etiquetas. | Un registro por VPS enrolado. |
 | `agent_credentials` | Hash de credencial por agent, fecha de emisión y revocación. | Se guarda solo el hash. |
 | `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
-| `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno. | Nace del `project.yaml` declarado. |
+| `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno, y el último resultado del healthcheck. | Nace del `project.yaml` que el agent lee en su servidor; el control plane no lo puede crear ni cambiar ([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)). |
 | `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
 | `runtime_units` | Último estado conocido de cada contenedor, servicio y proceso no gestionado de un servidor: nombre, estado, consumo y cuándo se lo vio. `runtime_sources` guarda si cada fuente (Docker, systemd, procesos) se pudo leer, y `servers.runtime_taken_at` la marca de la última foto. | Se reemplaza con cada `runtime_state`; no guarda historia. |
 | `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
 | `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU, iowait, memoria y swap, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
-| `metrics_1h` | Agregado por hora, con mínimo, promedio y máximo. | Retención 1 año. |
+| `metrics_1h` | Agregado por hora desde `metrics_1m`: mínimo y promedio de los promedios por minuto, y máximo de los máximos. También con `metrics_1h_disks` y `metrics_1h_networks`. | Partición mensual, retención 1 año. |
 | `audit_log` | Actor, tipo de actor (persona o LLM), acción, objetivo, resultado, IP. | Solo inserciones. |
 
 **Tablas de acceso**
 
-- `users`: cuenta del panel con hash de contraseña (argon2id). El TOTP llega en el Sprint 3.
+- `users`: cuenta del panel con hash de contraseña (argon2id) y secreto TOTP cifrado; los códigos de recuperación van en `user_recovery_codes`, como hash ([ADR-013](adr/ADR-013-segundo-factor-totp.md)).
 - `sessions`: sesión del panel, guardada como hash del token que viaja en la cookie; vence a las 24 h sin uso o a los 7 días ([ADR-010](adr/ADR-010-usuarios-y-sesiones-del-panel.md)).
 - `api_tokens`: token del MCP con hash, scopes por proyecto y entorno, y vencimiento.
 - `approvals`: solicitud de aprobación humana con el deploy asociado, quién aprobó y cuándo.
@@ -153,6 +153,7 @@ El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Desp
 | --- | --- | --- | --- |
 | Agent → servidor | `metrics` | Lote de muestras de CPU, RAM, disco, red y carga. | Cada 5 a 10 s |
 | Agent → servidor | `runtime_state` | Foto completa de contenedores, servicios y procesos no gestionados, con su estado y consumo. | Al cambiar algo, y cada tanto con el consumo al día |
+| Agent → servidor | `projects_state` | Proyectos declarados en el servidor, los archivos inválidos (sin su contenido) y el resultado del healthcheck. | Al cambiar algo, y cada 5 minutos |
 | Agent → servidor | `deploy_event` | Avance y resultado de un deploy. | Por evento |
 | Agent → servidor | `heartbeat` | Vivo y versión. | Cada 15 s |
 | Servidor → agent | `command` | Operación predefinida con parámetros validados. | A demanda |
@@ -325,24 +326,32 @@ status-sv/
 
 **Formato del `project.yaml`**
 
+Cada proyecto es un archivo en `/etc/status-sv/projects.d/<nombre>.yaml`, en el mismo servidor
+donde corre. Lo escribe una persona por SSH y el agent solo lo lee
+([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)).
+
 ```yaml
-name: cristales-baez
-server: vps-01
-environment: production
+name: cristales-baez       # igual al nombre del archivo
+environment: production    # production | staging
 repo: github.com/extendsystem/cristales-baez
 branch: main
 runtime: docker            # docker | systemd
 compose_file: docker-compose.yml
+compose_project: cristales-baez   # opcional; si falta, el nombre del directorio de workdir
 workdir: /srv/cristales-baez
 healthcheck:
   url: https://cristales.example.com/health
   expect_status: 200
-  timeout_seconds: 30
+  timeout_seconds: 10      # de 1 a 30
 deploy:
-  pre: []                  # comandos permitidos declarados por vos
+  pre: []                  # vacío hasta que el Sprint 4 defina los pasos declarados
   post: []
 rollback: previous_image
 ```
+
+Un proyecto de systemd lleva `runtime: systemd` y, en vez de `compose_file` y `compose_project`,
+la lista de sus servicios en `units` (por ejemplo `[gunicorn-cristales.service]`). El campo `server`
+ya no existe: el servidor es el que tiene el archivo.
 
 El ejemplo usa datos ilustrativos; los valores reales los definís vos por proyecto.
 
@@ -371,9 +380,9 @@ El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, 
 
 Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
 
-## Sprint 0, Sprint 1 y Sprint 2
+## Sprints 0 a 3
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo) y el Sprint 2 suma lo que corre adentro: contenedores, servicios y procesos.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos) y el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -500,6 +509,54 @@ durante y después, y nginx no se tocó.
 
 Si el sprint se estira, la línea de corte son los logs a demanda (el canal de comandos y su vista),
 que se mueven al Sprint 3 sin romper nada de lo anterior.
+
+**Sprint 3 (2 semanas): proyectos y cierre de la Fase 1**
+
+Objetivo: ver cada proyecto declarado con sus contenedores o servicios y su healthcheck, en dos
+servidores reales, con historia de un año y el panel protegido con TOTP. Las decisiones que lo
+abrían las tomó Juan el 2026-09-28: [ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)
+(dónde viven los proyectos, cómo se ligan y el healthcheck), [ADR-013](adr/ADR-013-segundo-factor-totp.md)
+(TOTP) y mover el control plane a un VPS propio en este sprint, como pide
+[ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md) antes del segundo servidor y de la
+escritura del Sprint 4.
+
+Métricas
+
+- [ ] Tablas `metrics_1h`, `metrics_1h_disks` y `metrics_1h_networks`, con partición mensual y un año
+      de retención. La ingesta recalcula la hora que toca cada lote a partir de `metrics_1m`, en la
+      misma transacción, como el minuto ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)).
+      La migración carga la hora de lo que ya hay por minuto.
+- [ ] La API sirve la resolución `1h` y el panel suma los rangos de 30 días, 90 días y 1 año.
+
+Acceso
+
+- [ ] TOTP en el servidor: login en dos pasos, alta con confirmación, códigos de recuperación,
+      secreto cifrado con la clave en un archivo, y `server user-totp-reset` por SSH.
+- [ ] Pantallas del panel para el código, el alta con QR y los códigos de recuperación.
+
+Proyectos
+
+- [ ] Mensajes `projects_state` y `projects_state_ack` en `proto/`, con topes y archivos golden.
+- [ ] Parser estricto de `project.yaml` en el agent (`agent/internal/projectspec`).
+- [ ] El agent lee `/etc/status-sv/projects.d`, revisa cada 30 s si cambió y manda solo si cambió.
+- [ ] Tabla `projects` y persistencia por servidor en una transacción; el ligado con `runtime_units`
+      se calcula al leer.
+- [ ] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
+      y el cambio empujado por el WebSocket del panel.
+- [ ] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
+- [ ] Healthcheck pasivo desde el agent cada 60 s. **Línea de corte**: si el sprint se estira, pasa
+      al Sprint 4.
+
+Calidad y despliegue
+
+- [ ] Lighthouse y latencia métrica → pantalla medidas en CI: son las dos metas de la Fase 1 que
+      faltaba verificar.
+- [ ] Control plane en un VPS propio con Caddy, los dos agents apuntando ahí, y un ADR que reemplaza
+      a ADR-007. Incluye desplegar #41 (migración 00005).
+
+Terminado cuando dos VPS reales se ven en vivo en el panel, cada uno con al menos un proyecto ligado
+a sus contenedores o servicios; los rangos de 30 días y un año se dibujan desde `metrics_1h`; el
+login exige TOTP; se cumplen todas las metas de la Fase 1, y el CI está verde.
 
 **Sprints siguientes (resumen)**
 
