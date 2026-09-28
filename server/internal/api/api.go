@@ -39,6 +39,7 @@ type Server struct {
 	enrollLimiter *ipLimiter
 	ingester      *metrics.Ingester
 	runtime       *runstate.Ingester
+	pending       *pendingCommands
 	users         *users.Service
 	panels        *panelHub
 	counters      *counterCache
@@ -57,6 +58,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 		ingester:      metrics.NewIngester(pool),
 		runtime:       runstate.NewIngester(pool),
+		pending:       newPendingCommands(),
 		users:         users.NewService(pool, log),
 		panels:        newPanelHub(),
 		counters:      newCounterCache(),
@@ -78,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	crossOrigin := http.NewCrossOriginProtection()
 	mux.Handle("POST /v1/auth/login", crossOrigin.Handler(http.HandlerFunc(s.handleLogin)))
 	mux.Handle("POST /v1/auth/logout", crossOrigin.Handler(http.HandlerFunc(s.handleLogout)))
+	mux.Handle("POST /v1/servers/{id}/logs", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleServerLogs))))
 	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
 	mux.Handle("GET /v1/servers", s.requireSession(http.HandlerFunc(s.handleListServers)))
 	mux.Handle("GET /v1/servers/{id}/metrics", s.requireSession(http.HandlerFunc(s.handleServerMetrics)))

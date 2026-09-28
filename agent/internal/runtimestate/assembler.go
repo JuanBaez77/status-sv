@@ -12,6 +12,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/cgroups"
@@ -50,6 +51,11 @@ type Assembler struct {
 	log     *slog.Logger
 	now     func() time.Time
 	last    time.Time
+
+	// known son los contenedores y servicios de la última foto. Lo consulta
+	// el ejecutor de comandos desde otra goroutine, así que va con candado.
+	knownMu sync.Mutex
+	known   map[string]bool
 }
 
 // NewAssembler arma el ensamblador. cores es la cantidad de núcleos de la
@@ -121,7 +127,30 @@ func (a *Assembler) Snapshot(ctx context.Context) proto.RuntimeState {
 
 	capLists(&state)
 	fit(&state)
+	a.remember(state)
 	return state
+}
+
+// Knows dice si el contenedor (por ID) o el servicio (por unidad) estaba en la
+// última foto. Es lo que usa el ejecutor de comandos para no operar sobre algo
+// que el agent no ve (regla 2).
+func (a *Assembler) Knows(kind proto.LogKind, target string) bool {
+	a.knownMu.Lock()
+	defer a.knownMu.Unlock()
+	return a.known[string(kind)+"/"+target]
+}
+
+func (a *Assembler) remember(s proto.RuntimeState) {
+	known := make(map[string]bool, len(s.Containers)+len(s.Services))
+	for _, c := range s.Containers {
+		known[string(proto.LogContainer)+"/"+c.ID] = true
+	}
+	for _, svc := range s.Services {
+		known[string(proto.LogService)+"/"+svc.Unit] = true
+	}
+	a.knownMu.Lock()
+	a.known = known
+	a.knownMu.Unlock()
 }
 
 // takenAt es la marca de la foto: al milisegundo, como las muestras, y siempre

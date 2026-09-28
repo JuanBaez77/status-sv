@@ -48,6 +48,9 @@ type fakeControlPlane struct {
 	// contestarles, igual que con las métricas.
 	runtimeStates []proto.RuntimeState
 	runtimeMode   metricsMode
+
+	// acks recibe las respuestas del agent a los comandos.
+	acks chan proto.CommandAck
 }
 
 type metricsMode int
@@ -102,6 +105,17 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 
 		envelope, err := proto.ParseEnvelope(raw)
 		if err != nil {
+			continue
+		}
+		if envelope.Type == proto.TypeCommandAck {
+			if ack, err := proto.Decode[proto.CommandAck](envelope); err == nil {
+				f.mu.Lock()
+				acks := f.acks
+				f.mu.Unlock()
+				if acks != nil {
+					acks <- ack
+				}
+			}
 			continue
 		}
 		if envelope.Type == proto.TypeRuntimeState {

@@ -55,6 +55,9 @@ type Client struct {
 	// runtime es la bandeja de las fotos de runtime. Es opcional: sin ella el
 	// canal no manda fotos (la prueba de carga, por ejemplo).
 	runtime *runtimestate.Outbox
+	// commands ejecuta los comandos del control plane. Es opcional: sin él,
+	// todo comando se rechaza.
+	commands commandHandler
 
 	sampler *selfstat.Sampler
 	backoff *Backoff
@@ -420,6 +423,10 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 		switch envelope.Type {
 		case proto.TypeHeartbeatAck:
 			c.handleHeartbeatAck(ctx, envelope)
+		case proto.TypeCommand:
+			// El comando corre aparte: la lectura del canal no puede quedar
+			// esperando a que termine.
+			go c.handleCommand(ctx, conn, envelope)
 		case proto.TypeRuntimeStateAck:
 			c.handleRuntimeAck(ctx, envelope)
 		case proto.TypeMetricsAck:

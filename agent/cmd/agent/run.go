@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"flag"
-	"log/slog"
 	goruntime "runtime"
 	"sync"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/collector"
+	"github.com/JuanBaez77/status-sv/agent/internal/commands"
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
+	"github.com/JuanBaez77/status-sv/agent/internal/journal"
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
 	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
@@ -61,18 +62,14 @@ func runAgent(ctx context.Context, args []string) error {
 	if goruntime.GOOS == "linux" {
 		outbox := runtimestate.NewOutbox()
 		client.SetRuntime(outbox)
-		runner := newRuntimeRunner(cfg, outbox, log)
+		parts := newRuntimeParts(cfg, log)
+		// Los comandos solo operan sobre lo que el agent vio en su última foto.
+		client.SetCommands(commands.NewExecutor(parts.dockerClient, journal.NewReader(), parts.assembler.Knows, log))
+		runner := runtimestate.NewRunner(parts.assembler, outbox, log, parts.dockerSource, parts.systemdSource)
 		wg.Go(func() { runner.Run(ctx) })
 	}
 
 	err = client.Run(ctx)
 	wg.Wait()
 	return err
-}
-
-// newRuntimeRunner arma el Runner del estado de runtime sobre el sistema de
-// verdad. Docker y systemd además avisan cuando algo cambia.
-func newRuntimeRunner(cfg config.Config, outbox *runtimestate.Outbox, log *slog.Logger) *runtimestate.Runner {
-	assembler, dockerSource, systemdSource := newAssembler(cfg, log)
-	return runtimestate.NewRunner(assembler, outbox, log, dockerSource, systemdSource)
 }

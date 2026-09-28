@@ -59,6 +59,13 @@ func TestGoldenEnvelopes(t *testing.T) {
 		{name: "metrics_ack", msg: proto.MetricsAck{Accepted: 1, LastTS: goldenTS}},
 		{name: "runtime_state", msg: validRuntimeState()},
 		{name: "runtime_state_ack", msg: proto.RuntimeStateAck{TakenAt: goldenTS}},
+		{name: "command", msg: proto.Command{Operation: proto.OpGetLogs, GetLogs: &proto.GetLogsParams{Kind: proto.LogService, Target: "nginx.service", Lines: 200}}},
+		{
+			name: "command_ack",
+			msg: proto.CommandAck{CommandID: goldenID, Status: proto.CommandOK, Logs: &proto.LogsResult{Lines: []proto.LogLine{
+				{TS: goldenTS, Stream: "stderr", Text: "2026/09/20 12:00:00 [error] conexión rechazada"},
+			}}},
+		},
 		{name: "error", msg: proto.NewError(proto.CodeInvalidToken, "el token no existe o ya se usó", goldenID)},
 	}
 
@@ -130,6 +137,8 @@ func TestEveryMessageTypeIsAccepted(t *testing.T) {
 		proto.MetricsAck{},
 		proto.RuntimeState{},
 		proto.RuntimeStateAck{},
+		proto.Command{},
+		proto.CommandAck{},
 		proto.ErrorMessage{},
 	}
 

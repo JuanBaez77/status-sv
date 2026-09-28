@@ -29,6 +29,7 @@ const (
 	TypeHeartbeat    MessageType = "heartbeat"
 	TypeMetrics      MessageType = "metrics"
 	TypeRuntimeState MessageType = "runtime_state"
+	TypeCommandAck   MessageType = "command_ack"
 )
 
 // Mensajes del control plane hacia el agent.
@@ -37,6 +38,7 @@ const (
 	TypeHeartbeatAck    MessageType = "heartbeat_ack"
 	TypeMetricsAck      MessageType = "metrics_ack"
 	TypeRuntimeStateAck MessageType = "runtime_state_ack"
+	TypeCommand         MessageType = "command"
 	TypeError           MessageType = "error"
 )
 
@@ -59,6 +61,8 @@ var knownTypes = map[MessageType]bool{
 	TypeMetricsAck:      true,
 	TypeRuntimeState:    true,
 	TypeRuntimeStateAck: true,
+	TypeCommand:         true,
+	TypeCommandAck:      true,
 	TypeError:           true,
 }
 

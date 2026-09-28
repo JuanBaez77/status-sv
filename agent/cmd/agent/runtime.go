@@ -44,20 +44,33 @@ func runRuntime(ctx context.Context, args []string) error {
 	}
 	// Los avisos de las fuentes van a stderr, para que stdout sea JSON válido.
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	assembler, _, systemdSource := newAssembler(cfg, log)
-	defer systemdSource.Close()
-	return printRuntime(ctx, assembler, *interval, os.Stdout)
+	parts := newRuntimeParts(cfg, log)
+	defer parts.systemdSource.Close()
+	return printRuntime(ctx, parts.assembler, *interval, os.Stdout)
 }
 
-// newAssembler arma el ensamblador sobre el sistema de verdad. Lo comparten
-// run y este subcomando, así ven exactamente lo mismo.
-func newAssembler(cfg config.Config, log *slog.Logger) (*runtimestate.Assembler, *docker.Source, *systemd.Source) {
+// runtimeParts son las piezas del estado de runtime sobre el sistema de
+// verdad. Las comparten run y este subcomando, así ven exactamente lo mismo.
+type runtimeParts struct {
+	assembler     *runtimestate.Assembler
+	dockerClient  *docker.Client
+	dockerSource  *docker.Source
+	systemdSource *systemd.Source
+}
+
+func newRuntimeParts(cfg config.Config, log *slog.Logger) runtimeParts {
 	cores := goruntime.NumCPU()
-	dockerSource := docker.NewSource(docker.NewClient(cfg.DockerSocket), log)
+	dockerClient := docker.NewClient(cfg.DockerSocket)
+	dockerSource := docker.NewSource(dockerClient, log)
 	systemdSource := systemd.NewSource(log, append(slices.Clone(systemd.DefaultExclude), cfg.SystemdExclude...))
 	scanner := procs.NewScanner(os.DirFS("/proc"), os.DirFS("/etc"), cores, os.Getpagesize())
 	reader := cgroups.NewReader(os.DirFS(cgroups.Root))
-	return runtimestate.NewAssembler(dockerSource, systemdSource, scanner, reader, cores, log), dockerSource, systemdSource
+	return runtimeParts{
+		assembler:     runtimestate.NewAssembler(dockerSource, systemdSource, scanner, reader, cores, log),
+		dockerClient:  dockerClient,
+		dockerSource:  dockerSource,
+		systemdSource: systemdSource,
+	}
 }
 
 // printRuntime toma dos fotos, para que la segunda traiga el consumo, e

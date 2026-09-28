@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "type": "command",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "operation": "get_logs",
+    "get_logs": {
+      "kind": "service",
+      "target": "nginx.service",
+      "lines": 200
+    }
+  }
+}

@@ -256,6 +256,29 @@ export type ServerRuntime = {
   processes: RuntimeProcess[]
 }
 
+export type LogKind = 'container' | 'service'
+
+/** LogLine es un renglón de log, con los secretos ya enmascarados por el agent. */
+export type LogLine = {
+  ts?: string
+  stream?: 'stdout' | 'stderr'
+  text: string
+}
+
+/**
+ * ServerLogs es la respuesta del agent a un pedido de logs. Un pedido que el
+ * agent rechazó o que falló viene con status distinto de ok y el motivo, no
+ * como error de HTTP.
+ */
+export type ServerLogs = {
+  status: 'ok' | 'rejected' | 'failed'
+  code?: string
+  message?: string
+  lines: LogLine[]
+  /** truncated dice que se dejaron afuera los renglones más viejos para que entraran. */
+  truncated: boolean
+}
+
 export const servers = {
   list: () => api.get<{ servers: ServerSummary[] }>('/v1/servers').then((body) => body.servers),
 
@@ -263,6 +286,9 @@ export const servers = {
     const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })
     return api.get<ServerMetrics>(`/v1/servers/${encodeURIComponent(id)}/metrics?${query}`)
   },
+
+  logs: (id: string, kind: LogKind, target: string, lines: number) =>
+    api.post<ServerLogs>(`/v1/servers/${encodeURIComponent(id)}/logs`, { kind, target, lines }),
 
   runtime: (id: string) => {
     return api.get<ServerRuntime>(`/v1/servers/${encodeURIComponent(id)}/runtime`)
