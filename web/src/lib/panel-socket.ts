@@ -30,11 +30,17 @@ export type LiveRuntime = {
   runtime: ServerRuntime
 }
 
+/** LiveProjects avisa que cambiaron los proyectos declarados de un servidor: no los trae. */
+export type LiveProjects = {
+  server_id: string
+}
+
 /** PanelStatus dice si lo que se ve es de ahora. */
 export type PanelStatus = 'connecting' | 'live' | 'reconnecting'
 
 type SampleListener = (sample: LiveSample) => void
 type RuntimeListener = (runtime: LiveRuntime) => void
+type ProjectsListener = (projects: LiveProjects) => void
 type StatusListener = (status: PanelStatus) => void
 
 /**
@@ -52,6 +58,7 @@ export class PanelSocket {
   #status: PanelStatus = 'connecting'
   #listeners = new Map<string, Set<SampleListener>>()
   #runtimeListeners = new Map<string, Set<RuntimeListener>>()
+  #projectsListeners = new Map<string, Set<ProjectsListener>>()
   /**
    * #refs cuenta cuántos oyentes tiene cada servidor, de cualquier tipo: la
    * suscripción al control plane es por servidor y trae muestras y fotos.
@@ -81,6 +88,14 @@ export class PanelSocket {
     return this.#add(this.#runtimeListeners, serverID, listener)
   }
 
+  /**
+   * subscribeProjects avisa cuando cambian los proyectos declarados de un
+   * servidor y devuelve cómo darse de baja.
+   */
+  subscribeProjects(serverID: string, listener: ProjectsListener): () => void {
+    return this.#add(this.#projectsListeners, serverID, listener)
+  }
+
   /** getStatus y onStatus son el par que espera useSyncExternalStore. */
   getStatus = (): PanelStatus => this.#status
 
@@ -97,6 +112,7 @@ export class PanelSocket {
     }
     this.#listeners.clear()
     this.#runtimeListeners.clear()
+    this.#projectsListeners.clear()
     this.#refs.clear()
     this.#attempt = 0
     this.#setStatus('connecting')
@@ -169,6 +185,11 @@ export class PanelSocket {
       case 'runtime': {
         const runtime = message as LiveRuntime
         this.#runtimeListeners.get(runtime.server_id)?.forEach((listener) => listener(runtime))
+        break
+      }
+      case 'projects': {
+        const projects = message as LiveProjects
+        this.#projectsListeners.get(projects.server_id)?.forEach((listener) => listener(projects))
         break
       }
       case 'error':

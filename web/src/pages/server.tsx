@@ -11,6 +11,7 @@ import { UsageBar } from '@/components/usage-bar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useLiveSamples } from '@/hooks/use-live-samples'
 import { useServerMetrics } from '@/hooks/use-server-metrics'
+import { useProjects } from '@/hooks/use-projects'
 import { useServerRuntime } from '@/hooks/use-server-runtime'
 import { useServers } from '@/hooks/use-servers'
 import type { Resolution, ServerMetrics } from '@/lib/api'
@@ -26,6 +27,7 @@ import {
   networkChart,
 } from '@/lib/series'
 import { cn } from '@/lib/utils'
+import { ProjectCard } from '@/components/project-card'
 
 /**
  * ServerPage es la vista de un servidor: los números de ahora arriba y los
@@ -160,6 +162,8 @@ export function ServerPage({ id }: { id: string }) {
           </CardContent>
         </Card>
       )}
+
+      <ServerProjects serverID={id} />
 
       {runtime.data !== undefined && <RuntimeSections runtime={runtime.data} />}
       {runtime.error !== null && (
@@ -324,5 +328,29 @@ function BackLink() {
       <ArrowLeft className="size-3" aria-hidden />
       Servidores
     </Link>
+  )
+}
+
+/**
+ * ServerProjects son los proyectos declarados en este servidor. No se muestra
+ * nada si no hay: la mayoría de los servidores todavía no tiene.
+ */
+function ServerProjects({ serverID }: { serverID: string }) {
+  const { data } = useProjects()
+  const mine = data?.projects.filter((p) => p.server_id === serverID) ?? []
+  if (mine.length === 0) return null
+  return (
+    <section aria-labelledby="server-projects" className="flex flex-col gap-2">
+      <h2 id="server-projects" className="text-sm font-medium">
+        Proyectos
+      </h2>
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {mine.map((p) => (
+          <li key={p.id}>
+            <ProjectCard project={p} />
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

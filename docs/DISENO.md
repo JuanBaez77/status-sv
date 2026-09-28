@@ -545,7 +545,7 @@ Proyectos
       se calcula al leer.
 - [x] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
       y el cambio empujado por el WebSocket del panel.
-- [ ] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
+- [x] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
 - [ ] Healthcheck pasivo desde el agent cada 60 s. **Línea de corte**: si el sprint se estira, pasa
       al Sprint 4.
 
