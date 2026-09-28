@@ -24,8 +24,9 @@ const (
 
 // channelLimits son los límites de frecuencia de un canal de agent.
 type channelLimits struct {
-	metrics *rate.Limiter
-	runtime *rate.Limiter
+	metrics  *rate.Limiter
+	runtime  *rate.Limiter
+	projects *rate.Limiter
 }
 
 // handleRuntimeState guarda una foto de runtime y le contesta al agent:

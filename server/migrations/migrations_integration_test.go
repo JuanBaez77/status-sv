@@ -11,7 +11,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // driver database/sql para goose
 	"github.com/pressly/goose/v3"
 
-	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/testdb"
 	"github.com/JuanBaez77/status-sv/server/migrations"
 )
@@ -36,10 +35,11 @@ func TestHourlyMigrationBackfillsExistingMinutes(t *testing.T) {
 		t.Fatalf("volver a la migración 5: %v", err)
 	}
 
+	// Con SQL propio y no con store: las consultas generadas siguen el esquema
+	// de la última migración, y acá la base está en la 5.
 	serverID := uuid.Must(uuid.NewV7())
-	if _, err := store.New(pool).CreateServer(ctx, store.CreateServerParams{
-		ID: serverID, Name: "vps-backfill", Hostname: "vps", Labels: []byte(`{}`), AgentVersion: "0.1.0",
-	}); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO servers (id, name, hostname, labels, agent_version)
+		VALUES ($1, 'vps-backfill', 'vps', '{}', '0.1.0')`, serverID); err != nil {
 		t.Fatalf("crear el servidor: %v", err)
 	}
 	noon := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
