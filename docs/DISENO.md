@@ -451,7 +451,7 @@ Agent
       stream de eventos (sin los `exec_*` de los healthchecks), que reabre solo si se corta.
 - [x] Servicios de systemd por D-Bus de solo lectura: lo que corre, lo que falló y lo habilitado que
       está parado, sin los oneshot que ya terminaron ni una lista de exclusión (`systemd-*`, `user@*`, `dbus`).
-- [ ] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
+- [x] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
       ninguno), los 20 más pesados por memoria y CPU, solo lectura.
 - [x] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current` sin la caché inactiva, como
       `docker stats`), sin preguntarle a ningún demonio.
@@ -476,7 +476,8 @@ Logs a demanda
 
 - [ ] Canal de comandos mínimo (`command` / `command_ack`) con ID, acuse e idempotencia, y una sola
       operación permitida: `get_logs`.
-- [ ] Filtro de enmascarado de secretos **en el agent**: lo que sale del VPS ya está enmascarado.
+- [x] Filtro de enmascarado de secretos **en el agent**: lo que sale del VPS ya está enmascarado. Se
+      adelantó al PR de procesos, porque la línea de comando de un proceso ya puede traer una contraseña.
 
 Terminado cuando un VPS real muestra sus contenedores, servicios y procesos en vivo en el panel, se
 pueden pedir los logs de una unidad con los secretos enmascarados, el agent sigue por debajo de
