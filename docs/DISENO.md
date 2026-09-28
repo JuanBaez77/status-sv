@@ -449,8 +449,8 @@ Agent
       por el grupo `systemd-journal`; endurecimiento de la unidad revisado en el laboratorio local.
 - [x] Cliente propio mínimo del socket de Docker: lista de contenedores, estado, healthcheck y el
       stream de eventos (sin los `exec_*` de los healthchecks), que reabre solo si se corta.
-- [ ] Servicios de systemd por D-Bus de solo lectura: todos los `.service` cargados menos una lista
-      de exclusión configurable (`systemd-*`, `user@*`, `dbus`).
+- [x] Servicios de systemd por D-Bus de solo lectura: lo que corre, lo que falló y lo habilitado que
+      está parado, sin los oneshot que ya terminaron ni una lista de exclusión (`systemd-*`, `user@*`, `dbus`).
 - [ ] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
       ninguno), los 20 más pesados por memoria y CPU, solo lectura.
 - [x] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current` sin la caché inactiva, como

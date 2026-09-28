@@ -164,6 +164,23 @@ func (s RuntimeSource) Validate() error {
 	return nil
 }
 
+// SourceFailed arma el estado de una fuente que existe pero no se pudo leer,
+// con el error recortado para que entre en el contrato: sin caracteres de
+// control y dentro de MaxSourceDetailLen, sin cortar un carácter por la mitad.
+// Un error largo o raro no puede hacer rechazar la foto entera.
+func SourceFailed(err error) RuntimeSource {
+	msg := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(err.Error(), "?"))
+	if len(msg) > MaxSourceDetailLen {
+		msg = strings.ToValidUTF8(msg[:MaxSourceDetailLen], "")
+	}
+	return RuntimeSource{Status: SourceError, Detail: msg}
+}
+
 // RuntimeSources es el resultado de cada una de las tres fuentes.
 type RuntimeSources struct {
 	Docker    RuntimeSource `json:"docker"`

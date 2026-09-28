@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -195,25 +194,8 @@ func SourceFromError(err error) proto.RuntimeSource {
 			Detail: "el agent no tiene permiso para el socket de Docker: falta el drop-in del grupo docker (ver el runbook)",
 		}
 	default:
-		return proto.RuntimeSource{Status: proto.SourceError, Detail: sourceDetail(err)}
+		return proto.SourceFailed(err)
 	}
-}
-
-// sourceDetail recorta un error para que entre en el contrato: sin caracteres
-// de control y dentro del largo máximo.
-func sourceDetail(err error) string {
-	msg := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, err.Error())
-	if len(msg) > proto.MaxSourceDetailLen {
-		msg = msg[:proto.MaxSourceDetailLen]
-		// No cortar un carácter de varios bytes por la mitad.
-		msg = strings.ToValidUTF8(msg, "")
-	}
-	return msg
 }
 
 // containerName devuelve el nombre del contenedor sin la barra inicial que le
