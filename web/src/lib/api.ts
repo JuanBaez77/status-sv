@@ -113,18 +113,21 @@ export type ServerSummary = {
 }
 
 /** Resolution es el detalle con el que vienen las series. */
-export type Resolution = 'raw' | '1m'
+export type Resolution = 'raw' | '1m' | '1h'
 
 /**
  * SamplePoint es un punto de la serie de una muestra.
  *
  * En resolución `1m` los campos `*_max` son el pico del minuto y el resto es el
- * promedio; en `raw` los dos son el mismo valor, el de la muestra.
+ * promedio; en `raw` los dos son el mismo valor, el de la muestra. En `1h` es
+ * igual que en `1m`, y además llegan los `*_min` de CPU y memoria: el promedio
+ * por minuto más bajo de la hora.
  */
 export type SamplePoint = {
   ts: string
   cpu_used_percent: number
   cpu_used_max_percent: number
+  cpu_used_min_percent?: number
   cpu_iowait_percent: number
   cpu_iowait_max_percent: number
   cpu_steal_percent: number
@@ -132,6 +135,7 @@ export type SamplePoint = {
   mem_total_bytes: number
   mem_used_bytes: number
   mem_used_max_bytes: number
+  mem_used_min_bytes?: number
   swap_total_bytes: number
   swap_used_bytes: number
   swap_used_max_bytes: number

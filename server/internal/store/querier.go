@@ -114,6 +114,9 @@ type Querier interface {
 	// filas eran nuevas.
 	InsertRawSamples(ctx context.Context, arg InsertRawSamplesParams) (int64, error)
 	ListCredentialsForServer(ctx context.Context, serverID uuid.UUID) ([]AgentCredential, error)
+	ListHourDisks(ctx context.Context, arg ListHourDisksParams) ([]ListHourDisksRow, error)
+	ListHourNetworks(ctx context.Context, arg ListHourNetworksParams) ([]ListHourNetworksRow, error)
+	ListHourSamples(ctx context.Context, arg ListHourSamplesParams) ([]ListHourSamplesRow, error)
 	// Consultas del panel. El estado (online, offline) no se guarda: sale de
 	// last_seen_at al consultar, como define docs/DISENO.md.
 	// ListLatestSamples devuelve la última muestra de cada servidor que mandó algo
