@@ -7,7 +7,9 @@
 package docker
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -104,6 +109,11 @@ type Inspection struct {
 			Status string `json:"Status"`
 		} `json:"Health"`
 	} `json:"State"`
+	// Config.Tty dice si el contenedor tiene terminal, que cambia el formato
+	// de sus logs.
+	Config struct {
+		Tty bool `json:"Tty"`
+	} `json:"Config"`
 }
 
 // Inspect devuelve los detalles de un contenedor.
@@ -234,4 +244,121 @@ func shortID(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// LogLine es un renglón de log de un contenedor, con su marca de tiempo y el
+// stream del que salió.
+type LogLine struct {
+	TS     time.Time
+	Stream string
+	Text   string
+}
+
+// maxLogBytes acota lo que se lee de un pedido de logs: mil renglones largos
+// entran de sobra, y un contenedor que escribe renglones enormes no puede
+// hacer que el agent se coma la memoria.
+const maxLogBytes = 4 << 20
+
+// Logs trae los últimos renglones del log de un contenedor, del más viejo al
+// más nuevo. tty dice si el contenedor tiene terminal: sin terminal, Docker
+// multiplexa stdout y stderr con un encabezado de 8 bytes por bloque; con
+// terminal manda el texto tal cual.
+func (c *Client) Logs(ctx context.Context, id string, lines int, tty bool) ([]LogLine, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	query := url.Values{
+		"stdout":     {"1"},
+		"stderr":     {"1"},
+		"timestamps": {"1"},
+		"tail":       {strconv.Itoa(lines)},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.base+"/containers/"+url.PathEscape(id)+"/logs?"+query.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("armar el pedido de logs: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("pedir los logs de %s: %w", shortID(id), err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return nil, fmt.Errorf("pedir los logs de %s: %w", shortID(id), err)
+	}
+
+	body := io.LimitReader(resp.Body, maxLogBytes)
+	if tty {
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("leer los logs de %s: %w", shortID(id), err)
+		}
+		return splitLogLines(raw, "stdout", nil), nil
+	}
+	return demuxLogs(body)
+}
+
+// demuxLogs separa el stream multiplexado de Docker: cada bloque empieza con
+// [stream, 0, 0, 0, largo en 4 bytes big-endian] y trae ese largo de texto.
+// Un renglón puede quedar partido entre dos bloques, así que se junta por
+// stream antes de cortar en renglones.
+func demuxLogs(r io.Reader) ([]LogLine, error) {
+	var lines []LogLine
+	pending := map[string][]byte{}
+	header := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(r, header); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			return nil, fmt.Errorf("leer los logs: %w", err)
+		}
+		stream := "stdout"
+		if header[0] == 2 {
+			stream = "stderr"
+		}
+		size := binary.BigEndian.Uint32(header[4:])
+		chunk := make([]byte, size)
+		if _, err := io.ReadFull(r, chunk); err != nil {
+			// Se cortó en el medio (el tope de bytes): lo que se leyó entero sirve.
+			break
+		}
+		lines = append(lines, splitLogLines(append(pending[stream], chunk...), stream, func(rest []byte) {
+			pending[stream] = rest
+		})...)
+	}
+	for stream, rest := range pending {
+		if len(rest) > 0 {
+			lines = append(lines, splitLogLines(append(rest, '\n'), stream, nil)...)
+		}
+	}
+	slices.SortStableFunc(lines, func(a, b LogLine) int { return a.TS.Compare(b.TS) })
+	return lines, nil
+}
+
+// splitLogLines corta en renglones y separa la marca de tiempo que Docker pone
+// adelante con timestamps=1. Si rest no es nil, lo que quedó sin fin de
+// renglón se le pasa para juntarlo con el bloque siguiente; si es nil, se
+// descarta.
+func splitLogLines(data []byte, stream string, rest func([]byte)) []LogLine {
+	var lines []LogLine
+	for {
+		i := bytes.IndexByte(data, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimSuffix(string(data[:i]), "\r")
+		data = data[i+1:]
+		ts, text, ok := strings.Cut(line, " ")
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if !ok || err != nil {
+			lines = append(lines, LogLine{Stream: stream, Text: line})
+			continue
+		}
+		lines = append(lines, LogLine{TS: t.UTC(), Stream: stream, Text: text})
+	}
+	if rest != nil {
+		rest(bytes.Clone(data))
+	}
+	return lines
 }

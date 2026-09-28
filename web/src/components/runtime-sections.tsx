@@ -1,8 +1,10 @@
 import { AlertTriangle, Info } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 
+import { LogsButton, LogsPanel } from '@/components/logs-panel'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type {
+  LogKind,
   RuntimeContainer,
   RuntimeProcess,
   RuntimeService,
@@ -74,7 +76,7 @@ function ContainersCard({ runtime }: { runtime: ServerRuntime }) {
       {visible.length > 0 && (
         <ul className="divide-y divide-border">
           {visible.map((c) => (
-            <ContainerRow key={c.id} container={c} />
+            <ContainerRow key={c.id} serverID={runtime.server_id} container={c} />
           ))}
         </ul>
       )}
@@ -93,7 +95,7 @@ function ContainersCard({ runtime }: { runtime: ServerRuntime }) {
   )
 }
 
-function ContainerRow({ container: c }: { container: RuntimeContainer }) {
+function ContainerRow({ serverID, container: c }: { serverID: string; container: RuntimeContainer }) {
   const project = c.compose_project && `${c.compose_project}${c.compose_service ? ` / ${c.compose_service}` : ''}`
   return (
     <Row
@@ -101,6 +103,7 @@ function ContainerRow({ container: c }: { container: RuntimeContainer }) {
       status={containerStatus(c)}
       usage={c.usage}
       details={[c.image, project, c.started_at && `arrancó ${since(c.started_at)}`]}
+      logs={{ serverID, kind: 'container', target: c.id }}
     />
   )
 }
@@ -118,7 +121,7 @@ function ServicesCard({ runtime }: { runtime: ServerRuntime }) {
       {sorted.length > 0 && (
         <ul className="divide-y divide-border">
           {sorted.map((s) => (
-            <ServiceRow key={s.unit} service={s} />
+            <ServiceRow key={s.unit} serverID={runtime.server_id} service={s} />
           ))}
         </ul>
       )}
@@ -126,7 +129,7 @@ function ServicesCard({ runtime }: { runtime: ServerRuntime }) {
   )
 }
 
-function ServiceRow({ service: s }: { service: RuntimeService }) {
+function ServiceRow({ serverID, service: s }: { serverID: string; service: RuntimeService }) {
   return (
     <Row
       title={s.unit.replace(/\.service$/, '')}
@@ -137,6 +140,7 @@ function ServiceRow({ service: s }: { service: RuntimeService }) {
         s.main_pid > 0 && `PID ${s.main_pid}`,
         s.active_since && `activo ${since(s.active_since)}`,
       ]}
+      logs={{ serverID, kind: 'service', target: s.unit }}
     />
   )
 }
@@ -252,14 +256,19 @@ function Row({
   usage,
   details,
   command,
+  logs,
 }: {
   title: string
   status?: UnitStatus
   usage: RuntimeUsage | null
   details: (string | false | null | undefined | '')[]
   command?: string
+  /** logs dice de dónde pedir los logs de la unidad; sin él no hay botón. */
+  logs?: { serverID: string; kind: LogKind; target: string }
 }) {
   const shown = details.filter((d): d is string => typeof d === 'string' && d !== '')
+  const [logsOpen, setLogsOpen] = useState(false)
+  const logsID = useId()
   return (
     <li className="flex min-w-0 flex-col gap-0.5 py-2 first:pt-0 last:pb-0">
       <div className="flex items-baseline justify-between gap-3">
@@ -278,11 +287,22 @@ function Row({
           </span>
         )}
         {shown.length > 0 && <span className="min-w-0 truncate">{shown.join(' · ')}</span>}
+        {logs !== undefined && (
+          <LogsButton
+            open={logsOpen}
+            onToggle={() => setLogsOpen((value) => !value)}
+            name={title}
+            controls={logsID}
+          />
+        )}
       </div>
       {command !== undefined && command !== '' && (
         <code className="block max-w-full truncate font-mono text-[11px] text-muted-foreground" title={command}>
           {command}
         </code>
+      )}
+      {logs !== undefined && logsOpen && (
+        <LogsPanel id={logsID} serverID={logs.serverID} kind={logs.kind} target={logs.target} />
       )}
     </li>
   )

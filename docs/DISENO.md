@@ -474,12 +474,13 @@ Panel
 - [x] Secciones de contenedores, servicios y procesos en la vista de un servidor, en vivo, con lo que
       tiene problemas primero y los contenedores detenidos escondidos hasta que se piden. Sin
       virtualizar: con los topes del contrato (200 y 300) una lista común alcanza y no suma dependencias.
-- [ ] Pedido de logs por unidad, con los últimos N renglones.
+- [x] Pedido de logs por unidad desde el panel, con los últimos 200 renglones (`POST /v1/servers/{id}/logs`).
 
 Logs a demanda
 
-- [ ] Canal de comandos mínimo (`command` / `command_ack`) con ID, acuse e idempotencia, y una sola
-      operación permitida: `get_logs`.
+- [x] Canal de comandos mínimo (`command` / `command_ack`) con ID, acuse e idempotencia, y una sola
+      operación permitida: `get_logs`, solo sobre lo que el agent vio en su última foto. Una respuesta
+      solo vale si llega por el canal del agent al que se le mandó el comando.
 - [x] Filtro de enmascarado de secretos **en el agent**: lo que sale del VPS ya está enmascarado. Se
       adelantó al PR de procesos, porque la línea de comando de un proceso ya puede traer una contraseña.
 

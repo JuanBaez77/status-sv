@@ -143,6 +143,10 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, s
 	case proto.TypeMetrics:
 		return s.handleMetrics(ctx, conn, server, limits.metrics, envelope)
 
+	case proto.TypeCommandAck:
+		s.handleCommandAck(ctx, server, envelope)
+		return nil
+
 	case proto.TypeRuntimeState:
 		return s.handleRuntimeState(ctx, conn, server, limits.runtime, envelope)
 

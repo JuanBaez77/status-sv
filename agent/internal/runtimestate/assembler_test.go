@@ -258,3 +258,24 @@ func TestFitShrinksOversizedSnapshots(t *testing.T) {
 		t.Errorf("recortadas %d, contadas %d", before-after, s.Omitted.Services+s.Omitted.Containers)
 	}
 }
+
+// Knows es lo que usa el ejecutor de comandos: solo lo de la última foto.
+func TestKnowsWhatWasInTheLastSnapshot(t *testing.T) {
+	f := newFixture()
+	if f.a.Knows(proto.LogContainer, containerID(1)) {
+		t.Fatal("antes de la primera foto no conoce nada")
+	}
+	f.a.Snapshot(context.Background())
+	if !f.a.Knows(proto.LogContainer, containerID(1)) || !f.a.Knows(proto.LogService, "nginx.service") {
+		t.Error("tiene que conocer lo de la foto")
+	}
+	if f.a.Knows(proto.LogContainer, containerID(99)) || f.a.Knows(proto.LogService, "otro.service") {
+		t.Error("no tiene que conocer lo que no estaba")
+	}
+
+	f.docker.containers = nil
+	f.a.Snapshot(context.Background())
+	if f.a.Knows(proto.LogContainer, containerID(1)) {
+		t.Error("lo que desapareció de la foto deja de conocerse")
+	}
+}

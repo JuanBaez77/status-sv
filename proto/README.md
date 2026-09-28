@@ -38,6 +38,8 @@ El formato es JSON con un envelope versionado; el porqué está en
 | `metrics_ack` | Servidor → agent | Respuesta al anterior | Cuántas muestras se guardaron y la marca de tiempo de la última |
 | `runtime_state` | Agent → servidor | Al cambiar algo, y cada tanto con el consumo al día | Foto completa de contenedores, servicios y procesos no gestionados |
 | `runtime_state_ack` | Servidor → agent | Respuesta al anterior | La marca de tiempo de la foto que se guardó |
+| `command` | Servidor → agent | A demanda | Una operación de la lista cerrada, con sus parámetros tipados |
+| `command_ack` | Agent → servidor | Respuesta al anterior | Cómo terminó el comando y su resultado |
 | `error` | Servidor → agent | Ante un rechazo | Código de una lista cerrada, texto para el log y el ID del mensaje rechazado |
 
 La credencial de `enroll_ack` viaja **una sola vez**: el control plane guarda solo su hash y el
@@ -111,6 +113,36 @@ como argumento no deja el servidor. Además viene recortada y sin caracteres de 
 es `MaxMessageBytes`: una foto no se puede partir. Un servidor con todos los topes al máximo y
 nombres de largo realista ocupa unos 155 KB, así que en la práctica entra siempre. Si alguna vez no
 entrara, el agent deja afuera lo menos importante y lo cuenta en `omitted`.
+
+## Comandos: una lista cerrada
+
+`command` le pide al agent una **operación de una lista cerrada** (regla 2 del proyecto). No
+existe una operación que ejecute texto libre: cada una lleva sus parámetros en su propio campo,
+tipados y validados. En el Sprint 2 la lista tiene una sola, de lectura:
+
+| Operación | Parámetros | Qué hace |
+| --- | --- | --- |
+| `get_logs` | `kind` (`container` o `service`), `target` (ID completo del contenedor o nombre de la unidad) y `lines` (1 a 1000) | Los últimos renglones del log, del más viejo al más nuevo |
+
+El ID del envelope es el ID del comando. El agent lo usa para no ejecutar dos veces un comando
+repetido (devuelve la misma respuesta) y lo devuelve en `command_ack.command_id`.
+
+**Lo que además revisa el agent**, aunque el comando pase el contrato:
+
+- **Que el objetivo exista en su última foto de runtime.** Un contenedor o servicio con un nombre
+  válido pero que el agent no ve se rechaza con `unknown_target`.
+- **Que no haya más de dos comandos corriendo.** Si los hay, contesta `busy` y el control plane
+  reintenta más tarde.
+
+**La respuesta**, `command_ack`, trae el estado (`ok`, `rejected` o `failed`), un código de una lista
+cerrada si no terminó bien (`unknown_operation`, `invalid_params`, `unknown_target`, `busy`,
+`unavailable`, `timeout`, `internal`) y, si terminó bien, el resultado. Los renglones de log salen del
+agent **sin secuencias de escape de terminal, con los secretos enmascarados y recién después
+recortados** a 2048 bytes (ADR-011). Si mil renglones no entran en un mensaje, se dejan afuera los
+más viejos y se marca `truncated`.
+
+Las operaciones largas de las fases siguientes (un deploy) van a contestar igual al terminar, e
+informar su avance aparte con `deploy_event`.
 
 ## Reglas de versionado
 

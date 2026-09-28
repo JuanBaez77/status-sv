@@ -2,7 +2,7 @@ import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ServerMetrics, ServerRuntime, ServerSummary } from '@/lib/api'
+import type { ServerLogs, ServerMetrics, ServerRuntime, ServerSummary } from '@/lib/api'
 import { panelSocket } from '@/lib/panel-socket'
 import { ServerPage } from '@/pages/server'
 import { json, renderWithQuery, stubFetch } from '@/test/render'
@@ -167,7 +167,7 @@ function runtime(overrides: Partial<ServerRuntime> = {}): ServerRuntime {
 
 /** answer responde la lista, las métricas y lo que corre, y guarda las consultas de rango. */
 function answer(
-  options: { servers?: ServerSummary[]; metrics?: ServerMetrics; runtime?: ServerRuntime } = {},
+  options: { servers?: ServerSummary[]; metrics?: ServerMetrics; runtime?: ServerRuntime; logs?: ServerLogs } = {},
 ) {
   const asked: URL[] = []
   const calls = stubFetch((path) => {
@@ -176,6 +176,18 @@ function answer(
     }
     if (path.endsWith('/runtime')) {
       return json(options.runtime ?? runtime())
+    }
+    if (path.endsWith('/logs')) {
+      return json(
+        options.logs ?? {
+          status: 'ok',
+          truncated: false,
+          lines: [
+            { ts: '2026-09-23T12:00:00Z', stream: 'stdout', text: 'escuchando en :8000' },
+            { ts: '2026-09-23T12:00:01Z', stream: 'stderr', text: 'conexión a postgres://app:***@db rechazada' },
+          ],
+        },
+      )
     }
     asked.push(new URL(path, 'http://panel.test'))
     return json(options.metrics ?? series())
@@ -330,6 +342,31 @@ describe('ServerPage', () => {
     renderWithQuery(<ServerPage id={id} />)
 
     expect(await screen.findByText(/todavía no mandó lo que corre/)).toBeInTheDocument()
+  })
+
+  it('trae los logs de un contenedor al abrirlos', async () => {
+    const { calls } = answer()
+
+    renderWithQuery(<ServerPage id={id} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ver los logs de cristales-web-1' }))
+
+    expect(await screen.findByText('escuchando en :8000')).toBeInTheDocument()
+    const error = screen.getByText('conexión a postgres://app:***@db rechazada')
+    expect(error.closest('li')).toHaveClass('text-destructive')
+    expect(screen.getByText('Últimos 2 renglones')).toBeInTheDocument()
+
+    const pedido = calls.find((call) => call.path.endsWith('/logs'))
+    expect(pedido?.init?.method).toBe('POST')
+    expect(JSON.parse(String(pedido?.init?.body))).toEqual({ kind: 'container', target: 'a'.repeat(64), lines: 200 })
+  })
+
+  it('explica por qué el agent no trajo los logs', async () => {
+    answer({ logs: { status: 'rejected', code: 'busy', lines: [], truncated: false } })
+
+    renderWithQuery(<ServerPage id={id} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ver los logs de nginx' }))
+
+    expect(await screen.findByText(/El agent está atendiendo otros pedidos/)).toBeInTheDocument()
   })
 
   it('avisa si el servidor no existe', async () => {

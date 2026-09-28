@@ -43,6 +43,13 @@ func (h *hub) remove(serverID uuid.UUID, conn *websocket.Conn) {
 	}
 }
 
+// get devuelve la conexión de un servidor, o nil si su agent no está conectado.
+func (h *hub) get(serverID uuid.UUID) *websocket.Conn {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.conns[serverID]
+}
+
 // count devuelve cuántos agents hay conectados.
 func (h *hub) count() int {
 	h.mu.Lock()
