@@ -313,3 +313,19 @@ func manyProcesses(n int) []proto.Process {
 	}
 	return processes
 }
+
+// Un error largo, con saltos de línea y bytes inválidos, se convierte en una
+// fuente que igual pasa el contrato: la foto no se rechaza por un mensaje raro.
+func TestSourceFailedFitsTheContract(t *testing.T) {
+	err := fmt.Errorf("%s\xff%s", strings.Repeat("línea\n", 100), "fin")
+	src := proto.SourceFailed(err)
+	if src.Status != proto.SourceError {
+		t.Errorf("estado: %q", src.Status)
+	}
+	if len(src.Detail) > proto.MaxSourceDetailLen {
+		t.Errorf("la explicación ocupa %d bytes", len(src.Detail))
+	}
+	if err := src.Validate(); err != nil {
+		t.Errorf("no pasa el contrato: %v", err)
+	}
+}

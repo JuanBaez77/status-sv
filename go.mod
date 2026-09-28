@@ -4,6 +4,8 @@ go 1.27.0
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/coreos/go-systemd/v22 v22.7.0
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
