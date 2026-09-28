@@ -447,8 +447,8 @@ Agent
 
 - [x] Acceso a Docker por el grupo `docker`, en un drop-in que escribe el instalador, y al diario
       por el grupo `systemd-journal`; endurecimiento de la unidad revisado en el laboratorio local.
-- [ ] Cliente propio mínimo del socket de Docker: lista de contenedores, estado, healthcheck y el
-      stream de eventos con un respiro de 1 s para juntar ráfagas.
+- [x] Cliente propio mínimo del socket de Docker: lista de contenedores, estado, healthcheck y el
+      stream de eventos (sin los `exec_*` de los healthchecks), que reabre solo si se corta.
 - [ ] Servicios de systemd por D-Bus de solo lectura: todos los `.service` cargados menos una lista
       de exclusión configurable (`systemd-*`, `user@*`, `dbus`).
 - [ ] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
