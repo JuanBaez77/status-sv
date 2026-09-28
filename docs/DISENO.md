@@ -453,7 +453,8 @@ Agent
       de exclusión configurable (`systemd-*`, `user@*`, `dbus`).
 - [ ] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
       ninguno), los 20 más pesados por memoria y CPU, solo lectura.
-- [ ] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current`), sin `docker stats`.
+- [x] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current` sin la caché inactiva, como
+      `docker stats`), sin preguntarle a ningún demonio.
 - [ ] Un solo estado de runtime armado con los tres adaptadores, enviado **solo cuando cambia**, con
       un refresco cada 5 minutos para sanar, acuse y reenvío como las métricas.
 
