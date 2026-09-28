@@ -182,11 +182,89 @@ export type ServerMetrics = {
   networks: NetworkSeries[]
 }
 
+/** RuntimeUsage falta (null) cuando no hay medición, que no es lo mismo que cero. */
+export type RuntimeUsage = {
+  cpu_percent: number
+  memory_bytes: number
+}
+
+/**
+ * RuntimeSource dice si el agent pudo leer una fuente. Con `error`, lo que se
+ * muestra de esa fuente es lo último que se supo.
+ */
+export type RuntimeSource = {
+  status: 'ok' | 'unavailable' | 'error'
+  detail?: string
+  /** omitted son las unidades que no entraron en la foto por los topes. */
+  omitted: number
+  taken_at: string
+}
+
+export type RuntimeContainer = {
+  id: string
+  name: string
+  image: string
+  state: 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead' | 'unknown'
+  /** health vacío es un contenedor sin healthcheck. */
+  health: '' | 'starting' | 'healthy' | 'unhealthy'
+  started_at: string | null
+  compose_project: string
+  compose_service: string
+  usage: RuntimeUsage | null
+  seen_at: string
+}
+
+export type RuntimeService = {
+  unit: string
+  load_state: string
+  active_state:
+    | 'active'
+    | 'reloading'
+    | 'inactive'
+    | 'failed'
+    | 'activating'
+    | 'deactivating'
+    | 'maintenance'
+    | 'refreshing'
+    | 'unknown'
+  sub_state: string
+  main_pid: number
+  active_since: string | null
+  usage: RuntimeUsage | null
+  seen_at: string
+}
+
+export type RuntimeProcess = {
+  pid: number
+  name: string
+  /** command ya viene con los secretos enmascarados desde el agent. */
+  command: string
+  user: string
+  started_at: string | null
+  usage: RuntimeUsage | null
+  seen_at: string
+}
+
+/** ServerRuntime es lo que corre en un servidor: la misma forma por la API y por el canal en vivo. */
+export type ServerRuntime = {
+  server_id: string
+  /** taken_at es null si el agent todavía no mandó ninguna foto. */
+  taken_at: string | null
+  sources: Partial<Record<'docker' | 'systemd' | 'processes', RuntimeSource>>
+  containers: RuntimeContainer[]
+  services: RuntimeService[]
+  processes: RuntimeProcess[]
+}
+
 export const servers = {
   list: () => api.get<{ servers: ServerSummary[] }>('/v1/servers').then((body) => body.servers),
 
   metrics: (id: string, from: Date, to: Date) => {
     const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })
     return api.get<ServerMetrics>(`/v1/servers/${encodeURIComponent(id)}/metrics?${query}`)
+  },
+
+  runtime: (id: string) => {
+    return api.get<ServerRuntime>(`/v1/servers/${encodeURIComponent(id)}/runtime`)
   },
 }
