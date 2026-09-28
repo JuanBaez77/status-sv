@@ -61,16 +61,20 @@ func (s *simulated) enroll(ctx context.Context, log *slog.Logger) error {
 			return nil
 		}
 
+		// Se reintenta el límite de frecuencia y también un corte de conexión:
+		// con diez enrolamientos seguidos, el cliente HTTP puede reusar una
+		// conexión que el control plane acaba de cerrar, y un POST no se
+		// reintenta solo. Un rechazo definitivo (token inválido) no se reintenta.
 		var rejected *ws.ErrEnrollRejected
-		retryable := errors.As(err, &rejected) && rejected.Retryable()
+		isRejection := errors.As(err, &rejected)
 		switch {
 		case ctx.Err() != nil:
 			return fmt.Errorf("%s: enrolar: se acabó el tiempo: %w", s.name, err)
-		case !retryable:
+		case isRejection && !rejected.Retryable():
 			return fmt.Errorf("%s: enrolar: %w", s.name, err)
 		}
 
-		log.DebugContext(ctx, "esperando turno para enrolar", "simulado", s.name, "motivo", rejected.Code)
+		log.DebugContext(ctx, "esperando turno para enrolar", "simulado", s.name, "motivo", err)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("%s: enrolar: se acabó el tiempo: %w", s.name, err)
