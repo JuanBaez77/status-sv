@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-09-21
+Última actualización: 2026-09-24
 
 ## Visión y alcance
 
@@ -99,7 +99,7 @@ Tu stack fuerte hoy es Python, así que las primeras semanas van a ser de curva.
 
 ## Modelo de datos
 
-Doce entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
+Trece entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
 
 | Tabla | Contenido | Notas |
 | --- | --- | --- |
@@ -108,6 +108,7 @@ Doce entidades cubren el MVP. Las métricas crudas y agregadas viven particionad
 | `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
 | `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno. | Nace del `project.yaml` declarado. |
 | `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
+| `runtime_units` | Último estado conocido de cada contenedor, servicio y proceso no gestionado de un servidor: nombre, estado, consumo y cuándo se lo vio. | Se reemplaza con cada `runtime_state`; no guarda historia. |
 | `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
 | `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU, iowait, memoria y swap, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
 | `metrics_1h` | Agregado por hora, con mínimo, promedio y máximo. | Retención 1 año. |
@@ -370,9 +371,9 @@ El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, 
 
 Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
 
-## Sprint 0 y Sprint 1
+## Sprint 0, Sprint 1 y Sprint 2
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, y el Sprint 1 entrega la primera vista útil: las métricas de un servidor en vivo.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo) y el Sprint 2 suma lo que corre adentro: contenedores, servicios y procesos.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -436,11 +437,57 @@ La prueba de carga con diez agents simulados da 20 MB para el control plane. Que
 Cloudflare Access delante del panel (lo configura Juan) y la meta de Lighthouse, que solo tiene
 sentido medir contra el despliegue con compresión.
 
+**Sprint 2 (2 semanas): Docker, systemd y procesos**
+
+Objetivo: ver los contenedores, los servicios y los procesos no gestionados de un servidor, en
+vivo, y poder pedir sus logs desde el panel. Las seis decisiones que lo abrían las tomó Juan el
+2026-09-24 y están en [ADR-011](adr/ADR-011-acceso-a-docker-y-journald.md).
+
+Agent
+
+- [ ] Acceso a Docker por el grupo `docker`, en un drop-in que escribe el instalador, y al diario
+      por el grupo `systemd-journal`; endurecimiento de la unidad revisado en el laboratorio local.
+- [ ] Cliente propio mínimo del socket de Docker: lista de contenedores, estado, healthcheck y el
+      stream de eventos con un respiro de 1 s para juntar ráfagas.
+- [ ] Servicios de systemd por D-Bus de solo lectura: todos los `.service` cargados menos una lista
+      de exclusión configurable (`systemd-*`, `user@*`, `dbus`).
+- [ ] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
+      ninguno), los 20 más pesados por memoria y CPU, solo lectura.
+- [ ] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current`), sin `docker stats`.
+- [ ] Un solo estado de runtime armado con los tres adaptadores, enviado **solo cuando cambia**, con
+      un refresco cada 5 minutos para sanar, acuse y reenvío como las métricas.
+
+Servidor
+
+- [ ] Mensajes `runtime_state` y `runtime_state_ack` en `proto/`, con topes por tipo (200
+      contenedores, 300 servicios, 20 procesos) y archivos golden.
+- [ ] Tabla `runtime_units` con upsert y borrado de lo que ya no está, en la transacción del lote.
+- [ ] `GET /v1/servers/{id}/runtime` detrás de la sesión, y el estado nuevo empujado por el
+      WebSocket del panel a quien esté suscripto.
+
+Panel
+
+- [ ] Secciones de contenedores, servicios y procesos en la vista de un servidor, en vivo, con
+      listas largas virtualizadas.
+- [ ] Pedido de logs por unidad, con los últimos N renglones.
+
+Logs a demanda
+
+- [ ] Canal de comandos mínimo (`command` / `command_ack`) con ID, acuse e idempotencia, y una sola
+      operación permitida: `get_logs`.
+- [ ] Filtro de enmascarado de secretos **en el agent**: lo que sale del VPS ya está enmascarado.
+
+Terminado cuando un VPS real muestra sus contenedores, servicios y procesos en vivo en el panel, se
+pueden pedir los logs de una unidad con los secretos enmascarados, el agent sigue por debajo de
+30 MB de RAM y 1% de CPU con Docker prendido, y el CI está verde.
+
+Si el sprint se estira, la línea de corte son los logs a demanda (el canal de comandos y su vista),
+que se mueven al Sprint 3 sin romper nada de lo anterior.
+
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |
 | --- | --- | --- |
-| 2 | Docker y systemd en el agent | Contenedores y servicios con estado, consumo y logs; procesos no gestionados en solo lectura. |
 | 3 | Proyectos y cierre de la Fase 1 | Lectura de `project.yaml`, vista de proyectos, agregado por hora, TOTP y segundo servidor en vivo. |
 | 4 | Deploy Docker | `deploy` con pull, build, healthcheck y rollback automático. |
 | 5 | Deploy systemd y auditoría | Deploy de gunicorn, historial de deploys y `audit_log`. |

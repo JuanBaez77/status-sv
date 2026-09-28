@@ -39,3 +39,4 @@ Qué más se evaluó y por qué se descartó.
 | [008](ADR-008-tablas-de-metricas.md) | Tablas de métricas, con discos e interfaces aparte, y particiones que maneja el control plane | aceptada |
 | [009](ADR-009-agregado-por-minuto-en-la-ingesta.md) | El agregado por minuto se recalcula en la ingesta, no en un job | aceptada |
 | [010](ADR-010-usuarios-y-sesiones-del-panel.md) | Usuarios del panel con argon2id y sesiones en la base | aceptada |
+| [011](ADR-011-acceso-a-docker-y-journald.md) | Cómo el agent observa Docker y systemd | aceptada |

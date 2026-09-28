@@ -21,6 +21,8 @@ readonly BINARY_DEST="/usr/local/bin/statussv-agent"
 readonly UNIT_DEST="/etc/systemd/system/${SERVICE}.service"
 readonly STATE_DIR="/var/lib/status-sv"
 readonly STATE_FILE="${STATE_DIR}/agent.json"
+readonly DROPIN_DIR="/etc/systemd/system/${SERVICE}.service.d"
+readonly DROPIN_DOCKER="${DROPIN_DIR}/10-docker.conf"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_DIR
@@ -95,6 +97,32 @@ install -o root -g root -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0700 "${STATE_DIR}"
 echo "${BINARY_DEST}"
 echo "${UNIT_DEST}"
+
+# --- Acceso a Docker ---
+
+# Para ver los contenedores, el agent necesita el socket de Docker, y al socket
+# se llega por el grupo docker. Va como drop-in y no en la unidad porque un
+# servidor sin Docker no tiene ese grupo, y systemd no arranca un servicio cuyo
+# grupo suplementario no existe. El grupo docker equivale a root: el porqué de
+# aceptarlo está en docs/adr/ADR-011-acceso-a-docker-y-journald.md.
+paso "acceso a Docker"
+if getent group docker >/dev/null; then
+  install -d -o root -g root -m 0755 "${DROPIN_DIR}"
+  install -o root -g root -m 0644 /dev/null "${DROPIN_DOCKER}"
+  cat > "${DROPIN_DOCKER}" <<'DROPIN'
+# Lo escribe deploy/install-agent.sh; no editar a mano.
+# El agent entra al grupo docker para leer /run/docker.sock (ADR-011).
+[Service]
+SupplementaryGroups=docker
+DROPIN
+  echo "el agent entra al grupo docker"
+else
+  # Si Docker se desinstaló, hay que sacar el drop-in o el servicio no arranca.
+  rm -f "${DROPIN_DOCKER}"
+  echo "este servidor no tiene el grupo docker: el agent no va a ver contenedores"
+  echo "si instalás Docker después, corré este script de nuevo"
+fi
+
 systemctl daemon-reload
 
 # --- Enrolamiento ---

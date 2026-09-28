@@ -32,6 +32,9 @@ roadmap de [DISENO.md](DISENO.md).
 - Aprobaciones por enlace firmado desde el celular, además del panel.
 - TimescaleDB, si el particionado nativo deja de alcanzar (ver [adr/ADR-001-go-y-postgresql.md](adr/ADR-001-go-y-postgresql.md)).
 - Protobuf para los mensajes de métricas, si el volumen lo justifica (ver [adr/ADR-003-contratos-json-versionado.md](adr/ADR-003-contratos-json-versionado.md)).
+- Historia del consumo por contenedor y por servicio (hoy el panel muestra solo el valor actual);
+  serían tablas de métricas propias, particionadas, como las del servidor (decisión del Sprint 2, ver
+  [adr/ADR-011-acceso-a-docker-y-journald.md](adr/ADR-011-acceso-a-docker-y-journald.md)).
 
 ## Deuda que deja el despliegue del Sprint 0
 
@@ -39,10 +42,6 @@ roadmap de [DISENO.md](DISENO.md).
   `git archive`, y el binario del agent se compila en la máquina de quien despliega. Lo correcto es
   que el CI publique las imágenes en un registro (GHCR) y los binarios del agent firmados, con
   checksum. El diseño ya lo pide para la Fase 4 (actualizaciones firmadas del agent).
-- **Agent y Docker (Sprint 2).** Para leer contenedores, el agent va a necesitar el socket de
-  Docker, que equivale a root. Habrá que decidir entre sumarlo al grupo `docker` o usar un proxy
-  del socket de solo lectura, y revisar el endurecimiento de la unidad de systemd, que hoy le
-  cierra casi todo.
 - **Revocar agents desde el panel.** Hoy se revoca con una sentencia SQL a mano (ver el runbook).
 - **Backups de PostgreSQL** del control plane, con un restore probado. Está en los riesgos del diseño.
 - **Mover el control plane a un VPS propio.** Hoy vive en el servidor de un cliente
