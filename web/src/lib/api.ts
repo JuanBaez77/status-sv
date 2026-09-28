@@ -66,17 +66,42 @@ export const api = {
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
 }
 
-/** Session es quién está en sesión y hasta cuándo. */
+/**
+ * SessionStage es el paso del login (ADR-013). Solo `full` ve el panel: con la
+ * contraseña se llega a `totp_pending` (falta el código de la app) o a
+ * `totp_enroll` (falta dar de alta el segundo factor).
+ */
+export type SessionStage = 'full' | 'totp_pending' | 'totp_enroll'
+
+/** Session es quién está en sesión, hasta cuándo y en qué paso del login. */
 export type Session = {
   username: string
   expires_at: string
+  stage: SessionStage
+  /** recovery_codes_left llega solo con la sesión completa. */
+  recovery_codes_left?: number
 }
+
+/** TotpEnrollment es lo que se carga en la app de autenticación. */
+export type TotpEnrollment = {
+  secret: string
+  otpauth_uri: string
+  /** qr_png es la imagen del QR como data URL. */
+  qr_png: string
+}
+
+/** TotpConfirmation trae los códigos de recuperación, que se ven una sola vez. */
+export type TotpConfirmation = Session & { recovery_codes: string[] }
 
 export const auth = {
   me: () => api.get<Session>('/v1/auth/me'),
   login: (username: string, password: string) =>
     api.post<Session>('/v1/auth/login', { username, password }),
   logout: () => api.post<void>('/v1/auth/logout'),
+  totpEnroll: () => api.post<TotpEnrollment>('/v1/auth/totp/enroll'),
+  totpConfirm: (code: string) => api.post<TotpConfirmation>('/v1/auth/totp/confirm', { code }),
+  totpVerify: (input: { code: string } | { recovery_code: string }) =>
+    api.post<Session>('/v1/auth/totp/verify', input),
 }
 
 /** ServerStatus es lo que devuelve la API, derivado del último latido. */

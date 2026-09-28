@@ -6,8 +6,12 @@ import { useSession } from '@/hooks/use-session'
 import { LoginPage } from '@/pages/login'
 import { ServerPage } from '@/pages/server'
 import { ServersPage } from '@/pages/servers'
+import { TotpEnrollPage, TotpVerifyPage } from '@/pages/totp'
 
-/** App decide qué se ve: mientras no haya sesión, solo el login. */
+/**
+ * App decide qué se ve: mientras no haya sesión, solo el login; con la sesión
+ * a medias, el segundo factor; con la completa, el panel.
+ */
 export default function App() {
   const { session, loading, unreachable } = useSession()
 
@@ -30,6 +34,14 @@ export default function App() {
 
   if (!session) {
     return <LoginPage />
+  }
+
+  // Con la contraseña sola la sesión queda a medias: falta el segundo factor.
+  if (session.stage === 'totp_pending') {
+    return <TotpVerifyPage session={session} />
+  }
+  if (session.stage !== 'full') {
+    return <TotpEnrollPage session={session} />
   }
 
   return (

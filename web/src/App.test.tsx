@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '@/App'
 import { apiError, json, renderWithQuery, stubFetch } from '@/test/render'
 
-const session = { username: 'juan', expires_at: '2026-09-29T12:00:00Z' }
+const session = {
+  username: 'juan',
+  expires_at: '2026-09-29T12:00:00Z',
+  stage: 'full',
+  recovery_codes_left: 10,
+}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -31,6 +36,30 @@ describe('App', () => {
     expect(await screen.findByText('Todavía no hay servidores')).toBeInTheDocument()
   })
 
+  it('con la sesión a medias pide el código y no muestra nada del panel', async () => {
+    const calls = stubFetch(() =>
+      json({ ...session, stage: 'totp_pending', recovery_codes_left: undefined }),
+    )
+
+    renderWithQuery(<App />)
+
+    expect(await screen.findByLabelText('Código')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /salir/i })).not.toBeInTheDocument()
+    expect(calls.map((call) => call.path)).not.toContain('/v1/servers')
+  })
+
+  it('avisa cuando quedan pocos códigos de recuperación', async () => {
+    stubFetch((path) =>
+      path === '/v1/servers' ? json({ servers: [] }) : json({ ...session, recovery_codes_left: 1 }),
+    )
+
+    renderWithQuery(<App />)
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Te queda 1 código de recuperación',
+    )
+  })
+
   it('avisa cuando el control plane no responde', async () => {
     vi.stubGlobal(
       'fetch',
@@ -42,7 +71,7 @@ describe('App', () => {
     expect(await screen.findByText(/No se puede hablar con el control plane/)).toBeInTheDocument()
   })
 
-  it('el botón de salir cierra la sesión en el servidor', async () => {
+  it('el botón de salir cierra la sesión en el servidor y vuelve al login', async () => {
     const calls = stubFetch((path) => {
       if (path === '/v1/auth/logout') return new Response(null, { status: 204 })
       if (path === '/v1/servers') return json({ servers: [] })
@@ -53,5 +82,6 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: /salir/i }))
 
     expect(calls.map((call) => call.path)).toContain('/v1/auth/logout')
+    expect(await screen.findByLabelText('Usuario')).toBeInTheDocument()
   })
 })
