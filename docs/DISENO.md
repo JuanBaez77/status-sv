@@ -543,7 +543,7 @@ Proyectos
 - [ ] El agent lee `/etc/status-sv/projects.d`, revisa cada 30 s si cambió y manda solo si cambió.
 - [ ] Tabla `projects` y persistencia por servidor en una transacción; el ligado con `runtime_units`
       se calcula al leer.
-- [ ] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
+- [x] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
       y el cambio empujado por el WebSocket del panel.
 - [ ] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
 - [ ] Healthcheck pasivo desde el agent cada 60 s. **Línea de corte**: si el sprint se estira, pasa
