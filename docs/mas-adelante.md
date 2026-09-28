@@ -30,6 +30,8 @@ roadmap de [DISENO.md](DISENO.md).
 - Notificaciones de deploy a clientes.
 - Modo staging automático por cada PR.
 - Aprobaciones por enlace firmado desde el celular, además del panel.
+- WebAuthn o passkeys como segundo factor, además de TOTP (ver
+  [adr/ADR-013-segundo-factor-totp.md](adr/ADR-013-segundo-factor-totp.md)).
 - TimescaleDB, si el particionado nativo deja de alcanzar (ver [adr/ADR-001-go-y-postgresql.md](adr/ADR-001-go-y-postgresql.md)).
 - Protobuf para los mensajes de métricas, si el volumen lo justifica (ver [adr/ADR-003-contratos-json-versionado.md](adr/ADR-003-contratos-json-versionado.md)).
 - Historia del consumo por contenedor y por servicio (hoy el panel muestra solo el valor actual);
