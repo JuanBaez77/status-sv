@@ -241,3 +241,122 @@ func TestNetworkRatesSkipCounterResetsAndGaps(t *testing.T) {
 		t.Errorf("hay tasa después de %v sin muestras: %+v", MaxRateGap, gap)
 	}
 }
+
+type hourRow struct {
+	samples                int
+	cpuMin, cpuAvg, cpuMax float32
+	memMin, memAvg, memMax int64
+	diskUsedMax            int64
+	rxAvg, rxMax           float64
+	hasNetwork             bool
+}
+
+func readHour(t *testing.T, pool *pgxpool.Pool, serverID uuid.UUID, bucket time.Time) (hourRow, bool) {
+	t.Helper()
+	ctx := t.Context()
+
+	var r hourRow
+	err := pool.QueryRow(ctx, `
+		SELECT samples, cpu_used_min, cpu_used_avg, cpu_used_max,
+		       mem_used_min_bytes, mem_used_avg_bytes, mem_used_max_bytes
+		FROM metrics_1h WHERE server_id = $1 AND bucket = $2`, serverID, bucket).
+		Scan(&r.samples, &r.cpuMin, &r.cpuAvg, &r.cpuMax, &r.memMin, &r.memAvg, &r.memMax)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, false
+	}
+	if err != nil {
+		t.Fatalf("leer metrics_1h: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT used_max_bytes FROM metrics_1h_disks
+		WHERE server_id = $1 AND bucket = $2 AND mountpoint = '/'`, serverID, bucket).
+		Scan(&r.diskUsedMax); err != nil {
+		t.Fatalf("leer metrics_1h_disks: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		SELECT rx_avg_per_sec, rx_max_per_sec FROM metrics_1h_networks
+		WHERE server_id = $1 AND bucket = $2 AND interface = 'eth0'`, serverID, bucket).
+		Scan(&r.rxAvg, &r.rxMax)
+	switch {
+	case err == nil:
+		r.hasNetwork = true
+	case !errors.Is(err, pgx.ErrNoRows):
+		t.Fatalf("leer metrics_1h_networks: %v", err)
+	}
+	return r, true
+}
+
+func mustHour(t *testing.T, pool *pgxpool.Pool, serverID uuid.UUID, bucket time.Time) hourRow {
+	t.Helper()
+	r, ok := readHour(t, pool, serverID, bucket)
+	if !ok {
+		t.Fatalf("no hay agregado de la hora %v", bucket)
+	}
+	return r
+}
+
+func TestIngestAggregatesByHour(t *testing.T) {
+	pool, server, ingester := aggregateSetup(t)
+
+	ingest(t, ingester, server,
+		netSample(minute12, 10, 1, 20, 0, 0),
+		netSample(minute12.Add(10*time.Second), 20, 3, 25, 1000, 0),
+		// 10000 bytes en 50 s: 200 por segundo, en el minuto siguiente.
+		netSample(minute12.Add(time.Minute), 90, 5, 22, 11000, 0),
+	)
+
+	got := mustHour(t, pool, server, minute12)
+	if got.samples != 3 {
+		t.Errorf("samples = %d, se esperaban 3", got.samples)
+	}
+	// Minutos: promedio 15 con dos muestras y 90 con una. El promedio de la
+	// hora pesa cada minuto por sus muestras: (15·2 + 90) / 3 = 40.
+	if got.cpuMin != 15 || got.cpuAvg != 40 || got.cpuMax != 90 {
+		t.Errorf("CPU = mínimo %v, promedio %v, máximo %v; se esperaba 15, 40 y 90", got.cpuMin, got.cpuAvg, got.cpuMax)
+	}
+	if got.memMin != 2<<30 || got.memAvg != 3<<30 || got.memMax != 5<<30 {
+		t.Errorf("memoria = mínimo %d, promedio %d, máximo %d; se esperaba 2, 3 y 5 GiB", got.memMin, got.memAvg, got.memMax)
+	}
+	if got.diskUsedMax != 25<<30 {
+		t.Errorf("disco usado = %d, se esperaba 25 GiB", got.diskUsedMax)
+	}
+	// Tasas por minuto: 100 y 200 por segundo.
+	if !got.hasNetwork || !near(got.rxAvg, 150) || !near(got.rxMax, 200) {
+		t.Errorf("rx = promedio %v, pico %v; se esperaba 150 y 200", got.rxAvg, got.rxMax)
+	}
+
+	// Reenviar un lote no cambia la hora.
+	ingest(t, ingester, server, netSample(minute12, 10, 1, 20, 0, 0))
+	if again := mustHour(t, pool, server, minute12); again != got {
+		t.Errorf("el reenvío cambió la hora: %+v, antes %+v", again, got)
+	}
+}
+
+// Una muestra que llega tarde recalcula su hora y, si arma un par de red con
+// la primera muestra de la hora siguiente, también la red de esa hora.
+func TestLateSampleRecomputesItsHourAndTheNextRate(t *testing.T) {
+	pool, server, _ := aggregateSetup(t)
+	ingester := ingesterAt(pool, minute12.Add(2*time.Hour))
+	hour13 := minute12.Add(time.Hour)
+
+	ingest(t, ingester, server,
+		netSample(minute12, 10, 1, 20, 0, 0),
+		// Casi una hora sin muestras: no hay tasa hasta las 13.
+		netSample(hour13, 30, 1, 20, 13000, 0),
+	)
+	if before := mustHour(t, pool, server, hour13); before.hasNetwork {
+		t.Fatalf("hay tasa en la hora 13 sin un par cercano: %+v", before)
+	}
+
+	// Llega tarde la muestra de las 12:55: 1000 bytes en 300 s hasta las 13.
+	ingest(t, ingester, server, netSample(minute12.Add(55*time.Minute), 50, 1, 20, 12000, 0))
+
+	noon := mustHour(t, pool, server, minute12)
+	if noon.samples != 2 || noon.cpuMax != 50 {
+		t.Errorf("hora 12 recalculada = %+v, se esperaban 2 muestras y CPU máx 50", noon)
+	}
+	after := mustHour(t, pool, server, hour13)
+	if !after.hasNetwork || !near(after.rxAvg, 1000.0/300) {
+		t.Errorf("hora 13 = %+v, se esperaba una tasa de %v", after, 1000.0/300)
+	}
+}

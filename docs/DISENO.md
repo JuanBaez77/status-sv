@@ -522,7 +522,7 @@ escritura del Sprint 4.
 
 Métricas
 
-- [ ] Tablas `metrics_1h`, `metrics_1h_disks` y `metrics_1h_networks`, con partición mensual y un año
+- [x] Tablas `metrics_1h`, `metrics_1h_disks` y `metrics_1h_networks`, con partición mensual y un año
       de retención. La ingesta recalcula la hora que toca cada lote a partir de `metrics_1m`, en la
       misma transacción, como el minuto ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)).
       La migración carga la hora de lo que ya hay por minuto.
