@@ -16,6 +16,10 @@ type Querier interface {
 	// si la nueva es más reciente. Cero filas quiere decir que la foto es vieja (un
 	// reenvío que llegó tarde) y no hay que aplicarla.
 	AdvanceRuntimeTakenAt(ctx context.Context, arg AdvanceRuntimeTakenAtParams) (int64, error)
+	// AdvanceTOTPStep anota el paso de un código aceptado. Si ya se usó ese paso o
+	// uno posterior, no cambia nada: dos pedidos con el mismo código a la vez no
+	// pasan los dos.
+	AdvanceTOTPStep(ctx context.Context, arg AdvanceTOTPStepParams) (int64, error)
 	// AggregateDisksByHour guarda el peor momento de cada disco en la hora.
 	AggregateDisksByHour(ctx context.Context, arg AggregateDisksByHourParams) (int64, error)
 	// AggregateDisksByMinute guarda el peor momento de cada disco en el minuto: lo
@@ -60,6 +64,10 @@ type Querier interface {
 	// fila, así que un token no se puede usar dos veces ni aunque dos agents lo
 	// presenten a la vez.
 	ConsumeEnrollmentToken(ctx context.Context, arg ConsumeEnrollmentTokenParams) (EnrollmentToken, error)
+	// CountSessionAttempt anota un código equivocado en una sesión a medias y
+	// devuelve cuántos lleva.
+	CountSessionAttempt(ctx context.Context, id uuid.UUID) (int16, error)
+	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAgentCredential(ctx context.Context, arg CreateAgentCredentialParams) (AgentCredential, error)
 	CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) (EnrollmentToken, error)
@@ -70,10 +78,12 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredEnrollmentTokens(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
+	DeleteRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	// DeleteRuntimeUnitsExcept borra las unidades de un tipo que ya no están en la
 	// foto. Con la lista vacía borra todas las de ese tipo.
 	DeleteRuntimeUnitsExcept(ctx context.Context, arg DeleteRuntimeUnitsExceptParams) (int64, error)
 	DeleteServer(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteSession(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
 	// DeleteUserSessions cierra todas las sesiones de un usuario, por ejemplo al
 	// cambiar la contraseña.
@@ -81,6 +91,10 @@ type Querier interface {
 	// DropMetricPartitions borra las particiones que terminan antes de before_ts y
 	// devuelve cuántas borró.
 	DropMetricPartitions(ctx context.Context, arg DropMetricPartitionsParams) (int32, error)
+	// EnableTOTP confirma el alta: el secreto pendiente pasa a ser el del usuario.
+	// Solo si el pendiente sigue siendo el que se verificó, por si otra pestaña
+	// empezó otra alta en el medio.
+	EnableTOTP(ctx context.Context, arg EnableTOTPParams) (int64, error)
 	// EnsureMetricPartitions crea las particiones que falten para cubrir el rango y
 	// devuelve cuántas creó. La lógica vive en una función de la migración 00002,
 	// que escapa los nombres de las tablas: desde Go no se arma DDL con texto.
@@ -113,6 +127,9 @@ type Querier interface {
 	// Lo que ya estaba (un lote reenviado) se ignora, y el resultado dice cuántas
 	// filas eran nuevas.
 	InsertRawSamples(ctx context.Context, arg InsertRawSamplesParams) (int64, error)
+	// Códigos de recuperación del segundo factor (ADR-013). Se guarda el SHA-256
+	// del código normalizado, y cada uno sirve una vez.
+	InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) (int64, error)
 	ListCredentialsForServer(ctx context.Context, serverID uuid.UUID) ([]AgentCredential, error)
 	ListHourDisks(ctx context.Context, arg ListHourDisksParams) ([]ListHourDisksRow, error)
 	ListHourNetworks(ctx context.Context, arg ListHourNetworksParams) ([]ListHourNetworksRow, error)
@@ -153,8 +170,13 @@ type Querier interface {
 	// un servidor que todavía no existe intentan crearlo los dos y el segundo choca
 	// contra el índice único.
 	LockServerName(ctx context.Context, name string) error
+	// ResetTOTP borra el segundo factor de un usuario: el próximo login pide el alta.
+	ResetTOTP(ctx context.Context, id uuid.UUID) (int64, error)
 	RevokeActiveCredentialsForServer(ctx context.Context, arg RevokeActiveCredentialsForServerParams) (int64, error)
 	RevokeAgentCredential(ctx context.Context, arg RevokeAgentCredentialParams) (AgentCredential, error)
+	// SetPendingTOTP guarda el secreto cifrado de un alta en curso. Pisa el de un
+	// alta anterior que no se confirmó.
+	SetPendingTOTP(ctx context.Context, arg SetPendingTOTPParams) (int64, error)
 	// SetUserPassword cambia el hash. Lo usan el cambio de contraseña y la
 	// actualización silenciosa de parámetros de argon2id al iniciar sesión.
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error)
@@ -173,6 +195,8 @@ type Querier interface {
 	// viaja como un valor que no puede ocurrir y se vuelve NULL acá: el año 1 para
 	// las fechas y -1 para el consumo.
 	UpsertRuntimeUnits(ctx context.Context, arg UpsertRuntimeUnitsParams) (int64, error)
+	// UseRecoveryCode marca un código como usado, si existe y no se usó.
+	UseRecoveryCode(ctx context.Context, arg UseRecoveryCodeParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

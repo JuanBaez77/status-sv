@@ -88,7 +88,7 @@ func withUsers(ctx context.Context, fn func(*users.Service) error) error {
 		return err
 	}
 	defer pool.Close()
-	return fn(users.NewService(pool, newLogger(cfg)))
+	return fn(users.NewService(pool, cfg.TOTPKey, newLogger(cfg)))
 }
 
 // readNewPassword pide la contraseña dos veces, sin eco. Si la entrada no es una
@@ -123,4 +123,24 @@ func readPasswordLine(r io.Reader) (string, error) {
 		return "", fmt.Errorf("leer la contraseña: %w", err)
 	}
 	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// runUserTOTPReset borra el segundo factor y los códigos de recuperación de una
+// persona que perdió el teléfono y los códigos, y cierra sus sesiones. Hace
+// falta acceso al servidor, la misma barrera que para crear el usuario
+// (ADR-013).
+func runUserTOTPReset(ctx context.Context, args []string) error {
+	username, err := parseUsernameFlag("user-totp-reset", args)
+	if err != nil {
+		return err
+	}
+	return withUsers(ctx, func(service *users.Service) error {
+		closed, err := service.ResetTOTP(ctx, username)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Segundo factor de %q borrado. Sesiones cerradas: %d.\n"+
+			"El próximo login le va a pedir darlo de alta de nuevo.\n", username, closed)
+		return nil
+	})
 }

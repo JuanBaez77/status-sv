@@ -25,10 +25,20 @@ import (
 )
 
 // Plazos de una sesión, por decisión de Juan: vence a las 24 h sin uso o a los
-// 7 días de abierta, lo que llegue primero.
+// 7 días de abierta, lo que llegue primero. Una sesión a medias, que espera el
+// segundo factor, vence a los 5 minutos (ADR-013).
 const (
-	IdleTimeout = 24 * time.Hour
-	MaxLifetime = 7 * 24 * time.Hour
+	IdleTimeout         = 24 * time.Hour
+	MaxLifetime         = 7 * 24 * time.Hour
+	HalfSessionLifetime = 5 * time.Minute
+)
+
+// Etapas de una sesión (ADR-013). Solo una sesión completa sirve para el panel;
+// las otras dos sirven únicamente para el paso siguiente del login.
+const (
+	StageFull        = "full"
+	StageTOTPPending = "totp_pending"
+	StageTOTPEnroll  = "totp_enroll"
 )
 
 // touchEvery es cada cuánto se anota el uso de una sesión. Escribir en cada
@@ -95,25 +105,33 @@ type Session struct {
 	Username  string
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	// Stage es la etapa: StageFull, StageTOTPPending o StageTOTPEnroll.
+	Stage string
 }
+
+// Full dice si la sesión pasó el segundo factor.
+func (s Session) Full() bool { return s.Stage == StageFull }
 
 // Service maneja usuarios y sesiones.
 type Service struct {
-	db     DB
-	q      *store.Queries
-	log    *slog.Logger
-	now    func() time.Time
-	hashes chan struct{}
+	db      DB
+	q       *store.Queries
+	totpKey auth.TOTPKey
+	log     *slog.Logger
+	now     func() time.Time
+	hashes  chan struct{}
 }
 
-// NewService arma el servicio.
-func NewService(db DB, log *slog.Logger) *Service {
+// NewService arma el servicio. totpKey cifra los secretos TOTP que se guardan
+// en la base.
+func NewService(db DB, totpKey auth.TOTPKey, log *slog.Logger) *Service {
 	return &Service{
-		db:     db,
-		q:      store.New(db),
-		log:    log,
-		now:    time.Now,
-		hashes: make(chan struct{}, maxConcurrentHashes),
+		db:      db,
+		q:       store.New(db),
+		totpKey: totpKey,
+		log:     log,
+		now:     time.Now,
+		hashes:  make(chan struct{}, maxConcurrentHashes),
 	}
 }
 
@@ -189,8 +207,10 @@ func (s *Service) SetPassword(ctx context.Context, username, password string) (c
 	return closed, nil
 }
 
-// Login verifica usuario y contraseña y abre una sesión. Devuelve el token, que
-// es lo único que sirve para usarla y no vuelve a estar disponible.
+// Login verifica usuario y contraseña y abre una sesión a medias (ADR-013):
+// esperando el código si el usuario ya tiene TOTP, o el alta si no lo tiene.
+// Devuelve el token, que es lo único que sirve para usarla y no vuelve a estar
+// disponible.
 //
 // Un usuario que no existe tarda lo mismo que una contraseña equivocada, y los
 // dos devuelven ErrInvalidCredentials: el login no dice qué nombres existen.
@@ -223,10 +243,16 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		s.rehash(ctx, user.ID, password)
 	}
 
-	return s.openSession(ctx, user, ip, userAgent)
+	stage := StageTOTPEnroll
+	if user.TotpSecret != nil {
+		stage = StageTOTPPending
+	}
+	return s.openSession(ctx, s.q, user.ID, user.Username, stage, ip, userAgent)
 }
 
-func (s *Service) openSession(ctx context.Context, user store.User, ip, userAgent string) (auth.Secret, Session, error) {
+// openSession abre una sesión en la etapa pedida. Recibe las consultas para
+// poder correr dentro de la transacción que cierra la sesión a medias.
+func (s *Service) openSession(ctx context.Context, q *store.Queries, userID uuid.UUID, username, stage, ip, userAgent string) (auth.Secret, Session, error) {
 	token, err := auth.NewSessionToken()
 	if err != nil {
 		return auth.Secret{}, Session{}, err
@@ -237,24 +263,30 @@ func (s *Service) openSession(ctx context.Context, user store.User, ip, userAgen
 	}
 
 	now := s.now().UTC()
-	row, err := s.q.CreateSession(ctx, store.CreateSessionParams{
+	lifetime := MaxLifetime
+	if stage != StageFull {
+		lifetime = HalfSessionLifetime
+	}
+	row, err := q.CreateSession(ctx, store.CreateSessionParams{
 		ID:        id,
-		UserID:    user.ID,
+		UserID:    userID,
 		TokenHash: token.Hash(),
 		CreatedAt: now,
-		ExpiresAt: now.Add(MaxLifetime),
+		ExpiresAt: now.Add(lifetime),
 		Ip:        truncate(ip, maxIPLen),
 		UserAgent: truncate(userAgent, maxUserAgentLen),
+		Stage:     stage,
 	})
 	if err != nil {
 		return auth.Secret{}, Session{}, fmt.Errorf("guardar la sesión: %w", err)
 	}
 	return token, Session{
 		ID:        row.ID,
-		UserID:    user.ID,
-		Username:  user.Username,
+		UserID:    userID,
+		Username:  username,
 		CreatedAt: row.CreatedAt,
 		ExpiresAt: row.ExpiresAt,
+		Stage:     row.Stage,
 	}, nil
 }
 
@@ -291,6 +323,7 @@ func (s *Service) Authenticate(ctx context.Context, token auth.Secret) (Session,
 		Username:  row.Username,
 		CreatedAt: row.CreatedAt,
 		ExpiresAt: row.ExpiresAt,
+		Stage:     row.Stage,
 	}, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
@@ -32,9 +33,14 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+// sessionResponse describe la sesión. Stage dice en qué paso del login está:
+// "full", o "totp_pending" / "totp_enroll" si falta el segundo factor.
 type sessionResponse struct {
 	Username  string    `json:"username"`
 	ExpiresAt time.Time `json:"expires_at"`
+	Stage     string    `json:"stage"`
+	// RecoveryCodesLeft viaja solo con una sesión completa.
+	RecoveryCodesLeft *int64 `json:"recovery_codes_left,omitempty"`
 }
 
 type errorResponse struct {
@@ -81,9 +87,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.log.InfoContext(ctx, "login", "usuario", session.Username, "ip", ip)
+	s.log.InfoContext(ctx, "contraseña correcta, falta el segundo factor", "usuario", session.Username, "ip", ip, "etapa", session.Stage)
 	http.SetCookie(w, sessionCookie(token.Reveal(), session.ExpiresAt))
-	writeJSON(ctx, w, http.StatusOK, sessionResponse{Username: session.Username, ExpiresAt: session.ExpiresAt})
+	writeJSON(ctx, w, http.StatusOK, sessionResponse{Username: session.Username, ExpiresAt: session.ExpiresAt, Stage: session.Stage})
 }
 
 // handleLogout cierra la sesión y borra la cookie. Responde lo mismo haya o no
@@ -104,12 +110,25 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleMe dice quién es el usuario de la sesión. Es lo que consulta el panel
-// al abrir, para saber si mostrar el login.
+// handleMe dice quién es el usuario de la sesión y en qué paso del login está.
+// Es lo que consulta el panel al abrir, para saber si mostrar el login, el
+// código o el alta del segundo factor.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	session := SessionFrom(r.Context())
+	ctx := r.Context()
+	session := SessionFrom(ctx)
 	noStore(w)
-	writeJSON(r.Context(), w, http.StatusOK, sessionResponse{Username: session.Username, ExpiresAt: session.ExpiresAt})
+
+	resp := sessionResponse{Username: session.Username, ExpiresAt: session.ExpiresAt, Stage: session.Stage}
+	if session.Full() {
+		left, err := s.users.RecoveryCodesLeft(ctx, session.UserID)
+		if err != nil {
+			s.log.ErrorContext(ctx, "no se pudieron contar los códigos de recuperación", "error", err)
+			writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
+			return
+		}
+		resp.RecoveryCodesLeft = &left
+	}
+	writeJSON(ctx, w, http.StatusOK, resp)
 }
 
 type sessionKey struct{}
@@ -120,9 +139,15 @@ func SessionFrom(ctx context.Context) users.Session {
 	return session
 }
 
-// requireSession deja pasar solo los pedidos con una sesión viva, y la pone en
-// el contexto para el handler.
+// requireSession deja pasar solo los pedidos con una sesión completa, que pasó
+// el segundo factor, y la pone en el contexto para el handler.
 func (s *Server) requireSession(next http.Handler) http.Handler {
+	return s.requireStage(next, users.StageFull)
+}
+
+// requireStage deja pasar solo los pedidos con una sesión viva en alguna de las
+// etapas dadas.
+func (s *Server) requireStage(next http.Handler, stages ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
@@ -142,6 +167,20 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 		case err != nil:
 			s.log.ErrorContext(ctx, "falló la verificación de la sesión", "error", err)
 			writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
+			return
+		}
+		if !slices.Contains(stages, session.Stage) {
+			noStore(w)
+			if slices.Contains(stages, users.StageFull) {
+				// El panel entiende este error como "mostrá la pantalla del código".
+				writeJSON(ctx, w, http.StatusUnauthorized, errorResponse{
+					Error: "second_factor_required", Message: "falta el segundo factor",
+				})
+				return
+			}
+			writeJSON(ctx, w, http.StatusConflict, errorResponse{
+				Error: "wrong_stage", Message: "este paso no corresponde a la sesión",
+			})
 			return
 		}
 

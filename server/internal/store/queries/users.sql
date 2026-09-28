@@ -19,3 +19,34 @@ WHERE id = sqlc.arg('id');
 
 -- name: CountUsers :one
 SELECT count(*) FROM users;
+
+-- SetPendingTOTP guarda el secreto cifrado de un alta en curso. Pisa el de un
+-- alta anterior que no se confirmó.
+-- name: SetPendingTOTP :execrows
+UPDATE users SET totp_pending_secret = sqlc.arg('pending') WHERE id = sqlc.arg('id') AND totp_secret IS NULL;
+
+-- EnableTOTP confirma el alta: el secreto pendiente pasa a ser el del usuario.
+-- Solo si el pendiente sigue siendo el que se verificó, por si otra pestaña
+-- empezó otra alta en el medio.
+-- name: EnableTOTP :execrows
+UPDATE users
+SET totp_secret = totp_pending_secret,
+    totp_pending_secret = NULL,
+    totp_last_step = sqlc.arg('step'),
+    totp_enabled_at = sqlc.arg('now')::timestamptz
+WHERE id = sqlc.arg('id')
+  AND totp_secret IS NULL
+  AND totp_pending_secret = sqlc.arg('pending');
+
+-- AdvanceTOTPStep anota el paso de un código aceptado. Si ya se usó ese paso o
+-- uno posterior, no cambia nada: dos pedidos con el mismo código a la vez no
+-- pasan los dos.
+-- name: AdvanceTOTPStep :execrows
+UPDATE users SET totp_last_step = sqlc.arg('step')
+WHERE id = sqlc.arg('id') AND totp_last_step < sqlc.arg('step');
+
+-- ResetTOTP borra el segundo factor de un usuario: el próximo login pide el alta.
+-- name: ResetTOTP :execrows
+UPDATE users
+SET totp_secret = NULL, totp_pending_secret = NULL, totp_last_step = 0, totp_enabled_at = NULL
+WHERE id = sqlc.arg('id');

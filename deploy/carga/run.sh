@@ -42,6 +42,17 @@ AGENT_NAME="vps-carga"
 # levantar el agent.
 export STATUSSV_ENROLL_TOKEN="${STATUSSV_ENROLL_TOKEN:-todavia-no-hay-token}"
 
+# La clave que cifra los secretos TOTP, solo para esta corrida. El contenedor
+# corre con otro usuario, así que tiene que poder leerla.
+STATUSSV_TOTP_KEY_PATH="$(mktemp)"
+openssl rand -base64 32 >"${STATUSSV_TOTP_KEY_PATH}"
+chmod 644 "${STATUSSV_TOTP_KEY_PATH}"
+# En Git Bash (Windows), Docker necesita la ruta en formato de Windows.
+if command -v cygpath >/dev/null 2>&1; then
+  STATUSSV_TOTP_KEY_PATH="$(cygpath -m "${STATUSSV_TOTP_KEY_PATH}")"
+fi
+export STATUSSV_TOTP_KEY_PATH
+
 TRABAJO="$(mktemp -d)"
 MEDICIONES="${TRABAJO}/rss.txt"
 TOKENS="${TRABAJO}/tokens.txt"
@@ -62,6 +73,7 @@ limpiar() {
   fi
   paso "limpiando"
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  rm -f "${STATUSSV_TOTP_KEY_PATH}"
   rm -rf "${TRABAJO}"
   exit $salida
 }

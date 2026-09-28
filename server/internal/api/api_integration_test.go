@@ -22,6 +22,7 @@ import (
 
 	"github.com/JuanBaez77/status-sv/proto"
 	"github.com/JuanBaez77/status-sv/server/internal/api"
+	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
@@ -38,6 +39,7 @@ type fixture struct {
 	pool    *pgxpool.Pool
 	queries *store.Queries
 	enroll  *enrollment.Service
+	totpKey auth.TOTPKey
 }
 
 func setup(t *testing.T) *fixture {
@@ -47,7 +49,11 @@ func setup(t *testing.T) *fixture {
 	testdb.Truncate(t, pool)
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := config.Config{EnrollmentTTL: testTTL, OfflineAfter: testOffline}
+	totpKey, err := auth.NewTOTPKey()
+	if err != nil {
+		t.Fatalf("NewTOTPKey: %v", err)
+	}
+	cfg := config.Config{EnrollmentTTL: testTTL, OfflineAfter: testOffline, TOTPKey: totpKey}
 
 	srv := httptest.NewServer(api.New(cfg, pool, log).Handler())
 	t.Cleanup(srv.Close)
@@ -57,6 +63,7 @@ func setup(t *testing.T) *fixture {
 		pool:    pool,
 		queries: store.New(pool),
 		enroll:  enrollment.NewService(pool, testTTL, log),
+		totpKey: totpKey,
 	}
 }
 

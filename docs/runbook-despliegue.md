@@ -98,6 +98,22 @@ sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 32)|" depl
 
 La contraseña no sale nunca del servidor ni hace falta saberla: la usan solo los contenedores.
 
+La **clave que cifra los secretos TOTP** del panel ([ADR-013](adr/ADR-013-segundo-factor-totp.md))
+también se genera en el servidor, una sola vez, en un archivo aparte de la base. El dueño es el
+usuario del contenedor (10001), que es quien la lee:
+
+```bash
+install -d -m 0700 deploy/secrets
+openssl rand -base64 32 > deploy/secrets/totp.key
+chown 10001:10001 deploy/secrets/totp.key
+chmod 0400 deploy/secrets/totp.key
+```
+
+Sin este archivo el control plane no arranca. **Entra en los backups**, separado del volcado de la
+base: si se pierde, los secretos guardados no se pueden descifrar y cada usuario tiene que hacer
+`user-totp-reset` (ver más abajo) y dar de alta el segundo factor de nuevo. `*.key` está en
+`.gitignore`: nunca se commitea.
+
 ### Levantar
 
 ```bash
@@ -201,11 +217,24 @@ Para cambiarla (cierra todas las sesiones abiertas de ese usuario):
 docker compose -f docker-compose.prod.yml --env-file .env exec -it server server user-password --username juan
 ```
 
+**Segundo factor.** El primer login después de crear el usuario pide darlo de alta: el panel
+muestra un QR para la app de autenticación (y la clave en texto, para cargarla a mano), se confirma
+con un código y entrega **10 códigos de recuperación, que se ven una sola vez**: guardarlos fuera
+del teléfono. Desde ahí, cada login pide la contraseña y el código de la app, o uno de los códigos
+de recuperación, que sirve una vez.
+
+Si se pierden el teléfono **y** los códigos, se borra el segundo factor por SSH. Cierra todas las
+sesiones del usuario y el próximo login pide el alta de nuevo:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec server server user-totp-reset --username juan
+```
+
 ### Cloudflare Access delante del panel
 
-Hasta que llegue el segundo factor (Sprint 3), lo único que protege al panel es esa contraseña. Con
-Cloudflare adelante conviene sumarle Access, que pide identidad **antes** de que el pedido llegue al
-servidor.
+El panel ya pide contraseña y código TOTP. Con Cloudflare adelante conviene sumarle igual Access,
+que pide identidad **antes** de que el pedido llegue al servidor: así el login del panel ni
+siquiera queda expuesto a internet.
 
 La aplicación de Access cubre `<DOMINIO>`, con una excepción que no se puede olvidar:
 

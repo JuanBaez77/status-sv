@@ -36,6 +36,9 @@ services:
       # Un umbral corto hace que la prueba no tenga que esperar 45 segundos para
       # ver qué pasa cuando un agent se queda callado.
       STATUSSV_OFFLINE_AFTER: 20s
+      STATUSSV_TOTP_KEY_FILE: /run/secrets/totp_key
+    secrets:
+      - totp_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,3 +69,9 @@ services:
     # Se enrola y arranca en el mismo contenedor, que nace vacío en cada corrida.
     entrypoint: ["/bin/sh", "-c"]
     command: ["/usr/local/bin/agent enroll --force && exec /usr/local/bin/agent run"]
+
+# La clave de TOTP de la prueba la genera el script al arrancar, en un
+# directorio temporal: no hay ninguna clave en el repositorio.
+secrets:
+  totp_key:
+    file: ${STATUSSV_TOTP_KEY_PATH:?hace falta la clave de TOTP de la prueba}

@@ -64,16 +64,13 @@ type seriesBody struct {
 	} `json:"networks"`
 }
 
-// login abre una sesión y devuelve su cookie.
+// login crea a juan, inicia sesión y da de alta el segundo factor, y devuelve
+// la cookie de la sesión completa.
 func (f *fixture) login(t *testing.T, ip string) *http.Cookie {
 	t.Helper()
 	f.createUser(t)
-	resp := f.do(t, http.MethodPost, "/v1/auth/login",
-		`{"username":"juan","password":"`+testPassword+`"}`, ip, nil, nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("login = %d: %s", resp.StatusCode, resp.body)
-	}
-	return sessionCookieOf(t, resp)
+	cookie, _ := f.loginWithTOTP(t, ip)
+	return cookie
 }
 
 // enrolledServer crea un servidor con su latido y sus particiones de métricas.

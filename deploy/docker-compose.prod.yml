@@ -54,6 +54,11 @@ services:
       STATUSSV_TRUSTED_PROXIES: 172.30.0.0/24
       STATUSSV_LOG_FORMAT: json
       STATUSSV_LOG_LEVEL: ${STATUSSV_LOG_LEVEL:-info}
+      # La clave que cifra los secretos TOTP (ADR-013). Vive en un archivo fuera de
+      # la base y del repositorio; ver docs/runbook-despliegue.md.
+      STATUSSV_TOTP_KEY_FILE: /run/secrets/totp_key
+    secrets:
+      - totp_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,6 +117,12 @@ networks:
       config:
         # Fija la red para que STATUSSV_TRUSTED_PROXIES pueda nombrarla.
         - subnet: 172.30.0.0/24
+
+# El archivo se genera en el servidor, con dueño 10001 (el usuario del
+# contenedor) y permisos 0400. Nunca se commitea: *.key está en .gitignore.
+secrets:
+  totp_key:
+    file: ./secrets/totp.key
 
 volumes:
   postgres-data:

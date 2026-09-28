@@ -7,9 +7,31 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const advanceTOTPStep = `-- name: AdvanceTOTPStep :execrows
+UPDATE users SET totp_last_step = $1
+WHERE id = $2 AND totp_last_step < $1
+`
+
+type AdvanceTOTPStepParams struct {
+	Step int64
+	ID   uuid.UUID
+}
+
+// AdvanceTOTPStep anota el paso de un código aceptado. Si ya se usó ese paso o
+// uno posterior, no cambia nada: dos pedidos con el mismo código a la vez no
+// pasan los dos.
+func (q *Queries) AdvanceTOTPStep(ctx context.Context, arg AdvanceTOTPStepParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceTOTPStep, arg.Step, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
 
 const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users
@@ -25,7 +47,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, username, password_hash)
 VALUES ($1, $2, $3)
-RETURNING id, username, password_hash, password_changed_at, created_at
+RETURNING id, username, password_hash, password_changed_at, created_at, totp_secret, totp_pending_secret, totp_last_step, totp_enabled_at
 `
 
 type CreateUserParams struct {
@@ -43,12 +65,50 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PasswordHash,
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
+		&i.TotpSecret,
+		&i.TotpPendingSecret,
+		&i.TotpLastStep,
+		&i.TotpEnabledAt,
 	)
 	return i, err
 }
 
+const enableTOTP = `-- name: EnableTOTP :execrows
+UPDATE users
+SET totp_secret = totp_pending_secret,
+    totp_pending_secret = NULL,
+    totp_last_step = $1,
+    totp_enabled_at = $2::timestamptz
+WHERE id = $3
+  AND totp_secret IS NULL
+  AND totp_pending_secret = $4
+`
+
+type EnableTOTPParams struct {
+	Step    int64
+	Now     time.Time
+	ID      uuid.UUID
+	Pending []byte
+}
+
+// EnableTOTP confirma el alta: el secreto pendiente pasa a ser el del usuario.
+// Solo si el pendiente sigue siendo el que se verificó, por si otra pestaña
+// empezó otra alta en el medio.
+func (q *Queries) EnableTOTP(ctx context.Context, arg EnableTOTPParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enableTOTP,
+		arg.Step,
+		arg.Now,
+		arg.ID,
+		arg.Pending,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, password_changed_at, created_at FROM users WHERE id = $1
+SELECT id, username, password_hash, password_changed_at, created_at, totp_secret, totp_pending_secret, totp_last_step, totp_enabled_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -60,12 +120,16 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.PasswordHash,
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
+		&i.TotpSecret,
+		&i.TotpPendingSecret,
+		&i.TotpLastStep,
+		&i.TotpEnabledAt,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, password_changed_at, created_at FROM users WHERE username = $1
+SELECT id, username, password_hash, password_changed_at, created_at, totp_secret, totp_pending_secret, totp_last_step, totp_enabled_at FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -77,8 +141,46 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.PasswordHash,
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
+		&i.TotpSecret,
+		&i.TotpPendingSecret,
+		&i.TotpLastStep,
+		&i.TotpEnabledAt,
 	)
 	return i, err
+}
+
+const resetTOTP = `-- name: ResetTOTP :execrows
+UPDATE users
+SET totp_secret = NULL, totp_pending_secret = NULL, totp_last_step = 0, totp_enabled_at = NULL
+WHERE id = $1
+`
+
+// ResetTOTP borra el segundo factor de un usuario: el próximo login pide el alta.
+func (q *Queries) ResetTOTP(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, resetTOTP, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setPendingTOTP = `-- name: SetPendingTOTP :execrows
+UPDATE users SET totp_pending_secret = $1 WHERE id = $2 AND totp_secret IS NULL
+`
+
+type SetPendingTOTPParams struct {
+	Pending []byte
+	ID      uuid.UUID
+}
+
+// SetPendingTOTP guarda el secreto cifrado de un alta en curso. Pisa el de un
+// alta anterior que no se confirmó.
+func (q *Queries) SetPendingTOTP(ctx context.Context, arg SetPendingTOTPParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPendingTOTP, arg.Pending, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setUserPassword = `-- name: SetUserPassword :execrows

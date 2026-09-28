@@ -44,6 +44,7 @@ type Server struct {
 	panels        *panelHub
 	counters      *counterCache
 	loginLimiter  *ipLimiter
+	totpLimiter   *ipLimiter
 }
 
 // New arma el servidor de la API.
@@ -59,10 +60,11 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		ingester:      metrics.NewIngester(pool),
 		runtime:       runstate.NewIngester(pool),
 		pending:       newPendingCommands(),
-		users:         users.NewService(pool, log),
+		users:         users.NewService(pool, cfg.TOTPKey, log),
 		panels:        newPanelHub(),
 		counters:      newCounterCache(),
 		loginLimiter:  newIPLimiter(loginPerMinute, loginBurst, limiterTTL),
+		totpLimiter:   newIPLimiter(totpPerMinute, totpBurst, limiterTTL),
 	}
 }
 
@@ -81,7 +83,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/auth/login", crossOrigin.Handler(http.HandlerFunc(s.handleLogin)))
 	mux.Handle("POST /v1/auth/logout", crossOrigin.Handler(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("POST /v1/servers/{id}/logs", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleServerLogs))))
-	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
+	// El segundo factor (ADR-013): cada paso acepta solo la sesión a medias de
+	// su etapa. /me acepta cualquiera, para que el panel sepa qué pantalla
+	// mostrar.
+	mux.Handle("POST /v1/auth/totp/enroll", crossOrigin.Handler(
+		s.requireStage(http.HandlerFunc(s.handleTOTPEnroll), users.StageTOTPEnroll)))
+	mux.Handle("POST /v1/auth/totp/confirm", crossOrigin.Handler(
+		s.requireStage(http.HandlerFunc(s.handleTOTPConfirm), users.StageTOTPEnroll)))
+	mux.Handle("POST /v1/auth/totp/verify", crossOrigin.Handler(
+		s.requireStage(http.HandlerFunc(s.handleTOTPVerify), users.StageTOTPPending)))
+	mux.Handle("GET /v1/auth/me", s.requireStage(http.HandlerFunc(s.handleMe),
+		users.StageFull, users.StageTOTPPending, users.StageTOTPEnroll))
 	mux.Handle("GET /v1/servers", s.requireSession(http.HandlerFunc(s.handleListServers)))
 	mux.Handle("GET /v1/servers/{id}/metrics", s.requireSession(http.HandlerFunc(s.handleServerMetrics)))
 	mux.Handle("GET /v1/servers/{id}/runtime", s.requireSession(http.HandlerFunc(s.handleServerRuntime)))

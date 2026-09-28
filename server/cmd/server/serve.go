@@ -56,7 +56,7 @@ func runServe(ctx context.Context, args []string) error {
 	background.Go(func() { partitions.Run(ctx) })
 	// Las sesiones vencidas del panel ya no sirven; el barrido es para que la
 	// tabla no crezca.
-	sessions := users.NewService(pool, log)
+	sessions := users.NewService(pool, cfg.TOTPKey, log)
 	background.Go(func() { sessions.RunCleanup(ctx) })
 
 	apiServer := api.New(cfg, pool, log)
