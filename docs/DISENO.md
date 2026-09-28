@@ -488,6 +488,12 @@ Terminado cuando un VPS real muestra sus contenedores, servicios y procesos en v
 pueden pedir los logs de una unidad con los secretos enmascarados, el agent sigue por debajo de
 30 MB de RAM y 1% de CPU con Docker prendido, y el CI está verde.
 
+**Cerrado el 2026-09-28** (commit `307038a`, desplegado en `cristales-baez-prod`): el agent ve los 11
+contenedores, 17 servicios y los procesos sueltos del servidor, con las tres fuentes en `ok` y el
+consumo por contenedor igual al de `docker stats`. Medido ahí con Docker prendido: agent 8,6 MB de
+RAM y 0,11 % de un núcleo; control plane 5,3 MB. El cotizador del cliente respondió 200 antes,
+durante y después, y nginx no se tocó.
+
 Si el sprint se estira, la línea de corte son los logs a demanda (el canal de comandos y su vista),
 que se mueven al Sprint 3 sin romper nada de lo anterior.
 
