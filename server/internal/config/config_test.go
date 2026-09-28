@@ -2,6 +2,8 @@ package config_test
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -222,6 +224,54 @@ func TestTrustedProxies(t *testing.T) {
 
 			if _, err := config.Load(); err == nil {
 				t.Errorf("se aceptó %q como lista de redes", invalid)
+			}
+		})
+	}
+}
+
+// TestMain deja una clave de TOTP válida para todos los tests: es obligatoria,
+// y cada test que la quiere probar mal la pisa con t.Setenv.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "statussv-config")
+	if err != nil {
+		panic(err)
+	}
+	path := filepath.Join(dir, "totp.key")
+	if err := os.WriteFile(path, []byte(testTOTPKey+"\n"), 0o600); err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("STATUSSV_TOTP_KEY_FILE", path); err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// testTOTPKey son 32 bytes en base64, solo para tests.
+const testTOTPKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
+func TestLoadRequiresTheTOTPKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", testDSN)
+	dir := t.TempDir()
+	short := filepath.Join(dir, "corta.key")
+	if err := os.WriteFile(short, []byte("MDEyMzQ1Njc4OWFiY2RlZg=="), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, path := range map[string]string{
+		"sin variable":      "",
+		"archivo que falta": filepath.Join(dir, "no-existe.key"),
+		"clave corta":       short,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("STATUSSV_TOTP_KEY_FILE", path)
+			_, err := config.Load()
+			if err == nil || !strings.Contains(err.Error(), "STATUSSV_TOTP_KEY_FILE") {
+				t.Fatalf("Load = %v, se esperaba un error que nombre STATUSSV_TOTP_KEY_FILE", err)
+			}
+			if strings.Contains(err.Error(), testTOTPKey) {
+				t.Error("el error muestra la clave")
 			}
 		})
 	}

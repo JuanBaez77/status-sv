@@ -46,7 +46,11 @@ func setup(t *testing.T) (*pgxpool.Pool, *Service, *clock) {
 	testdb.Truncate(t, pool)
 
 	c := &clock{now: time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)}
-	s := NewService(pool, slog.New(slog.DiscardHandler))
+	key, err := auth.NewTOTPKey()
+	if err != nil {
+		t.Fatalf("NewTOTPKey: %v", err)
+	}
+	s := NewService(pool, key, slog.New(slog.DiscardHandler))
 	s.now = c.Now
 	return pool, s, c
 }
@@ -96,8 +100,13 @@ func TestLoginAndAuthenticate(t *testing.T) {
 	if !token.HasPrefix(auth.SessionTokenPrefix) || session.Username != "juan" {
 		t.Errorf("sesión = %+v", session)
 	}
-	if !session.ExpiresAt.Equal(c.Now().Add(MaxLifetime)) {
-		t.Errorf("vence %v, se esperaba a los 7 días", session.ExpiresAt)
+	// Sin TOTP todavía, la contraseña abre una sesión a medias para el alta, que
+	// vence a los 5 minutos.
+	if session.Stage != StageTOTPEnroll || session.Full() {
+		t.Errorf("etapa = %q, se esperaba %q", session.Stage, StageTOTPEnroll)
+	}
+	if !session.ExpiresAt.Equal(c.Now().Add(HalfSessionLifetime)) {
+		t.Errorf("vence %v, se esperaba a los 5 minutos", session.ExpiresAt)
 	}
 
 	got, err := s.Authenticate(t.Context(), token)
@@ -141,15 +150,10 @@ func TestSessionExpiresWhenIdleOrTooOld(t *testing.T) {
 	}
 
 	// Sin uso: a las 24 h se termina.
-	idle, _, err := s.Login(t.Context(), "juan", password, "", "")
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
+	var secret []byte
+	idle := loginFull(t, s, c, &secret)
 	// Con uso todos los días: sigue viva hasta los 7 días.
-	active, _, err := s.Login(t.Context(), "juan", password, "", "")
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
+	active := loginFull(t, s, c, &secret)
 
 	for day := 1; day <= 6; day++ {
 		c.Advance(23 * time.Hour)

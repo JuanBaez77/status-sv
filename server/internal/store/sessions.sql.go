@@ -12,11 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
+const countSessionAttempt = `-- name: CountSessionAttempt :one
+UPDATE sessions SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts
+`
+
+// CountSessionAttempt anota un código equivocado en una sesión a medias y
+// devuelve cuántos lleva.
+func (q *Queries) CountSessionAttempt(ctx context.Context, id uuid.UUID) (int16, error) {
+	row := q.db.QueryRow(ctx, countSessionAttempt, id)
+	var attempts int16
+	err := row.Scan(&attempts)
+	return attempts, err
+}
+
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at, ip, user_agent)
+INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at, ip, user_agent, stage)
 VALUES ($1, $2, $3, $4,
-        $4, $5, $6, $7)
-RETURNING id, user_id, token_hash, created_at, last_seen_at, expires_at, ip, user_agent
+        $4, $5, $6, $7, $8)
+RETURNING id, user_id, token_hash, created_at, last_seen_at, expires_at, ip, user_agent, stage, attempts
 `
 
 type CreateSessionParams struct {
@@ -27,6 +40,7 @@ type CreateSessionParams struct {
 	ExpiresAt time.Time
 	Ip        string
 	UserAgent string
+	Stage     string
 }
 
 // CreateSession abre una sesión. El instante lo pone la aplicación, igual que
@@ -40,6 +54,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.ExpiresAt,
 		arg.Ip,
 		arg.UserAgent,
+		arg.Stage,
 	)
 	var i Session
 	err := row.Scan(
@@ -51,6 +66,8 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.ExpiresAt,
 		&i.Ip,
 		&i.UserAgent,
+		&i.Stage,
+		&i.Attempts,
 	)
 	return i, err
 }
@@ -68,6 +85,18 @@ type DeleteExpiredSessionsParams struct {
 
 func (q *Queries) DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredSessions, arg.Now, arg.IdleCutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSession = `-- name: DeleteSession :execrows
+DELETE FROM sessions WHERE id = $1
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSession, id)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +130,7 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID uuid.UUID) (int
 }
 
 const getActiveSession = `-- name: GetActiveSession :one
-SELECT s.id, s.user_id, s.created_at, s.last_seen_at, s.expires_at, u.username
+SELECT s.id, s.user_id, s.created_at, s.last_seen_at, s.expires_at, s.stage, s.attempts, u.username
 FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -121,6 +150,8 @@ type GetActiveSessionRow struct {
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
+	Stage      string
+	Attempts   int16
 	Username   string
 }
 
@@ -135,6 +166,8 @@ func (q *Queries) GetActiveSession(ctx context.Context, arg GetActiveSessionPara
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.ExpiresAt,
+		&i.Stage,
+		&i.Attempts,
 		&i.Username,
 	)
 	return i, err

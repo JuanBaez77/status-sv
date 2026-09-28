@@ -20,7 +20,7 @@ const testPassword = "una contraseña larga"
 // createUser da de alta a juan con testPassword.
 func (f *fixture) createUser(t *testing.T) {
 	t.Helper()
-	service := users.NewService(f.pool, slog.New(slog.DiscardHandler))
+	service := users.NewService(f.pool, f.totpKey, slog.New(slog.DiscardHandler))
 	if _, err := service.CreateUser(t.Context(), "juan", testPassword); err != nil {
 		t.Fatalf("crear el usuario: %v", err)
 	}

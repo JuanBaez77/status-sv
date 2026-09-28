@@ -200,6 +200,8 @@ type Session struct {
 	ExpiresAt  time.Time
 	Ip         string
 	UserAgent  string
+	Stage      string
+	Attempts   int16
 }
 
 type User struct {
@@ -208,4 +210,16 @@ type User struct {
 	PasswordHash      string
 	PasswordChangedAt time.Time
 	CreatedAt         time.Time
+	TotpSecret        []byte
+	TotpPendingSecret []byte
+	TotpLastStep      int64
+	TotpEnabledAt     *time.Time
+}
+
+type UserRecoveryCode struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	CodeHash  []byte
+	CreatedAt time.Time
+	UsedAt    *time.Time
 }

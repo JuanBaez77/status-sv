@@ -23,6 +23,17 @@ COMPOSE=(docker compose -f deploy/docker-compose.e2e.yml)
 # entero en cada comando: sin esto, hasta un simple `exec` fallaría antes de que
 # el token exista. Se reemplaza por el de verdad al levantar el agent.
 export STATUSSV_ENROLL_TOKEN="${STATUSSV_ENROLL_TOKEN:-todavia-no-hay-token}"
+
+# La clave que cifra los secretos TOTP, solo para esta corrida. El contenedor
+# corre con otro usuario, así que tiene que poder leerla.
+STATUSSV_TOTP_KEY_PATH="$(mktemp)"
+openssl rand -base64 32 >"${STATUSSV_TOTP_KEY_PATH}"
+chmod 644 "${STATUSSV_TOTP_KEY_PATH}"
+# En Git Bash (Windows), Docker necesita la ruta en formato de Windows.
+if command -v cygpath >/dev/null 2>&1; then
+  STATUSSV_TOTP_KEY_PATH="$(cygpath -m "${STATUSSV_TOTP_KEY_PATH}")"
+fi
+export STATUSSV_TOTP_KEY_PATH
 SERVER_NAME="vps-e2e"
 
 # Cuánto se espera cada condición antes de darla por fallada.
@@ -40,6 +51,7 @@ limpiar() {
   fi
   paso "limpiando"
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  rm -f "${STATUSSV_TOTP_KEY_PATH}"
   exit $salida
 }
 trap limpiar EXIT
@@ -100,8 +112,46 @@ verde "ok: el login entregó la cookie de sesión"
 
 YO="$("${COMPOSE[@]}" exec -T server wget -q -O- --header "Cookie: ${SESION}" http://127.0.0.1:8080/v1/auth/me)"
 case "${YO}" in
-  *'"username":"e2e"'*) verde "ok: la sesión identifica al usuario" ;;
+  *'"username":"e2e"'*'"stage":"totp_enroll"'*) verde "ok: la contraseña abre una sesión a medias, para el alta del TOTP" ;;
   *) rojo "/v1/auth/me respondió: ${YO}"; exit 1 ;;
+esac
+
+# --- Segundo factor (ADR-013) ---
+
+# totp_code calcula el código TOTP (RFC 6238: HMAC-SHA1, 6 dígitos, 30 s) de un
+# secreto en base32, como lo haría la app del teléfono.
+totp_code() {
+  local clave paso hmac offset valor
+  clave="$(printf '%s' "$1" | base32 -d | od -An -tx1 | tr -d ' \n')"
+  paso="$(printf '%016x' $(( $(date +%s) / 30 )))"
+  hmac="$(printf '%s' "${paso}" | sed 's/../\\x&/g' | xargs -0 printf '%b' \
+    | openssl dgst -sha1 -mac HMAC -macopt "hexkey:${clave}" -r | cut -c1-40)"
+  offset=$(( 16#${hmac:39:1} ))
+  valor=$(( (16#${hmac:$(( offset * 2 )):8} & 0x7fffffff) % 1000000 ))
+  printf '%06d' "${valor}"
+}
+
+paso "dando de alta el segundo factor"
+ALTA="$("${COMPOSE[@]}" exec -T server wget -q -O- --header "Cookie: ${SESION}" \
+  --header 'Content-Type: application/json' --post-data '' http://127.0.0.1:8080/v1/auth/totp/enroll)"
+SECRETO="$(printf '%s' "${ALTA}" | grep -o '"secret":"[A-Z2-7]*"' | cut -d'"' -f4)"
+if [ -z "${SECRETO}" ]; then
+  rojo "el alta no devolvió el secreto: ${ALTA:0:200}"
+  exit 1
+fi
+verde "ok: el alta devolvió el secreto y el QR"
+
+SESION="$(
+  "${COMPOSE[@]}" exec -T server wget -S -q -O /dev/null \
+    --header "Cookie: ${SESION}" --header 'Content-Type: application/json' \
+    --post-data "{\"code\":\"$(totp_code "${SECRETO}")\"}" \
+    http://127.0.0.1:8080/v1/auth/totp/confirm 2>&1 \
+    | grep -io '__Host-statussv_session=svses_[A-Za-z0-9_-]*' | head -1
+)"
+YO="$("${COMPOSE[@]}" exec -T server wget -q -O- --header "Cookie: ${SESION}" http://127.0.0.1:8080/v1/auth/me)"
+case "${YO}" in
+  *'"stage":"full"'*'"recovery_codes_left":10'*) verde "ok: el código de la app completó el login" ;;
+  *) rojo "después del código, /v1/auth/me respondió: ${YO}"; exit 1 ;;
 esac
 
 # --- 2. Token de enrolamiento ---

@@ -8,6 +8,7 @@
 //	server enroll-token --server NOMBRE crea un token de enrolamiento
 //	server user-add --username NOMBRE   da de alta a una persona del panel
 //	server user-password --username N   cambia su contraseña
+//	server user-totp-reset --username N borra su segundo factor y cierra sus sesiones
 //	server version                      imprime la versión
 package main
 
@@ -54,6 +55,8 @@ func run(ctx context.Context, args []string) error {
 		return runUserAdd(ctx, args[1:])
 	case "user-password":
 		return runUserPassword(ctx, args[1:])
+	case "user-totp-reset":
+		return runUserTOTPReset(ctx, args[1:])
 	case "enroll-token":
 		return runEnrollToken(ctx, args[1:])
 	case "version", "--version", "-version":
@@ -79,10 +82,14 @@ Uso:
   server enroll-token --server NOMBRE    crea un token de enrolamiento
   server user-add --username NOMBRE      da de alta a una persona del panel (pide la contraseña)
   server user-password --username NOMBRE cambia la contraseña y cierra sus sesiones
+  server user-totp-reset --username NOMBRE borra el segundo factor y cierra sus sesiones:
+                                          el próximo login pide darlo de alta de nuevo
   server version                         imprime la versión
 
 Configuración (variables de entorno, ver .env.example):
   DATABASE_URL              cadena de conexión de PostgreSQL (obligatoria)
+  STATUSSV_TOTP_KEY_FILE    archivo con la clave que cifra los secretos TOTP (obligatoria;
+                            se genera con: openssl rand -base64 32)
   STATUSSV_LISTEN_ADDR      dónde escucha la API (por defecto 127.0.0.1:8080)
   STATUSSV_ENROLLMENT_TTL   cuánto vive un token de enrolamiento (por defecto 15m)
   STATUSSV_OFFLINE_AFTER    silencio tras el cual un servidor se marca caído (45s)

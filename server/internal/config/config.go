@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/JuanBaez77/status-sv/server/internal/auth"
 )
 
 // Valores por defecto. Escuchar solo en localhost es a propósito: en producción
@@ -54,6 +56,9 @@ type Config struct {
 	// donde corre Caddy. Desde cualquier otro origen el encabezado se ignora,
 	// porque lo puede escribir cualquiera.
 	TrustedProxies []netip.Prefix
+	// TOTPKey cifra los secretos TOTP del panel (ADR-013). Sale del archivo que
+	// nombra STATUSSV_TOTP_KEY_FILE, fuera de la base y del repositorio.
+	TOTPKey auth.TOTPKey
 }
 
 // Load arma la configuración desde el entorno y la valida.
@@ -78,6 +83,13 @@ func Load() (Config, error) {
 	if cfg.LogLevel, err = envLevel("STATUSSV_LOG_LEVEL", slog.LevelInfo); err != nil {
 		return Config{}, err
 	}
+	path := strings.TrimSpace(os.Getenv("STATUSSV_TOTP_KEY_FILE"))
+	if path == "" {
+		return Config{}, errors.New("falta STATUSSV_TOTP_KEY_FILE: el archivo con la clave que cifra los secretos TOTP (se genera con `openssl rand -base64 32`)")
+	}
+	if cfg.TOTPKey, err = auth.LoadTOTPKey(path); err != nil {
+		return Config{}, fmt.Errorf("STATUSSV_TOTP_KEY_FILE: %w", err)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -92,6 +104,8 @@ func (c Config) Validate() error {
 		return errors.New("falta DATABASE_URL")
 	case c.ListenAddr == "":
 		return errors.New("falta STATUSSV_LISTEN_ADDR")
+	case c.TOTPKey.IsZero():
+		return errors.New("falta la clave de TOTP (STATUSSV_TOTP_KEY_FILE)")
 	case c.EnrollmentTTL < minEnrollmentTTL || c.EnrollmentTTL > maxEnrollmentTTL:
 		return fmt.Errorf("STATUSSV_ENROLLMENT_TTL debe estar entre %v y %v, llegó %v",
 			minEnrollmentTTL, maxEnrollmentTTL, c.EnrollmentTTL)

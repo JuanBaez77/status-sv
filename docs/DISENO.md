@@ -532,7 +532,7 @@ Métricas
 
 Acceso
 
-- [ ] TOTP en el servidor: login en dos pasos, alta con confirmación, códigos de recuperación,
+- [x] TOTP en el servidor: login en dos pasos, alta con confirmación, códigos de recuperación,
       secreto cifrado con la clave en un archivo, y `server user-totp-reset` por SSH.
 - [ ] Pantallas del panel para el código, el alta con QR y los códigos de recuperación.
 
