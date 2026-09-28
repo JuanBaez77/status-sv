@@ -62,3 +62,34 @@ DELETE FROM project_invalid_files WHERE server_id = sqlc.arg('server_id');
 INSERT INTO project_invalid_files (server_id, file, error, seen_at)
 SELECT sqlc.arg('server_id')::uuid, unnest(sqlc.arg('files')::text[]), unnest(sqlc.arg('errors')::text[]),
        sqlc.arg('seen_at')::timestamptz;
+
+-- ListProjects devuelve todos los proyectos, con el nombre de su servidor, en
+-- orden de servidor y de nombre.
+-- name: ListProjects :many
+SELECT p.*, s.name AS server_name
+FROM projects p
+JOIN servers s ON s.id = p.server_id
+ORDER BY s.name, p.name;
+
+-- GetProject devuelve un proyecto con el nombre de su servidor.
+-- name: GetProject :one
+SELECT p.*, s.name AS server_name
+FROM projects p
+JOIN servers s ON s.id = p.server_id
+WHERE p.id = sqlc.arg('id');
+
+-- ListInvalidProjectFiles devuelve los archivos que no se pudieron usar, de
+-- todos los servidores.
+-- name: ListInvalidProjectFiles :many
+SELECT f.server_id, s.name AS server_name, f.file, f.error, f.seen_at
+FROM project_invalid_files f
+JOIN servers s ON s.id = f.server_id
+ORDER BY s.name, f.file;
+
+-- ListProjectReadErrors devuelve los servidores cuya última lectura del
+-- directorio de proyectos falló: lo que se muestra de ellos puede estar viejo.
+-- name: ListProjectReadErrors :many
+SELECT id, name, projects_detail, projects_taken_at
+FROM servers
+WHERE projects_status = 'error'
+ORDER BY name;
