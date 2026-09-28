@@ -38,6 +38,8 @@ El formato es JSON con un envelope versionado; el porqué está en
 | `metrics_ack` | Servidor → agent | Respuesta al anterior | Cuántas muestras se guardaron y la marca de tiempo de la última |
 | `runtime_state` | Agent → servidor | Al cambiar algo, y cada tanto con el consumo al día | Foto completa de contenedores, servicios y procesos no gestionados |
 | `runtime_state_ack` | Servidor → agent | Respuesta al anterior | La marca de tiempo de la foto que se guardó |
+| `projects_state` | Agent → servidor | Al conectar y cuando cambia algo | Proyectos declarados en `/etc/status-sv/projects.d` (ADR-012), los archivos inválidos (nombre y error, nunca el contenido) y el último healthcheck |
+| `projects_state_ack` | Servidor → agent | Respuesta al anterior | La marca de tiempo de los proyectos que se guardaron |
 | `command` | Servidor → agent | A demanda | Una operación de la lista cerrada, con sus parámetros tipados |
 | `command_ack` | Agent → servidor | Respuesta al anterior | Cómo terminó el comando y su resultado |
 | `error` | Servidor → agent | Ante un rechazo | Código de una lista cerrada, texto para el log y el ID del mensaje rechazado |
