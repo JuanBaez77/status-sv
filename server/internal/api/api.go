@@ -81,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
 	mux.Handle("GET /v1/servers", s.requireSession(http.HandlerFunc(s.handleListServers)))
 	mux.Handle("GET /v1/servers/{id}/metrics", s.requireSession(http.HandlerFunc(s.handleServerMetrics)))
+	mux.Handle("GET /v1/servers/{id}/runtime", s.requireSession(http.HandlerFunc(s.handleServerRuntime)))
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si
