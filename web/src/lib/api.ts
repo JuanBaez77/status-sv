@@ -329,3 +329,83 @@ export const servers = {
     return api.get<ServerRuntime>(`/v1/servers/${encodeURIComponent(id)}/runtime`)
   },
 }
+
+/**
+ * ProjectStatus es el estado de un proyecto, que el control plane deriva de lo
+ * que el agent ve correr (ADR-012):
+ *
+ * - `ok`: corre todo lo que tiene que correr y el healthcheck pasa.
+ * - `degraded`: corre algo pero no todo, o el healthcheck falla.
+ * - `down`: no corre nada.
+ * - `unknown`: el agent no pudo leer Docker o systemd.
+ */
+export type ProjectStatus = 'ok' | 'degraded' | 'down' | 'unknown'
+
+/** ProjectHealth es el healthcheck declarado y su último resultado, si hay. */
+export type ProjectHealth = {
+  url: string
+  expect_status: number
+  timeout_seconds: number
+  state?: 'passing' | 'failing'
+  checked_at?: string
+  status_code?: number
+  latency_ms?: number
+  detail?: string
+}
+
+export type ProjectSummary = {
+  id: string
+  name: string
+  server_id: string
+  server_name: string
+  environment: 'production' | 'staging'
+  runtime: 'docker' | 'systemd'
+  repo: string
+  branch: string
+  status: ProjectStatus
+  /** units cuenta lo que tiene que correr y cuánto de eso está bien. */
+  units: { total: number; healthy: number }
+  health: ProjectHealth | null
+  seen_at: string
+}
+
+export type ProjectDetail = ProjectSummary & {
+  workdir: string
+  compose_file?: string
+  compose_project?: string
+  declared_units?: string[]
+  /** missing_units son los servicios declarados que el agent no ve. */
+  missing_units: string[]
+  containers: RuntimeContainer[]
+  services: RuntimeService[]
+  /** source dice si el agent pudo leer Docker o systemd; null si nunca mandó nada. */
+  source: RuntimeSource | null
+}
+
+/** InvalidProjectFile es un project.yaml que no se pudo usar: nunca trae el contenido. */
+export type InvalidProjectFile = {
+  server_id: string
+  server_name: string
+  file: string
+  error: string
+  seen_at: string
+}
+
+/** ProjectReadError es un servidor cuya última lectura de proyectos falló. */
+export type ProjectReadError = {
+  server_id: string
+  server_name: string
+  detail: string
+  taken_at: string | null
+}
+
+export type ProjectList = {
+  projects: ProjectSummary[]
+  invalid: InvalidProjectFile[]
+  read_errors: ProjectReadError[]
+}
+
+export const projects = {
+  list: () => api.get<ProjectList>('/v1/projects'),
+  get: (id: string) => api.get<ProjectDetail>(`/v1/projects/${encodeURIComponent(id)}`),
+}

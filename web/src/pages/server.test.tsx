@@ -175,6 +175,9 @@ function answer(
     if (path === '/v1/servers') {
       return json({ servers: options.servers ?? [summary()] })
     }
+    if (path === '/v1/projects') {
+      return json({ projects: [], invalid: [], read_errors: [] })
+    }
     if (path.endsWith('/runtime')) {
       return json(options.runtime ?? runtime())
     }
