@@ -5,7 +5,10 @@
 // un cgroup (contenedores y servicios) y el utime + stime de un proceso.
 package usage
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Tracker recuerda la última lectura de cada unidad.
 //
@@ -34,7 +37,8 @@ func NewTracker(cores int) *Tracker {
 }
 
 // CPUPercent registra que la unidad key llevaba cpu de tiempo de CPU en el
-// instante at, y devuelve el porcentaje desde la lectura anterior.
+// instante at, y devuelve el porcentaje desde la lectura anterior, con dos
+// decimales.
 //
 // Devuelve false cuando todavía no hay contra qué comparar: la primera vez que
 // aparece la unidad, o cuando su contador volvió atrás porque se recreó (un
@@ -50,6 +54,9 @@ func (t *Tracker) CPUPercent(key string, cpu time.Duration, at time.Time) (float
 	}
 
 	percent := float64(cpu-prev.cpu) / (float64(elapsed) * float64(t.cores)) * 100
+	// Dos decimales alcanzan para un panel, y un número como 0.0012963399449264
+	// solo agranda el mensaje.
+	percent = math.Round(percent*100) / 100
 	return min(percent, 100), true
 }
 

@@ -103,3 +103,12 @@ func TestSweepForgetsUnitsNotSeen(t *testing.T) {
 		t.Error("una unidad olvidada vuelve a empezar sin porcentaje")
 	}
 }
+
+func TestPercentHasTwoDecimals(t *testing.T) {
+	tr := NewTracker(3)
+	tr.CPUPercent("a", 0, t0)
+	got, _ := tr.CPUPercent("a", time.Second, t0.Add(10*time.Second))
+	if got != 3.33 {
+		t.Errorf("obtuve %v, esperaba 3.33", got)
+	}
+}

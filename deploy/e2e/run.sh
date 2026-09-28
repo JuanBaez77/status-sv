@@ -164,6 +164,13 @@ esperar "la ingesta agregó el minuto en metrics_1m" hay_metricas metrics_1m
 # La tasa de red necesita dos muestras seguidas: llega con el segundo lote.
 esperar "hay tasas de red en metrics_1m_networks" hay_metricas metrics_1m_networks
 
+paso "verificando que llega la foto de runtime"
+# En el contenedor del agent no hay Docker ni systemd: esas fuentes llegan como
+# no disponibles, que es justo lo que la foto tiene que decir. Lo que importa
+# acá es que la foto viaja, se guarda y se confirma.
+esperar "llegaron las tres fuentes a runtime_sources" hay_metricas runtime_sources 2
+verde "ok: $(psql_query "SELECT string_agg(source || ' ' || status, ', ' ORDER BY source) FROM runtime_sources m JOIN servers s ON s.id = m.server_id WHERE s.name = '${SERVER_NAME}'")"
+
 # --- 5. Reconexión ---
 
 paso "reiniciando el control plane para forzar una reconexión"

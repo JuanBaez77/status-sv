@@ -43,6 +43,11 @@ type fakeControlPlane struct {
 	// samples son todas las muestras recibidas, repetidas incluidas.
 	samples         []proto.Sample
 	metricsMessages int
+
+	// runtimeStates son las fotos de runtime recibidas; runtimeMode dice qué
+	// contestarles, igual que con las métricas.
+	runtimeStates []proto.RuntimeState
+	runtimeMode   metricsMode
 }
 
 type metricsMode int
@@ -97,6 +102,12 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 
 		envelope, err := proto.ParseEnvelope(raw)
 		if err != nil {
+			continue
+		}
+		if envelope.Type == proto.TypeRuntimeState {
+			if err := f.handleRuntime(r.Context(), conn, envelope); err != nil {
+				return
+			}
 			continue
 		}
 		if envelope.Type == proto.TypeMetrics {
