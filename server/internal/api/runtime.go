@@ -65,6 +65,11 @@ func (s *Server) handleRuntimeState(ctx context.Context, conn *websocket.Conn, s
 		return nil
 	}
 
+	// Los paneles que miran este servidor la ven al instante.
+	if applied {
+		s.publishRuntime(ctx, server.ID)
+	}
+
 	s.log.DebugContext(ctx, "foto de runtime",
 		"servidor", server.Name,
 		"aplicada", applied,
