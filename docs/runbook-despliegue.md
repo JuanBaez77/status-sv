@@ -230,7 +230,8 @@ qué lo rompió.
 # En tu máquina:
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w \
   -X github.com/JuanBaez77/status-sv/internal/buildinfo.Version=$(git describe --tags --always) \
-  -X github.com/JuanBaez77/status-sv/internal/buildinfo.Commit=$(git rev-parse HEAD)" \
+  -X github.com/JuanBaez77/status-sv/internal/buildinfo.Commit=$(git rev-parse HEAD) \
+  -X github.com/JuanBaez77/status-sv/internal/buildinfo.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o statussv-agent ./agent/cmd/agent
 
 scp -i ~/.ssh/statussv_deploy statussv-agent deploy/install-agent.sh root@<IP>:/tmp/
@@ -304,6 +305,15 @@ docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
 
 `hace` tiene que quedar siempre por debajo de 15 segundos.
 
+Desde el Sprint 2, además, cada fuente del estado de runtime tiene que estar en `ok` (o en
+`unavailable` si ese servidor no tiene Docker), y la foto no puede tener más de 5 minutos:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres \
+  psql -U statussv -d statussv -c "SELECT source, status, omitted, detail FROM runtime_sources;" \
+  -c "SELECT name, now() - runtime_taken_at AS foto FROM servers;"
+```
+
 ### Qué métricas lee el agent
 
 `sample` toma una muestra y la imprime como JSON, sin conectarse al control plane. Sirve para
@@ -343,6 +353,11 @@ patrones separados por comas (por ejemplo `snapd*,unattended-upgrades.service`).
 `STATUSSV_VERSION` en `deploy/.env`, y:
 
 ```bash
+# Si la versión nueva trae una migración, el respaldo primero: migrate down deshace el
+# esquema, pero no devuelve lo que la migración haya transformado.
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres \
+  pg_dump -U statussv -d statussv | gzip > /root/statussv-db-$(date +%Y%m%d-%H%M%S).sql.gz
+
 docker compose -f docker-compose.prod.yml --env-file .env build server
 docker compose -f docker-compose.prod.yml --env-file .env run --rm server migrate up
 docker compose -f docker-compose.prod.yml --env-file .env up -d server
@@ -382,7 +397,11 @@ antes de tocar nada: `chmod +x` al binario y de nuevo.
 anterior, poner esa versión en `STATUSSV_VERSION` y `up -d server`. Si la versión nueva traía una
 migración, antes: `run --rm server migrate down`.
 
-**Agent:** volver a correr `install-agent.sh` con el binario anterior.
+**Agent:** volver a correr `install-agent.sh` con el binario anterior. Conviene guardarlo antes
+de actualizar (`cp -p /usr/local/bin/statussv-agent /root/statussv-agent-<versión>`), porque el
+instalador lo reemplaza. Un binario anterior al Sprint 2 no lee Docker, así que el drop-in
+`10-docker.conf` le da un acceso que no usa: para volver del todo, borrar también
+`/etc/systemd/system/statussv-agent.service.d/10-docker.conf` y `systemctl daemon-reload`.
 
 ## 5. Revocar un agent
 
@@ -427,6 +446,9 @@ Salieron al desplegar en `cristales-baez-prod` y cuestan tiempo si se redescubre
 - **Por SSH con un script por la entrada estándar, `docker compose run` y `exec` van con `-T` y
   `</dev/null`.** Si no, leen la entrada estándar y se tragan el resto del script, que termina en
   silencio a la mitad. Interactivamente no pasa.
+- **Recién levantado, el control plane ocupa varias veces lo que ocupa andando.** En la
+  actualización del Sprint 2 midió 43 MB al minuto de arrancar y 5 MB a los cinco: es lo que el
+  runtime de Go todavía no devolvió. El consumo se mide pasados unos minutos, no al arrancar.
 - **Cloudflare responde 403 (`error code: 1000`) si el cliente manda su propio `CF-Connecting-IP`.**
   Es esperado y es una protección más: ese encabezado lo escribe solo Cloudflare. Para probar la
   falsificación de IP a través del proxy, alcanza con `X-Forwarded-For`.
