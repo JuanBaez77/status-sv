@@ -144,6 +144,7 @@ function runtime(overrides: Partial<ServerRuntime> = {}): ServerRuntime {
         load_state: 'loaded',
         active_state: 'active',
         sub_state: 'running',
+        result: '',
         main_pid: 812,
         active_since: seen,
         usage: { cpu_percent: 0.1, memory_bytes: 12 * 1024 ** 2 },

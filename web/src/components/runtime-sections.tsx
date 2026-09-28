@@ -15,7 +15,9 @@ import { bytes, percent, since } from '@/lib/format'
 import {
   byAttention,
   containerStatus,
+  imageName,
   processTitle,
+  serviceResult,
   serviceStatus,
   sourceNotice,
   summarize,
@@ -102,7 +104,7 @@ function ContainerRow({ serverID, container: c }: { serverID: string; container:
       title={c.name}
       status={containerStatus(c)}
       usage={c.usage}
-      details={[c.image, project, c.started_at && `arrancó ${since(c.started_at)}`]}
+      details={[imageName(c.image), project, c.started_at && `arrancó ${since(c.started_at)}`]}
       logs={{ serverID, kind: 'container', target: c.id }}
     />
   )
@@ -115,7 +117,11 @@ function ServicesCard({ runtime }: { runtime: ServerRuntime }) {
   return (
     <Section
       title="Servicios"
-      summary={summaryText(summary, summary.ok === 1 ? 'activo' : 'activos', 'sin estado')}
+      summary={summaryText(
+        summary,
+        summary.ok === 1 ? 'activo' : 'activos',
+        summary.idle === 1 ? 'parado' : 'parados',
+      )}
       notice={sourceNotice(runtime.sources.systemd, 'systemd')}
     >
       {sorted.length > 0 && (
@@ -137,6 +143,7 @@ function ServiceRow({ serverID, service: s }: { serverID: string; service: Runti
       usage={s.usage}
       details={[
         extraSubState(s),
+        serviceResult(s),
         s.main_pid > 0 && `PID ${s.main_pid}`,
         s.active_since && `activo ${since(s.active_since)}`,
       ]}

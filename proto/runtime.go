@@ -328,14 +328,21 @@ var knownActiveStates = map[ActiveState]bool{
 
 // Service es un servicio de systemd.
 //
-// LoadState y SubState se pasan como los da systemd, sin lista cerrada: son
-// informativos y su conjunto cambia según el tipo de unidad. ActiveState sí es
-// una lista cerrada, porque es lo que el panel usa para pintar el estado.
+// LoadState, SubState y Result se pasan como los da systemd, sin lista
+// cerrada: son informativos y su conjunto cambia según el tipo de unidad y la
+// versión de systemd. ActiveState sí es una lista cerrada, porque es lo que el
+// panel usa para pintar el estado.
+//
+// Result dice cómo terminó la última vez ("success", "exit-code", "signal",
+// "oom-kill"...) y viaja solo en los servicios parados o caídos: es lo que
+// separa uno que terminó bien de uno que se cayó. Un agent anterior no lo
+// manda.
 type Service struct {
 	Unit        string      `json:"unit"`
 	LoadState   string      `json:"load_state"`
 	ActiveState ActiveState `json:"active_state"`
 	SubState    string      `json:"sub_state"`
+	Result      string      `json:"result,omitempty"`
 	MainPID     int         `json:"main_pid,omitempty"`
 	ActiveSince time.Time   `json:"active_since,omitzero"`
 	Usage       *Usage      `json:"usage,omitempty"`
@@ -355,6 +362,8 @@ func (s Service) Validate() error {
 		return fmt.Errorf("estado desconocido %q", s.ActiveState)
 	case !validName(s.SubState, maxStateLen, isStateRune):
 		return fmt.Errorf("sub_state inválido %q", s.SubState)
+	case s.Result != "" && !validName(s.Result, maxStateLen, isStateRune):
+		return fmt.Errorf("result inválido %q", s.Result)
 	case s.MainPID < 0 || s.MainPID > maxPID:
 		return fmt.Errorf("PID principal fuera de rango: %d", s.MainPID)
 	}

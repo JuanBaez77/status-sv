@@ -32,7 +32,7 @@ WHERE server_id = sqlc.arg('server_id')
 -- las fechas y -1 para el consumo.
 -- name: UpsertRuntimeUnits :execrows
 INSERT INTO runtime_units (
-    server_id, kind, unit_key, name, state, health, load_state, sub_state, image,
+    server_id, kind, unit_key, name, state, health, load_state, sub_state, result, image,
     compose_project, compose_service, pid, user_name, command, started_at,
     cpu_percent, memory_bytes, seen_at
 )
@@ -44,6 +44,7 @@ SELECT sqlc.arg('server_id')::uuid,
        unnest(sqlc.arg('health')::text[]),
        unnest(sqlc.arg('load_state')::text[]),
        unnest(sqlc.arg('sub_state')::text[]),
+       unnest(sqlc.arg('result')::text[]),
        unnest(sqlc.arg('image')::text[]),
        unnest(sqlc.arg('compose_project')::text[]),
        unnest(sqlc.arg('compose_service')::text[]),
@@ -60,6 +61,7 @@ SET name            = EXCLUDED.name,
     health          = EXCLUDED.health,
     load_state      = EXCLUDED.load_state,
     sub_state       = EXCLUDED.sub_state,
+    result          = EXCLUDED.result,
     image           = EXCLUDED.image,
     compose_project = EXCLUDED.compose_project,
     compose_service = EXCLUDED.compose_service,
@@ -81,7 +83,7 @@ ORDER BY source;
 -- ListRuntimeUnits devuelve las unidades de un servidor, agrupadas por tipo y
 -- en orden de nombre.
 -- name: ListRuntimeUnits :many
-SELECT kind, unit_key, name, state, health, load_state, sub_state, image,
+SELECT kind, unit_key, name, state, health, load_state, sub_state, result, image,
        compose_project, compose_service, pid, user_name, command, started_at,
        cpu_percent, memory_bytes, seen_at
 FROM runtime_units

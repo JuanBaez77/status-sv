@@ -451,6 +451,10 @@ Agent
       stream de eventos (sin los `exec_*` de los healthchecks), que reabre solo si se corta.
 - [x] Servicios de systemd por D-Bus de solo lectura: lo que corre, lo que falló y lo habilitado que
       está parado, sin los oneshot que ya terminaron ni una lista de exclusión (`systemd-*`, `user@*`, `dbus`).
+      De lo parado o caído viaja cómo terminó (`result` de systemd): lo que terminó bien se muestra en
+      gris, sin contar como alarma, y lo que no arrancó porque su condición no se cumple en ese servidor
+      no se muestra. Salió del despliegue: en producción, tres servicios que habían terminado bien
+      aparecían "para revisar".
 - [x] Procesos no gestionados: recorrido de `/proc` con atribución por cgroup (Docker, servicio o
       ninguno), los 20 más pesados por memoria y CPU, solo lectura.
 - [x] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current` sin la caché inactiva, como

@@ -18,10 +18,10 @@ import type {
  *
  * - ok: funciona como tiene que funcionar.
  * - warning: está en transición o no está donde debería (un servicio
- *   habilitado que está parado).
+ *   habilitado que se paró y no se sabe por qué).
  * - bad: está roto y alguien tiene que mirarlo.
  * - idle: parado, y no es necesariamente un problema (un contenedor de una
- *   tarea que ya terminó).
+ *   tarea que ya terminó, o un servicio que terminó bien).
  */
 export type Tone = 'ok' | 'warning' | 'bad' | 'idle'
 
@@ -56,10 +56,12 @@ export function serviceStatus(s: RuntimeService): UnitStatus {
       return { tone: 'ok', label: 'Activo' }
     case 'failed':
       return { tone: 'bad', label: 'Falló' }
-    // El agent solo manda un servicio parado si está habilitado: arranca con
-    // el sistema y no está corriendo, así que es una advertencia.
+    // El agent solo manda un servicio parado si está habilitado. Si terminó
+    // bien, corrió y terminó solo (una tarea de arranque) o alguien lo paró a
+    // propósito: no es un problema. Si no se sabe cómo terminó (un agent
+    // anterior no lo dice) o terminó mal, hay que mirarlo.
     case 'inactive':
-      return { tone: 'warning', label: 'Parado' }
+      return s.result === 'success' ? { tone: 'idle', label: 'Parado' } : { tone: 'warning', label: 'Parado' }
     case 'activating':
       return { tone: 'warning', label: 'Arrancando' }
     case 'deactivating':
@@ -72,6 +74,36 @@ export function serviceStatus(s: RuntimeService): UnitStatus {
     default:
       return { tone: 'idle', label: 'Desconocido' }
   }
+}
+
+/** results traduce los motivos de systemd que más se ven. */
+const results: Record<string, string> = {
+  'exit-code': 'salió con error',
+  signal: 'lo mató una señal',
+  'core-dump': 'se colgó (core dump)',
+  'oom-kill': 'se quedó sin memoria',
+  timeout: 'se pasó de tiempo',
+  watchdog: 'no respondió al watchdog',
+  'start-limit-hit': 'demasiados reinicios seguidos',
+  resources: 'no consiguió recursos para arrancar',
+}
+
+/**
+ * serviceResult dice por qué terminó un servicio, si terminó mal. Un motivo
+ * que no está en la lista se muestra como lo da systemd.
+ */
+export function serviceResult(s: RuntimeService): string | null {
+  if (s.result === '' || s.result === 'success') return null
+  return results[s.result] ?? s.result
+}
+
+/**
+ * imageName acorta una imagen sin nombre, que Docker muestra como su hash
+ * entero, a los 12 caracteres de `docker ps`.
+ */
+export function imageName(image: string): string {
+  const hash = /^sha256:([0-9a-f]{64})$/.exec(image)
+  return hash ? hash[1].slice(0, 12) : image
 }
 
 /** toneOrder pone primero lo que hay que mirar. */

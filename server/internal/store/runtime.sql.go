@@ -102,7 +102,7 @@ func (q *Queries) ListRuntimeSources(ctx context.Context, serverID uuid.UUID) ([
 }
 
 const listRuntimeUnits = `-- name: ListRuntimeUnits :many
-SELECT kind, unit_key, name, state, health, load_state, sub_state, image,
+SELECT kind, unit_key, name, state, health, load_state, sub_state, result, image,
        compose_project, compose_service, pid, user_name, command, started_at,
        cpu_percent, memory_bytes, seen_at
 FROM runtime_units
@@ -118,6 +118,7 @@ type ListRuntimeUnitsRow struct {
 	Health         string
 	LoadState      string
 	SubState       string
+	Result         string
 	Image          string
 	ComposeProject string
 	ComposeService string
@@ -149,6 +150,7 @@ func (q *Queries) ListRuntimeUnits(ctx context.Context, serverID uuid.UUID) ([]L
 			&i.Health,
 			&i.LoadState,
 			&i.SubState,
+			&i.Result,
 			&i.Image,
 			&i.ComposeProject,
 			&i.ComposeService,
@@ -205,7 +207,7 @@ func (q *Queries) UpsertRuntimeSource(ctx context.Context, arg UpsertRuntimeSour
 
 const upsertRuntimeUnits = `-- name: UpsertRuntimeUnits :execrows
 INSERT INTO runtime_units (
-    server_id, kind, unit_key, name, state, health, load_state, sub_state, image,
+    server_id, kind, unit_key, name, state, health, load_state, sub_state, result, image,
     compose_project, compose_service, pid, user_name, command, started_at,
     cpu_percent, memory_bytes, seen_at
 )
@@ -220,19 +222,21 @@ SELECT $1::uuid,
        unnest($9::text[]),
        unnest($10::text[]),
        unnest($11::text[]),
-       unnest($12::integer[]),
-       unnest($13::text[]),
+       unnest($12::text[]),
+       unnest($13::integer[]),
        unnest($14::text[]),
-       NULLIF(unnest($15::timestamptz[]), '0001-01-01 00:00:00+00'::timestamptz),
-       NULLIF(unnest($16::real[]), -1),
-       NULLIF(unnest($17::bigint[]), -1),
-       $18::timestamptz
+       unnest($15::text[]),
+       NULLIF(unnest($16::timestamptz[]), '0001-01-01 00:00:00+00'::timestamptz),
+       NULLIF(unnest($17::real[]), -1),
+       NULLIF(unnest($18::bigint[]), -1),
+       $19::timestamptz
 ON CONFLICT (server_id, kind, unit_key) DO UPDATE
 SET name            = EXCLUDED.name,
     state           = EXCLUDED.state,
     health          = EXCLUDED.health,
     load_state      = EXCLUDED.load_state,
     sub_state       = EXCLUDED.sub_state,
+    result          = EXCLUDED.result,
     image           = EXCLUDED.image,
     compose_project = EXCLUDED.compose_project,
     compose_service = EXCLUDED.compose_service,
@@ -254,6 +258,7 @@ type UpsertRuntimeUnitsParams struct {
 	Health         []string
 	LoadState      []string
 	SubState       []string
+	Result         []string
 	Image          []string
 	ComposeProject []string
 	ComposeService []string
@@ -280,6 +285,7 @@ func (q *Queries) UpsertRuntimeUnits(ctx context.Context, arg UpsertRuntimeUnits
 		arg.Health,
 		arg.LoadState,
 		arg.SubState,
+		arg.Result,
 		arg.Image,
 		arg.ComposeProject,
 		arg.ComposeService,

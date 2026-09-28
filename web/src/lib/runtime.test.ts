@@ -4,6 +4,8 @@ import type { RuntimeContainer, RuntimeService } from '@/lib/api'
 import {
   byAttention,
   containerStatus,
+  imageName,
+  serviceResult,
   serviceStatus,
   sourceNotice,
   summarize,
@@ -32,6 +34,7 @@ function service(overrides: Partial<RuntimeService>): RuntimeService {
     load_state: 'loaded',
     active_state: 'active',
     sub_state: 'running',
+    result: '',
     main_pid: 812,
     active_since: null,
     usage: null,
@@ -58,14 +61,39 @@ describe('containerStatus', () => {
 
 describe('serviceStatus', () => {
   it.each([
-    ['active', 'ok'],
-    ['failed', 'bad'],
-    // Parado y habilitado: arranca con el sistema y no está corriendo.
-    ['inactive', 'warning'],
-    ['activating', 'warning'],
-    ['unknown', 'idle'],
-  ] as const)('%s es %s', (active_state, tone) => {
-    expect(serviceStatus(service({ active_state })).tone).toBe(tone)
+    ['active', '', 'ok'],
+    ['failed', 'exit-code', 'bad'],
+    // Parado y habilitado: si terminó bien (una tarea de arranque, o alguien
+    // lo paró), no es un problema; si terminó mal o no se sabe, sí.
+    ['inactive', 'success', 'idle'],
+    ['inactive', 'exit-code', 'warning'],
+    ['inactive', '', 'warning'],
+    ['activating', '', 'warning'],
+    ['unknown', '', 'idle'],
+  ] as const)('%s con result %o es %s', (active_state, result, tone) => {
+    expect(serviceStatus(service({ active_state, result })).tone).toBe(tone)
+  })
+})
+
+describe('serviceResult', () => {
+  it.each([
+    ['', null],
+    ['success', null],
+    ['oom-kill', 'se quedó sin memoria'],
+    // Un motivo nuevo de systemd se muestra como viene.
+    ['hibernado', 'hibernado'],
+  ])('%o dice %o', (result, text) => {
+    expect(serviceResult(service({ active_state: 'failed', result }))).toBe(text)
+  })
+})
+
+describe('imageName', () => {
+  it('acorta una imagen sin nombre como docker ps', () => {
+    expect(imageName(`sha256:197a87d24e7f${'0'.repeat(52)}`)).toBe('197a87d24e7f')
+  })
+  it('deja igual una imagen con nombre', () => {
+    expect(imageName('postgres:16-alpine')).toBe('postgres:16-alpine')
+    expect(imageName('ghcr.io/x/y@sha256:' + 'a'.repeat(64))).toBe('ghcr.io/x/y@sha256:' + 'a'.repeat(64))
   })
 })
 
