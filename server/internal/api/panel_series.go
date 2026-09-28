@@ -15,6 +15,7 @@ import (
 const (
 	resolutionRaw    = "raw"
 	resolutionMinute = "1m"
+	resolutionHour   = "1h"
 )
 
 // rangeQuery es un pedido de métricas ya validado.
@@ -26,8 +27,9 @@ type rangeQuery struct {
 // seriesResponse son las series de un servidor en un rango.
 //
 // En resolución 1m cada punto es el promedio del minuto, y los campos *_max son
-// el pico: un pico corto no desaparece en el promedio. En crudo, promedio y
-// pico son el mismo valor, el de la muestra.
+// el pico: un pico corto no desaparece en el promedio. En 1h es igual, y además
+// viajan los *_min de CPU y memoria, el promedio por minuto más bajo de la hora.
+// En crudo, promedio y pico son el mismo valor, el de la muestra.
 type seriesResponse struct {
 	ServerID   uuid.UUID `json:"server_id"`
 	Resolution string    `json:"resolution"`
@@ -44,6 +46,7 @@ type samplePoint struct {
 	TS                  time.Time `json:"ts"`
 	CPUUsedPercent      float32   `json:"cpu_used_percent"`
 	CPUUsedMaxPercent   float32   `json:"cpu_used_max_percent"`
+	CPUUsedMinPercent   *float32  `json:"cpu_used_min_percent,omitempty"`
 	CPUIOWaitPercent    float32   `json:"cpu_iowait_percent"`
 	CPUIOWaitMaxPercent float32   `json:"cpu_iowait_max_percent"`
 	CPUStealPercent     float32   `json:"cpu_steal_percent"`
@@ -51,6 +54,7 @@ type samplePoint struct {
 	MemTotalBytes       int64     `json:"mem_total_bytes"`
 	MemUsedBytes        int64     `json:"mem_used_bytes"`
 	MemUsedMaxBytes     int64     `json:"mem_used_max_bytes"`
+	MemUsedMinBytes     *int64    `json:"mem_used_min_bytes,omitempty"`
 	SwapTotalBytes      int64     `json:"swap_total_bytes"`
 	SwapUsedBytes       int64     `json:"swap_used_bytes"`
 	SwapUsedMaxBytes    int64     `json:"swap_used_max_bytes"`
@@ -121,14 +125,19 @@ func parseRange(r *http.Request, now time.Time) (rangeQuery, error) {
 
 	switch raw := r.URL.Query().Get("resolution"); raw {
 	case "":
-		q.resolution = resolutionRaw
-		if q.to.Sub(q.from) > rawRangeLimit {
+		switch span := q.to.Sub(q.from); {
+		case span <= rawRangeLimit:
+			q.resolution = resolutionRaw
+		case span <= minuteRangeLimit:
 			q.resolution = resolutionMinute
+		default:
+			q.resolution = resolutionHour
 		}
-	case resolutionRaw, resolutionMinute:
+	case resolutionRaw, resolutionMinute, resolutionHour:
 		q.resolution = raw
 	default:
-		return rangeQuery{}, fmt.Errorf("resolution tiene que ser %q o %q, llegó %q", resolutionRaw, resolutionMinute, raw)
+		return rangeQuery{}, fmt.Errorf("resolution tiene que ser %q, %q o %q, llegó %q",
+			resolutionRaw, resolutionMinute, resolutionHour, raw)
 	}
 
 	return q, nil
@@ -146,10 +155,14 @@ func (s *Server) readSeries(ctx context.Context, serverID uuid.UUID, q rangeQuer
 		Networks:   []networkSeries{},
 	}
 
-	if q.resolution == resolutionRaw {
+	switch q.resolution {
+	case resolutionRaw:
 		return s.readRawSeries(ctx, serverID, q, out)
+	case resolutionHour:
+		return s.readHourSeries(ctx, serverID, q, out)
+	default:
+		return s.readMinuteSeries(ctx, serverID, q, out)
 	}
-	return s.readMinuteSeries(ctx, serverID, q, out)
 }
 
 func (s *Server) readRawSeries(ctx context.Context, serverID uuid.UUID, q rangeQuery, out seriesResponse) (seriesResponse, error) {
@@ -249,6 +262,68 @@ func (s *Server) readMinuteSeries(ctx context.Context, serverID uuid.UUID, q ran
 	})
 	if err != nil {
 		return seriesResponse{}, fmt.Errorf("leer las interfaces por minuto: %w", err)
+	}
+	for _, row := range networks {
+		out.Networks = appendNetworkPoint(out.Networks, row.Interface, networkPoint{
+			TS:          row.Bucket,
+			RxPerSec:    row.RxAvgPerSec,
+			RxMaxPerSec: row.RxMaxPerSec,
+			TxPerSec:    row.TxAvgPerSec,
+			TxMaxPerSec: row.TxMaxPerSec,
+		})
+	}
+
+	out.Truncated = len(samples) == maxRows || len(disks) == maxRows || len(networks) == maxRows
+	return out, nil
+}
+
+func (s *Server) readHourSeries(ctx context.Context, serverID uuid.UUID, q rangeQuery, out seriesResponse) (seriesResponse, error) {
+	samples, err := s.queries.ListHourSamples(ctx, store.ListHourSamplesParams{
+		ServerID: serverID, FromTs: q.from, ToTs: q.to, MaxRows: maxRows,
+	})
+	if err != nil {
+		return seriesResponse{}, fmt.Errorf("leer las muestras por hora: %w", err)
+	}
+	for _, row := range samples {
+		out.Samples = append(out.Samples, samplePoint{
+			TS:                  row.Bucket,
+			CPUUsedPercent:      row.CpuUsedAvg,
+			CPUUsedMaxPercent:   row.CpuUsedMax,
+			CPUUsedMinPercent:   &row.CpuUsedMin,
+			CPUIOWaitPercent:    row.CpuIowaitAvg,
+			CPUIOWaitMaxPercent: row.CpuIowaitMax,
+			CPUStealPercent:     row.CpuStealAvg,
+			CPUCores:            row.CpuCores,
+			MemTotalBytes:       row.MemTotalBytes,
+			MemUsedBytes:        row.MemUsedAvgBytes,
+			MemUsedMaxBytes:     row.MemUsedMaxBytes,
+			MemUsedMinBytes:     &row.MemUsedMinBytes,
+			SwapTotalBytes:      row.SwapTotalBytes,
+			SwapUsedBytes:       row.SwapUsedAvgBytes,
+			SwapUsedMaxBytes:    row.SwapUsedMaxBytes,
+			Load1:               row.Load1Avg,
+			Load5:               row.Load5Avg,
+			Load15:              row.Load15Avg,
+		})
+	}
+
+	disks, err := s.queries.ListHourDisks(ctx, store.ListHourDisksParams{
+		ServerID: serverID, FromTs: q.from, ToTs: q.to, MaxRows: maxRows,
+	})
+	if err != nil {
+		return seriesResponse{}, fmt.Errorf("leer los discos por hora: %w", err)
+	}
+	for _, row := range disks {
+		out.Disks = appendDiskPoint(out.Disks, row.Mountpoint, diskPoint{
+			TS: row.Bucket, TotalBytes: row.TotalBytes, UsedBytes: row.UsedMaxBytes, AvailableBytes: row.AvailableMinBytes,
+		})
+	}
+
+	networks, err := s.queries.ListHourNetworks(ctx, store.ListHourNetworksParams{
+		ServerID: serverID, FromTs: q.from, ToTs: q.to, MaxRows: maxRows,
+	})
+	if err != nil {
+		return seriesResponse{}, fmt.Errorf("leer las interfaces por hora: %w", err)
 	}
 	for _, row := range networks {
 		out.Networks = appendNetworkPoint(out.Networks, row.Interface, networkPoint{

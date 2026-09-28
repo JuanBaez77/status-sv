@@ -86,3 +86,32 @@ WHERE server_id = sqlc.arg('server_id')
   AND bucket < sqlc.arg('to_ts')::timestamptz
 ORDER BY interface, bucket
 LIMIT sqlc.arg('max_rows');
+
+-- name: ListHourSamples :many
+SELECT bucket, samples, cpu_used_min, cpu_used_avg, cpu_used_max, cpu_iowait_avg, cpu_iowait_max, cpu_steal_avg,
+       cpu_cores, mem_total_bytes, mem_used_min_bytes, mem_used_avg_bytes, mem_used_max_bytes,
+       swap_total_bytes, swap_used_avg_bytes, swap_used_max_bytes, load1_avg, load5_avg, load15_avg
+FROM metrics_1h
+WHERE server_id = sqlc.arg('server_id')
+  AND bucket >= sqlc.arg('from_ts')::timestamptz
+  AND bucket < sqlc.arg('to_ts')::timestamptz
+ORDER BY bucket
+LIMIT sqlc.arg('max_rows');
+
+-- name: ListHourDisks :many
+SELECT bucket, mountpoint, total_bytes, used_max_bytes, available_min_bytes
+FROM metrics_1h_disks
+WHERE server_id = sqlc.arg('server_id')
+  AND bucket >= sqlc.arg('from_ts')::timestamptz
+  AND bucket < sqlc.arg('to_ts')::timestamptz
+ORDER BY mountpoint, bucket
+LIMIT sqlc.arg('max_rows');
+
+-- name: ListHourNetworks :many
+SELECT bucket, interface, rx_avg_per_sec, rx_max_per_sec, tx_avg_per_sec, tx_max_per_sec
+FROM metrics_1h_networks
+WHERE server_id = sqlc.arg('server_id')
+  AND bucket >= sqlc.arg('from_ts')::timestamptz
+  AND bucket < sqlc.arg('to_ts')::timestamptz
+ORDER BY interface, bucket
+LIMIT sqlc.arg('max_rows');

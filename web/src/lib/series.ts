@@ -17,7 +17,7 @@ export type ChartLine = {
   color: ChartColor
   /** values tiene un valor por cada instante de ChartData.x; null es un hueco. */
   values: (number | null)[]
-  /** dashed marca las líneas de referencia (los picos), que van punteadas. */
+  /** dashed marca las líneas de referencia (picos y mínimos), que van punteadas. */
   dashed?: boolean
 }
 
@@ -191,12 +191,21 @@ export function cpuChart(metrics: ServerMetrics): ChartData {
     { label: 'Uso', color: 'chart-1', values: onAxis(x, metrics.samples, (s) => s.cpu_used_percent) },
   ]
   // En crudo el pico es la misma muestra: repetir la línea no diría nada.
-  if (metrics.resolution === '1m') {
+  if (metrics.resolution !== 'raw') {
     lines.push({
       label: 'Pico',
       color: 'chart-1',
       dashed: true,
       values: onAxis(x, metrics.samples, (s) => s.cpu_used_max_percent),
+    })
+  }
+  // Por hora, además, el minuto más tranquilo: pico y mínimo arman la banda.
+  if (metrics.resolution === '1h') {
+    lines.push({
+      label: 'Mínimo',
+      color: 'chart-2',
+      dashed: true,
+      values: onAxis(x, metrics.samples, (s) => s.cpu_used_min_percent ?? s.cpu_used_percent),
     })
   }
   lines.push({
@@ -212,12 +221,20 @@ export function memoryChart(metrics: ServerMetrics): ChartData {
   const lines: ChartLine[] = [
     { label: 'En uso', color: 'chart-1', values: onAxis(x, metrics.samples, (s) => s.mem_used_bytes) },
   ]
-  if (metrics.resolution === '1m') {
+  if (metrics.resolution !== 'raw') {
     lines.push({
       label: 'Pico',
       color: 'chart-1',
       dashed: true,
       values: onAxis(x, metrics.samples, (s) => s.mem_used_max_bytes),
+    })
+  }
+  if (metrics.resolution === '1h') {
+    lines.push({
+      label: 'Mínimo',
+      color: 'chart-2',
+      dashed: true,
+      values: onAxis(x, metrics.samples, (s) => s.mem_used_min_bytes ?? s.mem_used_bytes),
     })
   }
   // El swap solo aparece si el servidor tiene: en la mayoría sería una línea en cero.

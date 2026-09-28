@@ -526,7 +526,9 @@ Métricas
       de retención. La ingesta recalcula la hora que toca cada lote a partir de `metrics_1m`, en la
       misma transacción, como el minuto ([ADR-009](adr/ADR-009-agregado-por-minuto-en-la-ingesta.md)).
       La migración carga la hora de lo que ya hay por minuto.
-- [ ] La API sirve la resolución `1h` y el panel suma los rangos de 30 días, 90 días y 1 año.
+- [x] La API sirve la resolución `1h` y el panel suma los rangos de 30 días, 90 días y 1 año. La
+      resolución sale sola del largo del rango: hasta 3 h en crudo, hasta 48 h por minuto y más por
+      hora, con una línea de mínimo además del pico.
 
 Acceso
 

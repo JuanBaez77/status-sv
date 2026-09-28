@@ -60,6 +60,21 @@ func TestParseRange(t *testing.T) {
 			wantFrom: time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC), wantTo: testNow,
 		},
 		{
+			name:  "más de 48 horas, por hora",
+			query: "from=2026-09-19T12:00:00Z&to=2026-09-22T12:00:00Z", wantResolution: resolutionHour,
+			wantFrom: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC), wantTo: testNow,
+		},
+		{
+			name:  "un año entero",
+			query: "from=2025-09-22T12:00:00Z&to=2026-09-22T12:00:00Z", wantResolution: resolutionHour,
+			wantFrom: time.Date(2025, 9, 22, 12, 0, 0, 0, time.UTC), wantTo: testNow,
+		},
+		{
+			name:  "por hora pedida a mano",
+			query: "resolution=1h", wantResolution: resolutionHour,
+			wantFrom: testNow.Add(-time.Hour), wantTo: testNow,
+		},
+		{
 			name:  "resolución pedida a mano",
 			query: "resolution=1m", wantResolution: resolutionMinute,
 			wantFrom: testNow.Add(-time.Hour), wantTo: testNow,

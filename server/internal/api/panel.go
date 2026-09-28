@@ -29,14 +29,20 @@ const recentWindow = 15 * time.Minute
 const (
 	// defaultRange es lo que muestra el panel al abrir un servidor.
 	defaultRange = time.Hour
-	// maxRange es el rango más largo que se puede pedir de una vez: más que
-	// esto no entra en un gráfico ni en la retención del agregado.
-	maxRange = 31 * 24 * time.Hour
-	// rawRangeLimit es hasta dónde se contesta con muestras crudas. Más allá,
-	// con el agregado por minuto.
-	rawRangeLimit = 3 * time.Hour
-	// maxRows acota cada serie. Un rango de 3 h en crudo son 1080 muestras.
-	maxRows = 20000
+	// maxRange es el rango más largo que se puede pedir de una vez: la
+	// retención del agregado por hora, más un día para que un año bisiesto
+	// entre entero.
+	maxRange = 366 * 24 * time.Hour
+	// rawRangeLimit es hasta dónde se contesta con muestras crudas, y
+	// minuteRangeLimit hasta dónde con el agregado por minuto. Más allá, con el
+	// agregado por hora. Con la resolución que se elige sola, ningún rango pasa de unos 8800 puntos
+	// por serie: 3 h en crudo son 1080, 48 h por minuto 2880 y un año por hora
+	// 8784.
+	rawRangeLimit    = 3 * time.Hour
+	minuteRangeLimit = 48 * time.Hour
+	// maxRows acota cada consulta. Los discos y las interfaces van todos en la
+	// misma: un año por hora alcanza para cinco discos.
+	maxRows = 50000
 )
 
 type serverListResponse struct {

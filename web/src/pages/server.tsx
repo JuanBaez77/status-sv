@@ -13,7 +13,7 @@ import { useLiveSamples } from '@/hooks/use-live-samples'
 import { useServerMetrics } from '@/hooks/use-server-metrics'
 import { useServerRuntime } from '@/hooks/use-server-runtime'
 import { useServers } from '@/hooks/use-servers'
-import type { ServerMetrics } from '@/lib/api'
+import type { Resolution, ServerMetrics } from '@/lib/api'
 import { bytes, load, percent, perSecond, ratio, since } from '@/lib/format'
 import { defaultRange, isRangeKey } from '@/lib/ranges'
 import {
@@ -107,9 +107,7 @@ export function ServerPage({ id }: { id: string }) {
             onChange={(next) => setParams({ rango: next }, { replace: true })}
           />
           <p className="text-xs text-muted-foreground">
-            {series?.resolution === '1m'
-              ? 'Promedio por minuto; la línea punteada es el pico.'
-              : 'Cada punto es una muestra del agent.'}
+            {resolutionNote(series?.resolution)}
           </p>
         </div>
       </header>
@@ -267,6 +265,18 @@ function ChartCard({
       <CardContent>{children}</CardContent>
     </Card>
   )
+}
+
+/** resolutionNote explica qué es cada punto de los gráficos. */
+function resolutionNote(resolution: Resolution | undefined): string {
+  switch (resolution) {
+    case '1m':
+      return 'Promedio por minuto; la línea punteada es el pico.'
+    case '1h':
+      return 'Promedio por hora; las líneas punteadas son el pico y el mínimo.'
+    default:
+      return 'Cada punto es una muestra del agent.'
+  }
 }
 
 function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {

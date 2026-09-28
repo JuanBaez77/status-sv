@@ -12,6 +12,206 @@ import (
 	"github.com/google/uuid"
 )
 
+const listHourDisks = `-- name: ListHourDisks :many
+SELECT bucket, mountpoint, total_bytes, used_max_bytes, available_min_bytes
+FROM metrics_1h_disks
+WHERE server_id = $1
+  AND bucket >= $2::timestamptz
+  AND bucket < $3::timestamptz
+ORDER BY mountpoint, bucket
+LIMIT $4
+`
+
+type ListHourDisksParams struct {
+	ServerID uuid.UUID
+	FromTs   time.Time
+	ToTs     time.Time
+	MaxRows  int32
+}
+
+type ListHourDisksRow struct {
+	Bucket            time.Time
+	Mountpoint        string
+	TotalBytes        int64
+	UsedMaxBytes      int64
+	AvailableMinBytes int64
+}
+
+func (q *Queries) ListHourDisks(ctx context.Context, arg ListHourDisksParams) ([]ListHourDisksRow, error) {
+	rows, err := q.db.Query(ctx, listHourDisks,
+		arg.ServerID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHourDisksRow{}
+	for rows.Next() {
+		var i ListHourDisksRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Mountpoint,
+			&i.TotalBytes,
+			&i.UsedMaxBytes,
+			&i.AvailableMinBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHourNetworks = `-- name: ListHourNetworks :many
+SELECT bucket, interface, rx_avg_per_sec, rx_max_per_sec, tx_avg_per_sec, tx_max_per_sec
+FROM metrics_1h_networks
+WHERE server_id = $1
+  AND bucket >= $2::timestamptz
+  AND bucket < $3::timestamptz
+ORDER BY interface, bucket
+LIMIT $4
+`
+
+type ListHourNetworksParams struct {
+	ServerID uuid.UUID
+	FromTs   time.Time
+	ToTs     time.Time
+	MaxRows  int32
+}
+
+type ListHourNetworksRow struct {
+	Bucket      time.Time
+	Interface   string
+	RxAvgPerSec float64
+	RxMaxPerSec float64
+	TxAvgPerSec float64
+	TxMaxPerSec float64
+}
+
+func (q *Queries) ListHourNetworks(ctx context.Context, arg ListHourNetworksParams) ([]ListHourNetworksRow, error) {
+	rows, err := q.db.Query(ctx, listHourNetworks,
+		arg.ServerID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHourNetworksRow{}
+	for rows.Next() {
+		var i ListHourNetworksRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Interface,
+			&i.RxAvgPerSec,
+			&i.RxMaxPerSec,
+			&i.TxAvgPerSec,
+			&i.TxMaxPerSec,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHourSamples = `-- name: ListHourSamples :many
+SELECT bucket, samples, cpu_used_min, cpu_used_avg, cpu_used_max, cpu_iowait_avg, cpu_iowait_max, cpu_steal_avg,
+       cpu_cores, mem_total_bytes, mem_used_min_bytes, mem_used_avg_bytes, mem_used_max_bytes,
+       swap_total_bytes, swap_used_avg_bytes, swap_used_max_bytes, load1_avg, load5_avg, load15_avg
+FROM metrics_1h
+WHERE server_id = $1
+  AND bucket >= $2::timestamptz
+  AND bucket < $3::timestamptz
+ORDER BY bucket
+LIMIT $4
+`
+
+type ListHourSamplesParams struct {
+	ServerID uuid.UUID
+	FromTs   time.Time
+	ToTs     time.Time
+	MaxRows  int32
+}
+
+type ListHourSamplesRow struct {
+	Bucket           time.Time
+	Samples          int32
+	CpuUsedMin       float32
+	CpuUsedAvg       float32
+	CpuUsedMax       float32
+	CpuIowaitAvg     float32
+	CpuIowaitMax     float32
+	CpuStealAvg      float32
+	CpuCores         int16
+	MemTotalBytes    int64
+	MemUsedMinBytes  int64
+	MemUsedAvgBytes  int64
+	MemUsedMaxBytes  int64
+	SwapTotalBytes   int64
+	SwapUsedAvgBytes int64
+	SwapUsedMaxBytes int64
+	Load1Avg         float32
+	Load5Avg         float32
+	Load15Avg        float32
+}
+
+func (q *Queries) ListHourSamples(ctx context.Context, arg ListHourSamplesParams) ([]ListHourSamplesRow, error) {
+	rows, err := q.db.Query(ctx, listHourSamples,
+		arg.ServerID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHourSamplesRow{}
+	for rows.Next() {
+		var i ListHourSamplesRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Samples,
+			&i.CpuUsedMin,
+			&i.CpuUsedAvg,
+			&i.CpuUsedMax,
+			&i.CpuIowaitAvg,
+			&i.CpuIowaitMax,
+			&i.CpuStealAvg,
+			&i.CpuCores,
+			&i.MemTotalBytes,
+			&i.MemUsedMinBytes,
+			&i.MemUsedAvgBytes,
+			&i.MemUsedMaxBytes,
+			&i.SwapTotalBytes,
+			&i.SwapUsedAvgBytes,
+			&i.SwapUsedMaxBytes,
+			&i.Load1Avg,
+			&i.Load5Avg,
+			&i.Load15Avg,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestSamples = `-- name: ListLatestSamples :many
 
 SELECT DISTINCT ON (server_id)

@@ -45,6 +45,7 @@ type seriesBody struct {
 		TS                time.Time `json:"ts"`
 		CPUUsedPercent    float64   `json:"cpu_used_percent"`
 		CPUUsedMaxPercent float64   `json:"cpu_used_max_percent"`
+		CPUUsedMinPercent *float64  `json:"cpu_used_min_percent"`
 		MemUsedBytes      int64     `json:"mem_used_bytes"`
 	} `json:"samples"`
 	Disks []struct {
@@ -227,9 +228,28 @@ func TestServerMetricsRange(t *testing.T) {
 	}
 
 	// Un rango largo pasa solo al agregado.
-	long := f.getSeries(t, server, "from="+now.Add(-48*time.Hour).Format(time.RFC3339)+"&to="+to, ip, cookie)
+	long := f.getSeries(t, server, "from="+now.Add(-24*time.Hour).Format(time.RFC3339)+"&to="+to, ip, cookie)
 	if long.Resolution != "1m" {
-		t.Errorf("rango de 48 h = %q, se esperaba 1m", long.Resolution)
+		t.Errorf("rango de 24 h = %q, se esperaba 1m", long.Resolution)
+	}
+
+	// Más de 48 horas pasa al agregado por hora, que trae además el mínimo. Las
+	// tres muestras caen en el mismo minuto, así que mínimo y promedio son el
+	// promedio de ese minuto.
+	week := f.getSeries(t, server, "from="+now.Add(-7*24*time.Hour).Format(time.RFC3339)+"&to="+to, ip, cookie)
+	if week.Resolution != "1h" || len(week.Samples) != 1 {
+		t.Fatalf("rango de 7 días = %s con %d puntos, se esperaba 1h con 1", week.Resolution, len(week.Samples))
+	}
+	hour := week.Samples[0]
+	if hour.CPUUsedMaxPercent != 90 || hour.CPUUsedMinPercent == nil || *hour.CPUUsedMinPercent != 40 || hour.CPUUsedPercent != 40 {
+		t.Errorf("hora = promedio %v, pico %v, mínimo %v; se esperaba 40, 90 y 40",
+			hour.CPUUsedPercent, hour.CPUUsedMaxPercent, hour.CPUUsedMinPercent)
+	}
+	if len(week.Disks) != 2 || len(week.Networks) != 1 {
+		t.Errorf("hora: %d discos y %d interfaces, se esperaban 2 y 1", len(week.Disks), len(week.Networks))
+	}
+	if minute.Samples[0].CPUUsedMinPercent != nil {
+		t.Error("el agregado por minuto no debería traer mínimo")
 	}
 
 	// Un rango sin datos devuelve listas vacías, no null: el front las recorre.
@@ -255,7 +275,7 @@ func TestServerMetricsRejectsBadRequests(t *testing.T) {
 		"fecha ilegible":         {"/v1/servers/" + server.String() + "/metrics?from=ayer", http.StatusBadRequest},
 		"rango dado vuelta":      {"/v1/servers/" + server.String() + "/metrics?from=2026-09-22T12:00:00Z&to=2026-09-22T11:00:00Z", http.StatusBadRequest},
 		"resolución inventada":   {"/v1/servers/" + server.String() + "/metrics?resolution=1s", http.StatusBadRequest},
-		"rango de más de un mes": {"/v1/servers/" + server.String() + "/metrics?from=2026-01-01T00:00:00Z&to=2026-09-22T00:00:00Z", http.StatusBadRequest},
+		"rango de más de un año": {"/v1/servers/" + server.String() + "/metrics?from=2025-01-01T00:00:00Z&to=2026-09-22T00:00:00Z", http.StatusBadRequest},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

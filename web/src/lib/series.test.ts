@@ -189,6 +189,23 @@ describe('gráficos', () => {
     ])
   })
 
+  it('por hora dibuja además el mínimo, de CPU y de memoria', () => {
+    const hourly = metrics({
+      resolution: '1h',
+      samples: [
+        sampleAt('2026-09-23T12:00:00Z', { cpu_used_min_percent: 4, mem_used_min_bytes: gib }),
+      ],
+    })
+
+    const cpu = cpuChart(hourly)
+    expect(cpu.lines.map((line) => line.label)).toEqual(['Uso', 'Pico', 'Mínimo', 'Espera de E/S'])
+    expect(cpu.lines[2].values).toContain(4)
+
+    const memory = memoryChart(hourly)
+    expect(memory.lines.map((line) => line.label)).toEqual(['En uso', 'Pico', 'Mínimo'])
+    expect(memory.lines[2].values).toContain(gib)
+  })
+
   it('muestra el swap solo si el servidor tiene', () => {
     expect(memoryChart(metrics()).lines.map((line) => line.label)).toEqual(['En uso'])
 
