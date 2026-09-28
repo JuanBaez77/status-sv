@@ -79,9 +79,12 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 		"conectados", s.hub.count(),
 	)
 
-	// Cada canal tiene su propio límite de lotes de métricas.
-	metricsLimiter := rate.NewLimiter(metricsPerSecond, metricsBurst)
-	err = s.readLoop(ctx, conn, server, metricsLimiter)
+	// Cada canal tiene sus propios límites de frecuencia.
+	limits := channelLimits{
+		metrics: rate.NewLimiter(metricsPerSecond, metricsBurst),
+		runtime: rate.NewLimiter(runtimePerSecond, runtimeBurst),
+	}
+	err = s.readLoop(ctx, conn, server, limits)
 
 	switch {
 	case errors.Is(err, context.Canceled),
@@ -98,7 +101,7 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 //
 // Un agent que no dice nada durante OfflineAfter se da por muerto y se le cierra
 // la conexión: es el mismo umbral con el que el panel lo marca caído.
-func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, server store.Server, metricsLimiter *rate.Limiter) error {
+func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, server store.Server, limits channelLimits) error {
 	for {
 		readCtx, cancel := context.WithTimeout(ctx, s.cfg.OfflineAfter)
 		messageType, data, err := conn.Read(readCtx)
@@ -112,7 +115,7 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, server stor
 			continue
 		}
 
-		if err := s.handleAgentMessage(ctx, conn, server, metricsLimiter, data); err != nil {
+		if err := s.handleAgentMessage(ctx, conn, server, limits, data); err != nil {
 			return err
 		}
 	}
@@ -121,7 +124,7 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, server stor
 // handleAgentMessage procesa un mensaje. Devuelve error solo cuando el canal ya
 // no sirve: un mensaje inválido se contesta con un error del protocolo y la
 // conexión sigue.
-func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, server store.Server, metricsLimiter *rate.Limiter, raw []byte) error {
+func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, server store.Server, limits channelLimits, raw []byte) error {
 	envelope, err := proto.ParseEnvelope(raw)
 	if err != nil {
 		code := proto.CodeInvalidMessage
@@ -138,7 +141,10 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, s
 		return s.handleHeartbeat(ctx, conn, server, envelope)
 
 	case proto.TypeMetrics:
-		return s.handleMetrics(ctx, conn, server, metricsLimiter, envelope)
+		return s.handleMetrics(ctx, conn, server, limits.metrics, envelope)
+
+	case proto.TypeRuntimeState:
+		return s.handleRuntimeState(ctx, conn, server, limits.runtime, envelope)
 
 	default:
 		s.replyError(ctx, conn, envelope.ID, proto.CodeInvalidMessage,

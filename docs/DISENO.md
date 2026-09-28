@@ -99,7 +99,7 @@ Tu stack fuerte hoy es Python, así que las primeras semanas van a ser de curva.
 
 ## Modelo de datos
 
-Trece entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
+Catorce entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
 
 | Tabla | Contenido | Notas |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ Trece entidades cubren el MVP. Las métricas crudas y agregadas viven particiona
 | `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
 | `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno. | Nace del `project.yaml` declarado. |
 | `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
-| `runtime_units` | Último estado conocido de cada contenedor, servicio y proceso no gestionado de un servidor: nombre, estado, consumo y cuándo se lo vio. | Se reemplaza con cada `runtime_state`; no guarda historia. |
+| `runtime_units` | Último estado conocido de cada contenedor, servicio y proceso no gestionado de un servidor: nombre, estado, consumo y cuándo se lo vio. `runtime_sources` guarda si cada fuente (Docker, systemd, procesos) se pudo leer, y `servers.runtime_taken_at` la marca de la última foto. | Se reemplaza con cada `runtime_state`; no guarda historia. |
 | `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
 | `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU, iowait, memoria y swap, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
 | `metrics_1h` | Agregado por hora, con mínimo, promedio y máximo. | Retención 1 año. |
@@ -462,7 +462,9 @@ Servidor
 
 - [x] Mensajes `runtime_state` y `runtime_state_ack` en `proto/`, con topes por tipo (200
       contenedores, 300 servicios, 20 procesos) y archivos golden.
-- [ ] Tabla `runtime_units` con upsert y borrado de lo que ya no está, en la transacción del lote.
+- [x] Tablas `runtime_units` y `runtime_sources`: cada foto reemplaza lo de cada fuente según su estado
+      (con `error` se conserva lo anterior), en una transacción, y una foto más vieja que la guardada
+      se confirma sin aplicarse. Este PR se adelantó al envío del agent: el receptor antes que el emisor.
 - [ ] `GET /v1/servers/{id}/runtime` detrás de la sesión, y el estado nuevo empujado por el
       WebSocket del panel a quien esté suscripto.
 
