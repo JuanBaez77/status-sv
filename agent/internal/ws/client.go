@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
+	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
 	"github.com/JuanBaez77/status-sv/agent/internal/selfstat"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
 	"github.com/JuanBaez77/status-sv/proto"
@@ -50,6 +51,10 @@ type Client struct {
 	// muestras esperando: después de un corte, el buffer se vacía sin esperar
 	// un intervalo entero por cada lote.
 	metricsWake chan struct{}
+
+	// runtime es la bandeja de las fotos de runtime. Es opcional: sin ella el
+	// canal no manda fotos (la prueba de carga, por ejemplo).
+	runtime *runtimestate.Outbox
 
 	sampler *selfstat.Sampler
 	backoff *Backoff
@@ -199,11 +204,17 @@ func (c *Client) session(ctx context.Context) error {
 	// llegar: esas muestras salen de nuevo en este.
 	c.buffer.Restart()
 	c.metricsRejected = false
+	if c.runtime != nil {
+		c.runtime.Restart()
+	}
 
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
 	go func() { errs <- c.heartbeatLoop(sessionCtx, conn) }()
 	go func() { errs <- c.metricsLoop(sessionCtx, conn) }()
 	go func() { errs <- c.readLoop(sessionCtx, conn) }()
+	if c.runtime != nil {
+		go func() { errs <- c.runtimeLoop(sessionCtx, conn) }()
+	}
 
 	return <-errs
 }
@@ -409,6 +420,8 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 		switch envelope.Type {
 		case proto.TypeHeartbeatAck:
 			c.handleHeartbeatAck(ctx, envelope)
+		case proto.TypeRuntimeStateAck:
+			c.handleRuntimeAck(ctx, envelope)
 		case proto.TypeMetricsAck:
 			c.handleMetricsAck(ctx, envelope)
 		case proto.TypeError:
@@ -477,6 +490,11 @@ func (c *Client) handleServerError(ctx context.Context, envelope proto.Envelope)
 	}
 
 	if message.InReplyTo != nil {
+		if c.runtime != nil && c.runtime.Rejected(*message.InReplyTo, message.Retryable()) {
+			c.log.WarnContext(ctx, "el control plane rechazó una foto de runtime",
+				"codigo", message.Code, "detalle", message.Message, "reintentable", message.Retryable())
+			return
+		}
 		if discarded, matched := c.buffer.Reject(*message.InReplyTo, message.Retryable()); matched {
 			c.logMetricsRejection(ctx, message, discarded)
 			return

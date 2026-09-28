@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,6 +33,13 @@ type Config struct {
 	// EnrollToken solo hace falta para enrolar.
 	EnrollToken string
 
+	// DockerSocket es el socket de Docker. Si no existe, el agent informa que
+	// el servidor no tiene Docker.
+	DockerSocket string
+	// SystemdExclude son patrones de servicios que no se muestran, además de
+	// los de siempre (systemd.DefaultExclude).
+	SystemdExclude []string
+
 	LogLevel slog.Level
 	LogJSON  bool
 }
@@ -39,10 +47,11 @@ type Config struct {
 // Load lee la configuración del entorno.
 func Load() (Config, error) {
 	cfg := Config{
-		StateFile:   envOr("STATUSSV_STATE_FILE", DefaultStateFile()),
-		ServerURL:   strings.TrimSpace(os.Getenv("STATUSSV_SERVER_URL")),
-		EnrollToken: strings.TrimSpace(os.Getenv("STATUSSV_ENROLL_TOKEN")),
-		LogJSON:     !strings.EqualFold(envOr("STATUSSV_LOG_FORMAT", "json"), "text"),
+		StateFile:    envOr("STATUSSV_STATE_FILE", DefaultStateFile()),
+		ServerURL:    strings.TrimSpace(os.Getenv("STATUSSV_SERVER_URL")),
+		EnrollToken:  strings.TrimSpace(os.Getenv("STATUSSV_ENROLL_TOKEN")),
+		LogJSON:      !strings.EqualFold(envOr("STATUSSV_LOG_FORMAT", "json"), "text"),
+		DockerSocket: envOr("STATUSSV_DOCKER_SOCKET", "/run/docker.sock"),
 	}
 
 	level, err := envLevel("STATUSSV_LOG_LEVEL", slog.LevelInfo)
@@ -50,6 +59,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.LogLevel = level
+
+	exclude, err := envPatterns("STATUSSV_SYSTEMD_EXCLUDE")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SystemdExclude = exclude
 
 	return cfg, nil
 }
@@ -81,4 +96,25 @@ func envLevel(key string, fallback slog.Level) (slog.Level, error) {
 		return 0, fmt.Errorf("%s no es un nivel de log válido (%q): usar debug, info, warn o error", key, raw)
 	}
 	return level, nil
+}
+
+// envPatterns lee una lista de patrones de path.Match separados por comas, y
+// rechaza los que están mal escritos: uno roto no excluiría nada sin avisar.
+func envPatterns(key string) ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	var patterns []string
+	for p := range strings.SplitSeq(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, err := path.Match(p, ""); err != nil {
+			return nil, fmt.Errorf("%s tiene un patrón inválido (%q): %w", key, p, err)
+		}
+		patterns = append(patterns, p)
+	}
+	return patterns, nil
 }

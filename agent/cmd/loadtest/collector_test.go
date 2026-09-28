@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/collector"
+	"github.com/JuanBaez77/status-sv/proto"
 )
 
 func TestLaPrimeraLecturaEsSoloLaBase(t *testing.T) {
@@ -136,5 +138,20 @@ func TestLosTokensSeLeenDeLaEntrada(t *testing.T) {
 
 	if _, err := readTokens(strings.NewReader("\n# nada\n")); err == nil {
 		t.Error("sin tokens tendría que fallar")
+	}
+}
+
+// La foto inventada tiene que pasar el contrato y entrar en un mensaje, o la
+// prueba de carga mediría rechazos en vez de ingesta.
+func TestSyntheticRuntimeIsValid(t *testing.T) {
+	for number := range 10 {
+		s := syntheticRuntime(number, number, time.Now())
+		raw, err := proto.Marshal(s)
+		if err != nil {
+			t.Fatalf("agent %d: la foto no pasa el contrato: %v", number, err)
+		}
+		if len(raw) > proto.MaxMessageBytes {
+			t.Errorf("agent %d: la foto ocupa %d bytes", number, len(raw))
+		}
 	}
 }

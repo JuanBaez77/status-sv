@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
+	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
 	"github.com/JuanBaez77/status-sv/agent/internal/ws"
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
@@ -26,6 +27,7 @@ const enrollRetry = 5 * time.Second
 // inventa las lecturas en vez de leer /proc.
 type simulated struct {
 	name      string
+	number    int
 	token     string
 	opts      options
 	buffer    *metrics.Buffer
@@ -37,6 +39,7 @@ type simulated struct {
 func newSimulated(number int, token string, opts options) *simulated {
 	return &simulated{
 		name:      fmt.Sprintf("carga-%02d", number),
+		number:    number,
 		token:     token,
 		opts:      opts,
 		buffer:    metrics.NewBuffer(metrics.DefaultMaxAge, metrics.DefaultMaxSamples),
@@ -87,6 +90,11 @@ func (s *simulated) serve(ctx context.Context, log *slog.Logger) error {
 
 	var wg sync.WaitGroup
 	wg.Go(func() { sampler.Run(ctx) })
+
+	// Las fotos de runtime, para que la carga incluya ese tráfico también.
+	outbox := runtimestate.NewOutbox()
+	client.SetRuntime(outbox)
+	wg.Go(func() { feedRuntime(ctx, s.number, outbox) })
 	err := client.Run(ctx)
 	wg.Wait()
 

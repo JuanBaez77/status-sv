@@ -455,8 +455,9 @@ Agent
       ninguno), los 20 más pesados por memoria y CPU, solo lectura.
 - [x] Consumo de cada unidad desde cgroup v2 (`cpu.stat`, `memory.current` sin la caché inactiva, como
       `docker stats`), sin preguntarle a ningún demonio.
-- [ ] Un solo estado de runtime armado con los tres adaptadores, enviado **solo cuando cambia**, con
-      un refresco cada 5 minutos para sanar, acuse y reenvío como las métricas.
+- [x] Una sola foto de runtime armada con los tres adaptadores y el consumo de cgroups. Se mira cada
+      30 s y después de cada cambio (con 1 s de respiro), pero sale solo si cambió algo (el consumo,
+      redondeado) o pasaron 5 minutos; una en vuelo, acuse y reenvío como las métricas.
 
 Servidor
 
