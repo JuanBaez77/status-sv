@@ -36,6 +36,8 @@ El formato es JSON con un envelope versionado; el porqué está en
 | `heartbeat_ack` | Servidor → agent | Respuesta al anterior | Hora del servidor y, solo si cambió, la configuración nueva |
 | `metrics` | Agent → servidor | Cada 10 s, en lotes | Muestras de CPU, memoria, carga, discos e interfaces |
 | `metrics_ack` | Servidor → agent | Respuesta al anterior | Cuántas muestras se guardaron y la marca de tiempo de la última |
+| `runtime_state` | Agent → servidor | Al cambiar algo, y cada tanto con el consumo al día | Foto completa de contenedores, servicios y procesos no gestionados |
+| `runtime_state_ack` | Servidor → agent | Respuesta al anterior | La marca de tiempo de la foto que se guardó |
 | `error` | Servidor → agent | Ante un rechazo | Código de una lista cerrada, texto para el log y el ID del mensaje rechazado |
 
 La credencial de `enroll_ack` viaja **una sola vez**: el control plane guarda solo su hash y el
@@ -75,6 +77,40 @@ grande que acepta el contrato ocupa unos 112 KB, así que siempre entra sola.
 - **Que los valores entren en las columnas de PostgreSQL:** bytes hasta 2⁶³ − 1, por ejemplo.
 - **La frecuencia:** hasta 30 lotes seguidos y después uno por segundo, por canal. Pasado eso
   contesta `rate_limited`, que es reintentable: el agent no pierde las muestras.
+
+## Estado de runtime: una foto entera
+
+`runtime_state` es la foto de lo que corre en el servidor: contenedores de Docker, servicios de
+systemd y los procesos que no pertenecen a ninguno de los dos. Viaja **entera**, nunca como
+diferencia: si una se pierde, la siguiente la reemplaza y no hay nada que reconstruir.
+
+`taken_at` identifica la foto. El control plane descarta una más vieja que la que ya tiene, y
+`runtime_state_ack` confirma por esa misma marca. Como en las métricas, hay una sola foto en vuelo.
+
+**Cada fuente dice si se pudo leer**, y eso decide qué hace el control plane con su lista:
+
+| `status` de la fuente | Significado | Qué hace el control plane |
+| --- | --- | --- |
+| `ok` | Se leyó entera | La lista es la verdad: lo que no aparece, dejó de existir. |
+| `unavailable` | No existe en este servidor (un VPS sin Docker) | No hay nada que mostrar de esa fuente. |
+| `error` | Existe pero falló la lectura | **Conserva lo último que supo.** Un Docker que no contesta no borra los contenedores del panel. |
+
+Una fuente que no está en `ok` no puede traer elementos: no se sabría si son la lista completa.
+
+**Nombres con los caracteres de cada sistema.** Los IDs de contenedor son 64 caracteres
+hexadecimales; los nombres, los de Docker (`[a-zA-Z0-9_.-]`); las unidades, los de systemd y
+terminadas en `.service`. Estos nombres llegan al panel y, más adelante, a los parámetros de los
+comandos, así que cualquier otro carácter se rechaza. Los estados de contenedor y de servicio son
+listas cerradas con un valor `unknown`: el adaptador traduce ahí un estado que no conoce, para que
+una versión nueva de Docker o de systemd no haga rechazar la foto entera.
+
+**La línea de comando de un proceso sale enmascarada del agent** (ADR-011): una contraseña pasada
+como argumento no deja el servidor. Además viene recortada y sin caracteres de control.
+
+**Tamaño:** los topes por tipo son 200 contenedores, 300 servicios y 20 procesos, pero lo que manda
+es `MaxMessageBytes`: una foto no se puede partir. Un servidor con todos los topes al máximo y
+nombres de largo realista ocupa unos 155 KB, así que en la práctica entra siempre. Si alguna vez no
+entrara, el agent deja afuera lo menos importante y lo cuenta en `omitted`.
 
 ## Reglas de versionado
 

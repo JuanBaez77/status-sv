@@ -57,6 +57,8 @@ func TestGoldenEnvelopes(t *testing.T) {
 		{name: "heartbeat_ack", msg: proto.HeartbeatAck{ServerTime: goldenTS}},
 		{name: "metrics", msg: proto.Metrics{Samples: []proto.Sample{validSample()}}},
 		{name: "metrics_ack", msg: proto.MetricsAck{Accepted: 1, LastTS: goldenTS}},
+		{name: "runtime_state", msg: validRuntimeState()},
+		{name: "runtime_state_ack", msg: proto.RuntimeStateAck{TakenAt: goldenTS}},
 		{name: "error", msg: proto.NewError(proto.CodeInvalidToken, "el token no existe o ya se usó", goldenID)},
 	}
 
@@ -126,6 +128,8 @@ func TestEveryMessageTypeIsAccepted(t *testing.T) {
 		proto.HeartbeatAck{},
 		proto.Metrics{},
 		proto.MetricsAck{},
+		proto.RuntimeState{},
+		proto.RuntimeStateAck{},
 		proto.ErrorMessage{},
 	}
 

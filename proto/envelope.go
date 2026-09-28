@@ -25,17 +25,19 @@ type MessageType string
 
 // Mensajes del agent hacia el control plane.
 const (
-	TypeEnroll    MessageType = "enroll"
-	TypeHeartbeat MessageType = "heartbeat"
-	TypeMetrics   MessageType = "metrics"
+	TypeEnroll       MessageType = "enroll"
+	TypeHeartbeat    MessageType = "heartbeat"
+	TypeMetrics      MessageType = "metrics"
+	TypeRuntimeState MessageType = "runtime_state"
 )
 
 // Mensajes del control plane hacia el agent.
 const (
-	TypeEnrollAck    MessageType = "enroll_ack"
-	TypeHeartbeatAck MessageType = "heartbeat_ack"
-	TypeMetricsAck   MessageType = "metrics_ack"
-	TypeError        MessageType = "error"
+	TypeEnrollAck       MessageType = "enroll_ack"
+	TypeHeartbeatAck    MessageType = "heartbeat_ack"
+	TypeMetricsAck      MessageType = "metrics_ack"
+	TypeRuntimeStateAck MessageType = "runtime_state_ack"
+	TypeError           MessageType = "error"
 )
 
 // Errores que devuelve el paquete al leer un envelope.
@@ -49,13 +51,15 @@ var (
 // knownTypes es la lista cerrada de tipos que este código entiende. Un tipo que
 // no esté acá se rechaza con un error explícito, en vez de ignorarse en silencio.
 var knownTypes = map[MessageType]bool{
-	TypeEnroll:       true,
-	TypeHeartbeat:    true,
-	TypeMetrics:      true,
-	TypeEnrollAck:    true,
-	TypeHeartbeatAck: true,
-	TypeMetricsAck:   true,
-	TypeError:        true,
+	TypeEnroll:          true,
+	TypeHeartbeat:       true,
+	TypeMetrics:         true,
+	TypeEnrollAck:       true,
+	TypeHeartbeatAck:    true,
+	TypeMetricsAck:      true,
+	TypeRuntimeState:    true,
+	TypeRuntimeStateAck: true,
+	TypeError:           true,
 }
 
 // Message es lo que sabe hacer todo mensaje del protocolo: decir de qué tipo es

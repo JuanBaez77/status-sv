@@ -152,7 +152,7 @@ El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Desp
 | Dirección | Mensaje | Contenido | Frecuencia |
 | --- | --- | --- | --- |
 | Agent → servidor | `metrics` | Lote de muestras de CPU, RAM, disco, red y carga. | Cada 5 a 10 s |
-| Agent → servidor | `runtime_state` | Contenedores y servicios con su estado. | Solo al cambiar |
+| Agent → servidor | `runtime_state` | Foto completa de contenedores, servicios y procesos no gestionados, con su estado y consumo. | Al cambiar algo, y cada tanto con el consumo al día |
 | Agent → servidor | `deploy_event` | Avance y resultado de un deploy. | Por evento |
 | Agent → servidor | `heartbeat` | Vivo y versión. | Cada 15 s |
 | Servidor → agent | `command` | Operación predefinida con parámetros validados. | A demanda |
@@ -445,7 +445,7 @@ vivo, y poder pedir sus logs desde el panel. Las seis decisiones que lo abrían 
 
 Agent
 
-- [ ] Acceso a Docker por el grupo `docker`, en un drop-in que escribe el instalador, y al diario
+- [x] Acceso a Docker por el grupo `docker`, en un drop-in que escribe el instalador, y al diario
       por el grupo `systemd-journal`; endurecimiento de la unidad revisado en el laboratorio local.
 - [ ] Cliente propio mínimo del socket de Docker: lista de contenedores, estado, healthcheck y el
       stream de eventos con un respiro de 1 s para juntar ráfagas.
@@ -459,7 +459,7 @@ Agent
 
 Servidor
 
-- [ ] Mensajes `runtime_state` y `runtime_state_ack` en `proto/`, con topes por tipo (200
+- [x] Mensajes `runtime_state` y `runtime_state_ack` en `proto/`, con topes por tipo (200
       contenedores, 300 servicios, 20 procesos) y archivos golden.
 - [ ] Tabla `runtime_units` con upsert y borrado de lo que ya no está, en la transacción del lote.
 - [ ] `GET /v1/servers/{id}/runtime` detrás de la sesión, y el estado nuevo empujado por el
