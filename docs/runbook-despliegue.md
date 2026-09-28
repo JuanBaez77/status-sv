@@ -320,6 +320,23 @@ Hay una diferencia con lo que ve el servicio: la unidad lleva `ProtectHome=true`
 que no llega al panel. Se verificó con systemd 255. Si un servidor tiene un disco ahí, hay que
 decidir si se relaja esa protección.
 
+### Qué ve el agent de contenedores, servicios y procesos
+
+`runtime` arma la misma foto que el agent le manda al control plane y la imprime como JSON, sin
+conectarse. Toma dos lecturas separadas por `--interval` para que traiga el consumo:
+
+```bash
+sudo -u statussv /usr/local/bin/statussv-agent runtime
+```
+
+Cada fuente dice si se pudo leer: `unavailable` con "Docker no está instalado" es lo esperado en un
+VPS sin Docker, pero un `error` de permiso sobre el socket quiere decir que falta el drop-in del
+grupo `docker` (ver arriba). Corrido con `sudo -u statussv` tiene los grupos de ese usuario en
+`/etc/group`, no los del drop-in: para ver exactamente lo que ve el servicio, mirar el log del agent.
+
+Para esconder más servicios que los de siempre, `STATUSSV_SYSTEMD_EXCLUDE` en la unidad, con
+patrones separados por comas (por ejemplo `snapd*,unattended-upgrades.service`).
+
 ## 3. Actualizar
 
 **Control plane:** copiar el nuevo commit igual que en el paso 1, actualizar `STATUSSV_COMMIT` y

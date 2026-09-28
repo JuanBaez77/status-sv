@@ -16,6 +16,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/panel"
+	"github.com/JuanBaez77/status-sv/server/internal/runstate"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
@@ -37,6 +38,7 @@ type Server struct {
 	hub           *hub
 	enrollLimiter *ipLimiter
 	ingester      *metrics.Ingester
+	runtime       *runstate.Ingester
 	users         *users.Service
 	panels        *panelHub
 	counters      *counterCache
@@ -54,6 +56,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		hub:           newHub(),
 		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 		ingester:      metrics.NewIngester(pool),
+		runtime:       runstate.NewIngester(pool),
 		users:         users.NewService(pool, log),
 		panels:        newPanelHub(),
 		counters:      newCounterCache(),
@@ -78,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/auth/me", s.requireSession(http.HandlerFunc(s.handleMe)))
 	mux.Handle("GET /v1/servers", s.requireSession(http.HandlerFunc(s.handleListServers)))
 	mux.Handle("GET /v1/servers/{id}/metrics", s.requireSession(http.HandlerFunc(s.handleServerMetrics)))
+	mux.Handle("GET /v1/servers/{id}/runtime", s.requireSession(http.HandlerFunc(s.handleServerRuntime)))
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si

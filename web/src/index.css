@@ -36,6 +36,8 @@
   --status-online: oklch(0.65 0.17 150);
   --status-offline: oklch(0.58 0.21 27);
   --status-unknown: oklch(0.65 0.02 260);
+  /* Algo en transición o fuera de lugar (un contenedor reiniciándose). */
+  --status-warning: oklch(0.7 0.15 75);
 
   /* Líneas de los gráficos. Se distinguen por tono y no solo por brillo, así
      siguen siendo cinco líneas distintas en una pantalla mal calibrada. */
@@ -72,6 +74,7 @@
   --status-online: oklch(0.72 0.17 150);
   --status-offline: oklch(0.65 0.19 27);
   --status-unknown: oklch(0.6 0.02 260);
+  --status-warning: oklch(0.78 0.15 80);
 
   --chart-1: oklch(0.7 0.14 250);
   --chart-2: oklch(0.72 0.17 150);
@@ -105,6 +108,7 @@
   --color-status-online: var(--status-online);
   --color-status-offline: var(--status-offline);
   --color-status-unknown: var(--status-unknown);
+  --color-status-warning: var(--status-warning);
 
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);

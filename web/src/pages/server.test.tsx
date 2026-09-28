@@ -2,7 +2,7 @@ import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ServerMetrics, ServerSummary } from '@/lib/api'
+import type { ServerMetrics, ServerRuntime, ServerSummary } from '@/lib/api'
 import { panelSocket } from '@/lib/panel-socket'
 import { ServerPage } from '@/pages/server'
 import { json, renderWithQuery, stubFetch } from '@/test/render'
@@ -90,12 +90,92 @@ function series(overrides: Partial<ServerMetrics> = {}): ServerMetrics {
   }
 }
 
-/** answer responde la lista y las métricas, y guarda las consultas de rango. */
-function answer(options: { servers?: ServerSummary[]; metrics?: ServerMetrics } = {}) {
+function runtime(overrides: Partial<ServerRuntime> = {}): ServerRuntime {
+  const seen = '2026-09-23T12:00:00Z'
+  return {
+    server_id: id,
+    taken_at: seen,
+    sources: {
+      docker: { status: 'ok', omitted: 0, taken_at: seen },
+      systemd: { status: 'ok', omitted: 0, taken_at: seen },
+      processes: { status: 'ok', omitted: 0, taken_at: seen },
+    },
+    containers: [
+      {
+        id: 'a'.repeat(64),
+        name: 'cristales-web-1',
+        image: 'ghcr.io/extendsystem/cristales:2026.09.20',
+        state: 'running',
+        health: 'healthy',
+        started_at: seen,
+        compose_project: 'cristales',
+        compose_service: 'web',
+        usage: { cpu_percent: 1.5, memory_bytes: 180 * 1024 ** 2 },
+        seen_at: seen,
+      },
+      {
+        id: 'b'.repeat(64),
+        name: 'cristales-worker-1',
+        image: 'ghcr.io/extendsystem/cristales:2026.09.20',
+        state: 'restarting',
+        health: '',
+        started_at: null,
+        compose_project: 'cristales',
+        compose_service: 'worker',
+        usage: null,
+        seen_at: seen,
+      },
+      {
+        id: 'c'.repeat(64),
+        name: 'migracion-vieja',
+        image: 'busybox',
+        state: 'exited',
+        health: '',
+        started_at: null,
+        compose_project: '',
+        compose_service: '',
+        usage: null,
+        seen_at: seen,
+      },
+    ],
+    services: [
+      {
+        unit: 'nginx.service',
+        load_state: 'loaded',
+        active_state: 'active',
+        sub_state: 'running',
+        main_pid: 812,
+        active_since: seen,
+        usage: { cpu_percent: 0.1, memory_bytes: 12 * 1024 ** 2 },
+        seen_at: seen,
+      },
+    ],
+    processes: [
+      {
+        pid: 900,
+        name: 'python3',
+        command: 'python3 importar.py --db-password=***',
+        user: 'juan',
+        started_at: seen,
+        usage: { cpu_percent: 25, memory_bytes: 100 * 1024 ** 2 },
+        seen_at: seen,
+      },
+    ],
+    ...overrides,
+  }
+}
+
+/** answer responde la lista, las métricas y lo que corre, y guarda las consultas de rango. */
+function answer(
+  options: { servers?: ServerSummary[]; metrics?: ServerMetrics; runtime?: ServerRuntime } = {},
+) {
   const asked: URL[] = []
   const calls = stubFetch((path) => {
     if (path === '/v1/servers') {
       return json({ servers: options.servers ?? [summary()] })
+    }
+    if (path.endsWith('/runtime')) {
+      return json(options.runtime ?? runtime())
     }
     asked.push(new URL(path, 'http://panel.test'))
     return json(options.metrics ?? series())
@@ -183,6 +263,73 @@ describe('ServerPage', () => {
 
     expect(await screen.findByText('No hay métricas en este rango')).toBeInTheDocument()
     expect(screen.queryAllByTestId('chart')).toHaveLength(0)
+  })
+
+  it('muestra lo que corre, con lo que tiene problemas primero', async () => {
+    answer()
+
+    renderWithQuery(<ServerPage id={id} />)
+
+    const containers = await screen.findByRole('heading', { name: 'Contenedores' })
+    const card = containers.closest('div.rounded-lg') as HTMLElement
+    const names = [...card.querySelectorAll('li span[title]')].map((node) => node.textContent)
+    // El que se está reiniciando va antes que el sano, y el detenido no se ve.
+    expect(names).toEqual(['cristales-worker-1', 'cristales-web-1'])
+    expect(screen.getByText('1 corriendo · 1 para revisar · 1 detenido')).toBeInTheDocument()
+
+    // Los detenidos aparecen cuando se piden.
+    await userEvent.click(screen.getByRole('button', { name: 'Mostrar 1 detenido' }))
+    expect(screen.getByText('migracion-vieja')).toBeInTheDocument()
+
+    expect(screen.getByText('nginx')).toBeInTheDocument()
+    expect(screen.getByText('python3 importar.py --db-password=***')).toBeInTheDocument()
+  })
+
+  it('explica cuando una fuente no existe o no se pudo leer', async () => {
+    const seen = '2026-09-23T12:00:00Z'
+    answer({
+      runtime: runtime({
+        sources: {
+          docker: { status: 'unavailable', detail: 'Docker no está instalado en este servidor', omitted: 0, taken_at: seen },
+          systemd: { status: 'error', detail: 'tiempo agotado', omitted: 0, taken_at: seen },
+          processes: { status: 'ok', omitted: 0, taken_at: seen },
+        },
+        containers: [],
+      }),
+    })
+
+    renderWithQuery(<ServerPage id={id} />)
+
+    expect(await screen.findByText('Docker no está instalado en este servidor')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo leer: tiempo agotado')
+  })
+
+  it('una foto que llega en vivo reemplaza lo que se ve', async () => {
+    answer()
+
+    renderWithQuery(<ServerPage id={id} />)
+    await screen.findByText('cristales-web-1')
+
+    act(() => {
+      FakeWebSocket.last.connect()
+      FakeWebSocket.last.receive({ type: 'subscribed', server_ids: [id] })
+      FakeWebSocket.last.receive({
+        type: 'runtime',
+        server_id: id,
+        runtime: runtime({ containers: [{ ...runtime().containers[0], name: 'cristales-web-2' }] }),
+      })
+    })
+
+    expect(await screen.findByText('cristales-web-2')).toBeInTheDocument()
+    expect(screen.queryByText('cristales-web-1')).not.toBeInTheDocument()
+  })
+
+  it('avisa si el agent todavía no mandó lo que corre', async () => {
+    answer({ runtime: runtime({ taken_at: null, sources: {}, containers: [], services: [], processes: [] }) })
+
+    renderWithQuery(<ServerPage id={id} />)
+
+    expect(await screen.findByText(/todavía no mandó lo que corre/)).toBeInTheDocument()
   })
 
   it('avisa si el servidor no existe', async () => {
