@@ -14,7 +14,7 @@
  * inicial: acá no se guarda ningún token (ADR-010).
  */
 
-import type { DiskPoint, NetworkPoint, SamplePoint } from '@/lib/api'
+import type { DiskPoint, NetworkPoint, SamplePoint, ServerRuntime } from '@/lib/api'
 
 /** LiveSample es una muestra recién guardada, con la misma forma que los puntos de la API REST. */
 export type LiveSample = {
@@ -24,10 +24,17 @@ export type LiveSample = {
   networks: NetworkPoint[]
 }
 
+/** LiveRuntime es una foto de runtime recién guardada, con la misma forma que la API REST. */
+export type LiveRuntime = {
+  server_id: string
+  runtime: ServerRuntime
+}
+
 /** PanelStatus dice si lo que se ve es de ahora. */
 export type PanelStatus = 'connecting' | 'live' | 'reconnecting'
 
 type SampleListener = (sample: LiveSample) => void
+type RuntimeListener = (runtime: LiveRuntime) => void
 type StatusListener = (status: PanelStatus) => void
 
 /**
@@ -44,6 +51,12 @@ export class PanelSocket {
   #socket: WebSocket | null = null
   #status: PanelStatus = 'connecting'
   #listeners = new Map<string, Set<SampleListener>>()
+  #runtimeListeners = new Map<string, Set<RuntimeListener>>()
+  /**
+   * #refs cuenta cuántos oyentes tiene cada servidor, de cualquier tipo: la
+   * suscripción al control plane es por servidor y trae muestras y fotos.
+   */
+  #refs = new Map<string, number>()
   #statusListeners = new Set<StatusListener>()
   #attempt = 0
   #retry: ReturnType<typeof setTimeout> | null = null
@@ -57,24 +70,15 @@ export class PanelSocket {
    * darse de baja.
    */
   subscribe(serverID: string, listener: SampleListener): () => void {
-    const existing = this.#listeners.get(serverID)
-    if (existing === undefined) {
-      this.#listeners.set(serverID, new Set([listener]))
-      this.#send({ type: 'subscribe', server_ids: [serverID] })
-    } else {
-      existing.add(listener)
-    }
-    this.#connect()
+    return this.#add(this.#listeners, serverID, listener)
+  }
 
-    return () => {
-      const listeners = this.#listeners.get(serverID)
-      if (listeners === undefined) return
-      listeners.delete(listener)
-      if (listeners.size === 0) {
-        this.#listeners.delete(serverID)
-        this.#send({ type: 'unsubscribe', server_ids: [serverID] })
-      }
-    }
+  /**
+   * subscribeRuntime empieza a recibir las fotos de runtime de un servidor y
+   * devuelve cómo darse de baja.
+   */
+  subscribeRuntime(serverID: string, listener: RuntimeListener): () => void {
+    return this.#add(this.#runtimeListeners, serverID, listener)
   }
 
   /** getStatus y onStatus son el par que espera useSyncExternalStore. */
@@ -92,6 +96,8 @@ export class PanelSocket {
       this.#retry = null
     }
     this.#listeners.clear()
+    this.#runtimeListeners.clear()
+    this.#refs.clear()
     this.#attempt = 0
     this.#setStatus('connecting')
 
@@ -108,7 +114,7 @@ export class PanelSocket {
 
     socket.onopen = () => {
       this.#attempt = 0
-      const ids = [...this.#listeners.keys()]
+      const ids = [...this.#refs.keys()]
       if (ids.length > 0) {
         this.#send({ type: 'subscribe', server_ids: ids })
       }
@@ -125,7 +131,7 @@ export class PanelSocket {
   }
 
   #scheduleRetry() {
-    if (this.#listeners.size === 0) {
+    if (this.#refs.size === 0) {
       // Nadie está mirando: la conexión se vuelve a abrir cuando alguien se suscriba.
       this.#setStatus('connecting')
       return
@@ -160,11 +166,49 @@ export class PanelSocket {
         this.#listeners.get(sample.server_id)?.forEach((listener) => listener(sample))
         break
       }
+      case 'runtime': {
+        const runtime = message as LiveRuntime
+        this.#runtimeListeners.get(runtime.server_id)?.forEach((listener) => listener(runtime))
+        break
+      }
       case 'error':
         console.warn('el control plane rechazó un mensaje del panel:', message.message)
         break
       default:
       // welcome y lo que venga más adelante no cambian nada de lo que se ve.
+    }
+  }
+
+  #add<L>(map: Map<string, Set<L>>, serverID: string, listener: L): () => void {
+    let listeners = map.get(serverID)
+    if (listeners === undefined) {
+      listeners = new Set()
+      map.set(serverID, listeners)
+    }
+    listeners.add(listener)
+
+    const refs = this.#refs.get(serverID) ?? 0
+    this.#refs.set(serverID, refs + 1)
+    if (refs === 0) {
+      this.#send({ type: 'subscribe', server_ids: [serverID] })
+    }
+    this.#connect()
+
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      const current = map.get(serverID)
+      current?.delete(listener)
+      if (current?.size === 0) map.delete(serverID)
+
+      const left = (this.#refs.get(serverID) ?? 1) - 1
+      if (left > 0) {
+        this.#refs.set(serverID, left)
+        return
+      }
+      this.#refs.delete(serverID)
+      this.#send({ type: 'unsubscribe', server_ids: [serverID] })
     }
   }
 
