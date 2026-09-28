@@ -81,8 +81,9 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 
 	// Cada canal tiene sus propios límites de frecuencia.
 	limits := channelLimits{
-		metrics: rate.NewLimiter(metricsPerSecond, metricsBurst),
-		runtime: rate.NewLimiter(runtimePerSecond, runtimeBurst),
+		metrics:  rate.NewLimiter(metricsPerSecond, metricsBurst),
+		runtime:  rate.NewLimiter(runtimePerSecond, runtimeBurst),
+		projects: rate.NewLimiter(projectsPerSecond, projectsBurst),
 	}
 	err = s.readLoop(ctx, conn, server, limits)
 
@@ -149,6 +150,9 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, s
 
 	case proto.TypeRuntimeState:
 		return s.handleRuntimeState(ctx, conn, server, limits.runtime, envelope)
+
+	case proto.TypeProjectsState:
+		return s.handleProjectsState(ctx, conn, server, limits.projects, envelope)
 
 	default:
 		s.replyError(ctx, conn, envelope.ID, proto.CodeInvalidMessage,

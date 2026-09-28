@@ -12,6 +12,11 @@ import (
 )
 
 type Querier interface {
+	// Proyectos declarados (ADR-012, migración 00008).
+	// AdvanceProjectsTakenAt avanza la marca de la última lectura de proyectos de
+	// un servidor, solo si la nueva es más reciente, y guarda cómo salió leer el
+	// directorio. Cero filas es una lectura vieja que no hay que aplicar.
+	AdvanceProjectsTakenAt(ctx context.Context, arg AdvanceProjectsTakenAtParams) (int64, error)
 	// AdvanceRuntimeTakenAt avanza la marca de la última foto de un servidor, solo
 	// si la nueva es más reciente. Cero filas quiere decir que la foto es vieja (un
 	// reenvío que llegó tarde) y no hay que aplicarla.
@@ -78,6 +83,12 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredEnrollmentTokens(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
+	// DeleteInvalidProjectFiles borra los archivos inválidos de un servidor, antes
+	// de guardar los de la lectura nueva.
+	DeleteInvalidProjectFiles(ctx context.Context, serverID uuid.UUID) (int64, error)
+	// DeleteProjectsExcept borra los proyectos de un servidor que ya no están
+	// declarados. Con la lista vacía borra todos.
+	DeleteProjectsExcept(ctx context.Context, arg DeleteProjectsExceptParams) (int64, error)
 	DeleteRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	// DeleteRuntimeUnitsExcept borra las unidades de un tipo que ya no están en la
 	// foto. Con la lista vacía borra todas las de ese tipo.
@@ -114,6 +125,8 @@ type Querier interface {
 	GetServerByName(ctx context.Context, name string) (Server, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// InsertInvalidProjectFiles guarda los archivos inválidos de una lectura.
+	InsertInvalidProjectFiles(ctx context.Context, arg InsertInvalidProjectFilesParams) (int64, error)
 	// InsertRawDisks guarda los discos de un lote, una fila por disco y por muestra.
 	InsertRawDisks(ctx context.Context, arg InsertRawDisksParams) (int64, error)
 	// InsertRawNetworks guarda las interfaces de un lote, una fila por interfaz y
@@ -188,6 +201,9 @@ type Querier interface {
 	// minuto por sesión, para no escribir en cada pedido.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateServerHostname(ctx context.Context, arg UpdateServerHostnameParams) (Server, error)
+	// UpsertProject guarda un proyecto. Si ya existía con ese nombre en ese
+	// servidor conserva su ID, que es el que usa el panel.
+	UpsertProject(ctx context.Context, arg UpsertProjectParams) error
 	// UpsertRuntimeSource guarda el resultado de leer una fuente.
 	UpsertRuntimeSource(ctx context.Context, arg UpsertRuntimeSourceParams) error
 	// UpsertRuntimeUnits guarda las unidades de un tipo, una fila por unidad, con

@@ -541,7 +541,7 @@ Proyectos
 - [x] Mensajes `projects_state` y `projects_state_ack` en `proto/`, con topes y archivos golden.
 - [x] Parser estricto de `project.yaml` en el agent (`agent/internal/projectspec`).
 - [x] El agent lee `/etc/status-sv/projects.d` cada 30 s y manda solo si cambió algo, o cada 5 minutos.
-- [ ] Tabla `projects` y persistencia por servidor en una transacción; el ligado con `runtime_units`
+- [x] Tabla `projects` y persistencia por servidor en una transacción; el ligado con `runtime_units`
       se calcula al leer.
 - [ ] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
       y el cambio empujado por el WebSocket del panel.

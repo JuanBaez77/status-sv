@@ -16,6 +16,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/panel"
+	"github.com/JuanBaez77/status-sv/server/internal/projects"
 	"github.com/JuanBaez77/status-sv/server/internal/runstate"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
@@ -39,6 +40,7 @@ type Server struct {
 	enrollLimiter *ipLimiter
 	ingester      *metrics.Ingester
 	runtime       *runstate.Ingester
+	projects      *projects.Ingester
 	pending       *pendingCommands
 	users         *users.Service
 	panels        *panelHub
@@ -59,6 +61,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
 		ingester:      metrics.NewIngester(pool),
 		runtime:       runstate.NewIngester(pool),
+		projects:      projects.NewIngester(pool),
 		pending:       newPendingCommands(),
 		users:         users.NewService(pool, cfg.TOTPKey, log),
 		panels:        newPanelHub(),

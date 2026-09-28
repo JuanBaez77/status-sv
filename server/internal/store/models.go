@@ -147,6 +147,36 @@ type MetricsRawNetwork struct {
 	TxBytes   int64
 }
 
+type Project struct {
+	ID                        uuid.UUID
+	ServerID                  uuid.UUID
+	Name                      string
+	Environment               string
+	Repo                      string
+	Branch                    string
+	Runtime                   string
+	Workdir                   string
+	ComposeFile               string
+	ComposeProject            string
+	Units                     []string
+	HealthcheckUrl            string
+	HealthcheckExpectStatus   int32
+	HealthcheckTimeoutSeconds int32
+	HealthState               string
+	HealthCheckedAt           *time.Time
+	HealthStatusCode          int32
+	HealthLatencyMs           int32
+	HealthDetail              string
+	SeenAt                    time.Time
+}
+
+type ProjectInvalidFile struct {
+	ServerID uuid.UUID
+	File     string
+	Error    string
+	SeenAt   time.Time
+}
+
 type RuntimeSource struct {
 	ServerID uuid.UUID
 	Source   string
@@ -179,16 +209,19 @@ type RuntimeUnit struct {
 }
 
 type Server struct {
-	ID             uuid.UUID
-	Name           string
-	Hostname       string
-	Labels         []byte
-	AgentVersion   string
-	LastSeenAt     *time.Time
-	EnrolledAt     time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	RuntimeTakenAt *time.Time
+	ID              uuid.UUID
+	Name            string
+	Hostname        string
+	Labels          []byte
+	AgentVersion    string
+	LastSeenAt      *time.Time
+	EnrolledAt      time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	RuntimeTakenAt  *time.Time
+	ProjectsTakenAt *time.Time
+	ProjectsStatus  string
+	ProjectsDetail  string
 }
 
 type Session struct {

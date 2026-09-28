@@ -14,7 +14,7 @@ import (
 const createServer = `-- name: CreateServer :one
 INSERT INTO servers (id, name, hostname, labels, agent_version, enrolled_at)
 VALUES ($1, $2, $3, $4, $5, now())
-RETURNING id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at
+RETURNING id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at, projects_taken_at, projects_status, projects_detail
 `
 
 type CreateServerParams struct {
@@ -45,6 +45,9 @@ func (q *Queries) CreateServer(ctx context.Context, arg CreateServerParams) (Ser
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeTakenAt,
+		&i.ProjectsTakenAt,
+		&i.ProjectsStatus,
+		&i.ProjectsDetail,
 	)
 	return i, err
 }
@@ -62,7 +65,7 @@ func (q *Queries) DeleteServer(ctx context.Context, id uuid.UUID) (int64, error)
 }
 
 const getServerByID = `-- name: GetServerByID :one
-SELECT id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at FROM servers WHERE id = $1
+SELECT id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at, projects_taken_at, projects_status, projects_detail FROM servers WHERE id = $1
 `
 
 func (q *Queries) GetServerByID(ctx context.Context, id uuid.UUID) (Server, error) {
@@ -79,12 +82,15 @@ func (q *Queries) GetServerByID(ctx context.Context, id uuid.UUID) (Server, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeTakenAt,
+		&i.ProjectsTakenAt,
+		&i.ProjectsStatus,
+		&i.ProjectsDetail,
 	)
 	return i, err
 }
 
 const getServerByName = `-- name: GetServerByName :one
-SELECT id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at FROM servers WHERE lower(name) = lower($1)
+SELECT id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at, projects_taken_at, projects_status, projects_detail FROM servers WHERE lower(name) = lower($1)
 `
 
 func (q *Queries) GetServerByName(ctx context.Context, name string) (Server, error) {
@@ -101,12 +107,15 @@ func (q *Queries) GetServerByName(ctx context.Context, name string) (Server, err
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeTakenAt,
+		&i.ProjectsTakenAt,
+		&i.ProjectsStatus,
+		&i.ProjectsDetail,
 	)
 	return i, err
 }
 
 const listServers = `-- name: ListServers :many
-SELECT id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at FROM servers ORDER BY name
+SELECT id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at, projects_taken_at, projects_status, projects_detail FROM servers ORDER BY name
 `
 
 func (q *Queries) ListServers(ctx context.Context) ([]Server, error) {
@@ -129,6 +138,9 @@ func (q *Queries) ListServers(ctx context.Context) ([]Server, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RuntimeTakenAt,
+			&i.ProjectsTakenAt,
+			&i.ProjectsStatus,
+			&i.ProjectsDetail,
 		); err != nil {
 			return nil, err
 		}
@@ -159,7 +171,7 @@ SET last_seen_at  = now(),
     agent_version = COALESCE($1, agent_version),
     updated_at    = now()
 WHERE id = $2
-RETURNING id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at
+RETURNING id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at, projects_taken_at, projects_status, projects_detail
 `
 
 type TouchServerParams struct {
@@ -183,6 +195,9 @@ func (q *Queries) TouchServer(ctx context.Context, arg TouchServerParams) (Serve
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeTakenAt,
+		&i.ProjectsTakenAt,
+		&i.ProjectsStatus,
+		&i.ProjectsDetail,
 	)
 	return i, err
 }
@@ -192,7 +207,7 @@ UPDATE servers
 SET hostname   = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at
+RETURNING id, name, hostname, labels, agent_version, last_seen_at, enrolled_at, created_at, updated_at, runtime_taken_at, projects_taken_at, projects_status, projects_detail
 `
 
 type UpdateServerHostnameParams struct {
@@ -214,6 +229,9 @@ func (q *Queries) UpdateServerHostname(ctx context.Context, arg UpdateServerHost
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeTakenAt,
+		&i.ProjectsTakenAt,
+		&i.ProjectsStatus,
+		&i.ProjectsDetail,
 	)
 	return i, err
 }
