@@ -1,0 +1,63 @@
+{
+  "v": 1,
+  "type": "runtime_state",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "taken_at": "2026-09-20T12:00:00Z",
+    "sources": {
+      "docker": {
+        "status": "ok"
+      },
+      "systemd": {
+        "status": "ok"
+      },
+      "processes": {
+        "status": "ok"
+      }
+    },
+    "containers": [
+      {
+        "id": "abababababababababababababababababababababababababababababababab",
+        "name": "cristales-web-1",
+        "image": "ghcr.io/extendsystem/cristales:2026.09.20",
+        "state": "running",
+        "health": "healthy",
+        "started_at": "2026-09-20T11:00:00Z",
+        "compose_project": "cristales",
+        "compose_service": "web",
+        "usage": {
+          "cpu_percent": 1.5,
+          "memory_bytes": 188743680
+        }
+      }
+    ],
+    "services": [
+      {
+        "unit": "nginx.service",
+        "load_state": "loaded",
+        "active_state": "active",
+        "sub_state": "running",
+        "main_pid": 812,
+        "active_since": "2026-09-01T03:00:00Z",
+        "usage": {
+          "cpu_percent": 0.1,
+          "memory_bytes": 12582912
+        }
+      }
+    ],
+    "processes": [
+      {
+        "pid": 4242,
+        "name": "gunicorn",
+        "command": "/srv/app/.venv/bin/gunicorn app:wsgi --bind 127.0.0.1:8000",
+        "user": "www-data",
+        "started_at": "2026-09-19T08:00:00Z",
+        "usage": {
+          "cpu_percent": 2.3,
+          "memory_bytes": 99614720
+        }
+      }
+    ]
+  }
+}
