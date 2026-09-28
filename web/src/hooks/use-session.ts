@@ -35,7 +35,10 @@ export function useLogout() {
       // Sin sesión el canal en vivo no tiene con qué autenticarse, y lo que
       // quedó en memoria es de quien acaba de salir.
       panelSocket.close()
-      client.clear()
+      client.removeQueries({ predicate: (query) => query.queryKey[0] !== sessionKey[0] })
+      // La sesión se pisa en vez de borrarse: así App se entera y muestra el
+      // login. Con clear() la pantalla se quedaba con la sesión vieja.
+      client.setQueryData(sessionKey, null)
     },
   })
 }
