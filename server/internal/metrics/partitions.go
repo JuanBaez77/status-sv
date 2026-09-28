@@ -14,10 +14,12 @@ import (
 
 // Retención de cada nivel (docs/DISENO.md). Como se borra de a particiones
 // enteras, lo guardado va de la retención a la retención más una partición:
-// el crudo, de 48 a 72 horas, y el agregado por minuto, de 30 días a dos meses.
+// el crudo, de 48 a 72 horas; el agregado por minuto, de 30 días a dos meses, y
+// el agregado por hora, de un año a un año y un mes.
 const (
 	RawRetention    = 48 * time.Hour
 	MinuteRetention = 30 * 24 * time.Hour
+	HourRetention   = 365 * 24 * time.Hour
 )
 
 // Cuánto por adelantado se crean las particiones. No hay partición por defecto
@@ -27,6 +29,7 @@ const (
 const (
 	rawAhead    = 48 * time.Hour
 	minuteAhead = 32 * 24 * time.Hour
+	hourAhead   = 32 * 24 * time.Hour
 )
 
 // Frecuencia del mantenimiento.
@@ -52,6 +55,9 @@ func policies() []policy {
 		{table: "metrics_1m", retention: MinuteRetention, ahead: minuteAhead},
 		{table: "metrics_1m_disks", retention: MinuteRetention, ahead: minuteAhead},
 		{table: "metrics_1m_networks", retention: MinuteRetention, ahead: minuteAhead},
+		{table: "metrics_1h", retention: HourRetention, ahead: hourAhead},
+		{table: "metrics_1h_disks", retention: HourRetention, ahead: hourAhead},
+		{table: "metrics_1h_networks", retention: HourRetention, ahead: hourAhead},
 	}
 }
 

@@ -117,13 +117,14 @@ func TestPartitionsLifecycle(t *testing.T) {
 	monday := time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC)
 
 	// Primera pasada: del 19 al 23 en el crudo (48 h para atrás y para
-	// adelante) y de agosto a octubre en el agregado por minuto.
+	// adelante), de agosto a octubre en el agregado por minuto y de septiembre
+	// de 2025 a octubre de 2026 en el agregado por hora.
 	result, err := partitionsAt(q, monday).Maintain(t.Context())
 	if err != nil {
 		t.Fatalf("Maintain: %v", err)
 	}
-	if result != (Result{Created: 3*5 + 3*3, Dropped: 0}) {
-		t.Errorf("primera pasada: %+v, se esperaban 24 creadas", result)
+	if result != (Result{Created: 3*5 + 3*3 + 3*14, Dropped: 0}) {
+		t.Errorf("primera pasada: %+v, se esperaban 66 creadas", result)
 	}
 	wantRaw := []string{"metrics_raw_p20260919", "metrics_raw_p20260920", "metrics_raw_p20260921", "metrics_raw_p20260922", "metrics_raw_p20260923"}
 	if got := partitionsOf(t, pool, "metrics_raw"); !slices.Equal(got, wantRaw) {

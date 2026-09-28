@@ -127,3 +127,107 @@ ON CONFLICT (server_id, bucket, interface) DO UPDATE SET
     rx_max_per_sec = EXCLUDED.rx_max_per_sec,
     tx_avg_per_sec = EXCLUDED.tx_avg_per_sec,
     tx_max_per_sec = EXCLUDED.tx_max_per_sec;
+
+-- Agregado por hora. Igual que el minuto, cada consulta recalcula las horas que
+-- empiezan entre from_ts y to_ts, pero desde metrics_1m: el crudo dura 48 horas
+-- y el minuto ya está al día cuando se llega acá, en la misma transacción.
+--
+-- Los promedios de la hora pesan cada minuto por sus muestras, así un minuto
+-- con una sola muestra no vale lo mismo que uno completo.
+
+-- AggregateSamplesByHour agrega CPU, memoria y carga, con el mínimo de CPU y
+-- de memoria además del promedio y el máximo.
+-- name: AggregateSamplesByHour :execrows
+INSERT INTO metrics_1h (
+    server_id, bucket, samples, cpu_used_min, cpu_used_avg, cpu_used_max, cpu_iowait_avg, cpu_iowait_max,
+    cpu_steal_avg, cpu_cores, mem_total_bytes, mem_used_min_bytes, mem_used_avg_bytes, mem_used_max_bytes,
+    swap_total_bytes, swap_used_avg_bytes, swap_used_max_bytes, load1_avg, load5_avg, load15_avg
+)
+SELECT server_id,
+       date_trunc('hour', bucket, 'UTC'),
+       LEAST(sum(samples), 2147483647)::integer,
+       LEAST(min(cpu_used_avg), sum(cpu_used_avg * samples) / sum(samples))::real,
+       LEAST(sum(cpu_used_avg * samples) / sum(samples), max(cpu_used_max))::real,
+       max(cpu_used_max),
+       LEAST(sum(cpu_iowait_avg * samples) / sum(samples), max(cpu_iowait_max))::real,
+       max(cpu_iowait_max),
+       (sum(cpu_steal_avg * samples) / sum(samples))::real,
+       max(cpu_cores),
+       max(mem_total_bytes),
+       LEAST(min(mem_used_avg_bytes), round(sum(mem_used_avg_bytes::numeric * samples) / sum(samples)))::bigint,
+       LEAST(round(sum(mem_used_avg_bytes::numeric * samples) / sum(samples)), max(mem_used_max_bytes))::bigint,
+       max(mem_used_max_bytes),
+       max(swap_total_bytes),
+       LEAST(round(sum(swap_used_avg_bytes::numeric * samples) / sum(samples)), max(swap_used_max_bytes))::bigint,
+       max(swap_used_max_bytes),
+       (sum(load1_avg * samples) / sum(samples))::real,
+       (sum(load5_avg * samples) / sum(samples))::real,
+       (sum(load15_avg * samples) / sum(samples))::real
+FROM metrics_1m
+WHERE server_id = sqlc.arg('server_id')::uuid
+  AND bucket >= sqlc.arg('from_ts')::timestamptz
+  AND bucket < sqlc.arg('to_ts')::timestamptz
+GROUP BY server_id, date_trunc('hour', bucket, 'UTC')
+ON CONFLICT (server_id, bucket) DO UPDATE SET
+    samples             = EXCLUDED.samples,
+    cpu_used_min        = EXCLUDED.cpu_used_min,
+    cpu_used_avg        = EXCLUDED.cpu_used_avg,
+    cpu_used_max        = EXCLUDED.cpu_used_max,
+    cpu_iowait_avg      = EXCLUDED.cpu_iowait_avg,
+    cpu_iowait_max      = EXCLUDED.cpu_iowait_max,
+    cpu_steal_avg       = EXCLUDED.cpu_steal_avg,
+    cpu_cores           = EXCLUDED.cpu_cores,
+    mem_total_bytes     = EXCLUDED.mem_total_bytes,
+    mem_used_min_bytes  = EXCLUDED.mem_used_min_bytes,
+    mem_used_avg_bytes  = EXCLUDED.mem_used_avg_bytes,
+    mem_used_max_bytes  = EXCLUDED.mem_used_max_bytes,
+    swap_total_bytes    = EXCLUDED.swap_total_bytes,
+    swap_used_avg_bytes = EXCLUDED.swap_used_avg_bytes,
+    swap_used_max_bytes = EXCLUDED.swap_used_max_bytes,
+    load1_avg           = EXCLUDED.load1_avg,
+    load5_avg           = EXCLUDED.load5_avg,
+    load15_avg          = EXCLUDED.load15_avg;
+
+-- AggregateDisksByHour guarda el peor momento de cada disco en la hora.
+-- name: AggregateDisksByHour :execrows
+INSERT INTO metrics_1h_disks (server_id, bucket, mountpoint, total_bytes, used_max_bytes, available_min_bytes)
+SELECT server_id,
+       date_trunc('hour', bucket, 'UTC'),
+       mountpoint,
+       max(total_bytes),
+       max(used_max_bytes),
+       min(available_min_bytes)
+FROM metrics_1m_disks
+WHERE server_id = sqlc.arg('server_id')::uuid
+  AND bucket >= sqlc.arg('from_ts')::timestamptz
+  AND bucket < sqlc.arg('to_ts')::timestamptz
+GROUP BY server_id, date_trunc('hour', bucket, 'UTC'), mountpoint
+ON CONFLICT (server_id, bucket, mountpoint) DO UPDATE SET
+    total_bytes         = EXCLUDED.total_bytes,
+    used_max_bytes      = EXCLUDED.used_max_bytes,
+    available_min_bytes = EXCLUDED.available_min_bytes;
+
+-- AggregateNetworksByHour promedia las tasas de los minutos de la hora y se
+-- queda con el pico más alto. Un minuto sin tasa (el agent estuvo caído) no
+-- está en metrics_1m_networks, así que no baja el promedio.
+-- name: AggregateNetworksByHour :execrows
+INSERT INTO metrics_1h_networks (
+    server_id, bucket, interface, rx_avg_per_sec, rx_max_per_sec, tx_avg_per_sec, tx_max_per_sec
+)
+SELECT server_id,
+       date_trunc('hour', bucket, 'UTC'),
+       interface,
+       LEAST(avg(rx_avg_per_sec), max(rx_max_per_sec)),
+       max(rx_max_per_sec),
+       LEAST(avg(tx_avg_per_sec), max(tx_max_per_sec)),
+       max(tx_max_per_sec)
+FROM metrics_1m_networks
+WHERE server_id = sqlc.arg('server_id')::uuid
+  AND bucket >= sqlc.arg('from_ts')::timestamptz
+  AND bucket < sqlc.arg('to_ts')::timestamptz
+GROUP BY server_id, date_trunc('hour', bucket, 'UTC'), interface
+ON CONFLICT (server_id, bucket, interface) DO UPDATE SET
+    rx_avg_per_sec = EXCLUDED.rx_avg_per_sec,
+    rx_max_per_sec = EXCLUDED.rx_max_per_sec,
+    tx_avg_per_sec = EXCLUDED.tx_avg_per_sec,
+    tx_max_per_sec = EXCLUDED.tx_max_per_sec;

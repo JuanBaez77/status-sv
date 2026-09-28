@@ -16,9 +16,15 @@ type Querier interface {
 	// si la nueva es más reciente. Cero filas quiere decir que la foto es vieja (un
 	// reenvío que llegó tarde) y no hay que aplicarla.
 	AdvanceRuntimeTakenAt(ctx context.Context, arg AdvanceRuntimeTakenAtParams) (int64, error)
+	// AggregateDisksByHour guarda el peor momento de cada disco en la hora.
+	AggregateDisksByHour(ctx context.Context, arg AggregateDisksByHourParams) (int64, error)
 	// AggregateDisksByMinute guarda el peor momento de cada disco en el minuto: lo
 	// más usado y lo menos disponible.
 	AggregateDisksByMinute(ctx context.Context, arg AggregateDisksByMinuteParams) (int64, error)
+	// AggregateNetworksByHour promedia las tasas de los minutos de la hora y se
+	// queda con el pico más alto. Un minuto sin tasa (el agent estuvo caído) no
+	// está en metrics_1m_networks, así que no baja el promedio.
+	AggregateNetworksByHour(ctx context.Context, arg AggregateNetworksByHourParams) (int64, error)
 	// AggregateNetworksByMinute pasa los contadores acumulados a tasas en bytes por
 	// segundo. Cada par de muestras seguidas de una interfaz da una tasa, que
 	// cuenta para el minuto de la segunda. El promedio del minuto es el total de
@@ -29,6 +35,15 @@ type Querier interface {
 	// estuvo caído) o con un contador que bajó (el servidor se reinició) no es una
 	// tasa, y se descarta.
 	AggregateNetworksByMinute(ctx context.Context, arg AggregateNetworksByMinuteParams) (int64, error)
+	// Agregado por hora. Igual que el minuto, cada consulta recalcula las horas que
+	// empiezan entre from_ts y to_ts, pero desde metrics_1m: el crudo dura 48 horas
+	// y el minuto ya está al día cuando se llega acá, en la misma transacción.
+	//
+	// Los promedios de la hora pesan cada minuto por sus muestras, así un minuto
+	// con una sola muestra no vale lo mismo que uno completo.
+	// AggregateSamplesByHour agrega CPU, memoria y carga, con el mínimo de CPU y
+	// de memoria además del promedio y el máximo.
+	AggregateSamplesByHour(ctx context.Context, arg AggregateSamplesByHourParams) (int64, error)
 	// Agregado por minuto (ADR-009). Cada consulta recalcula, para un servidor,
 	// los minutos que empiezan entre from_ts y to_ts a partir de todo el crudo de
 	// esos minutos, y pisa lo que hubiera. Recalcular desde el crudo, en vez de

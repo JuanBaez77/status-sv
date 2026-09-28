@@ -55,7 +55,7 @@ type IngestResult struct {
 // muestra nunca queda guardada a medias. Guardar dos veces el mismo lote no
 // duplica nada.
 //
-// En la misma transacción recalcula el agregado por minuto de los minutos que
+// En la misma transacción recalcula el agregado por minuto y por hora de lo que
 // tocó el lote (ADR-009): el agregado nunca queda atrás del crudo, aunque una
 // muestra llegue tarde. Si el lote no trajo nada nuevo, no hay nada que
 // recalcular.
@@ -92,7 +92,7 @@ func (i *Ingester) Ingest(ctx context.Context, serverID uuid.UUID, samples []pro
 		}
 	}
 	if inserted+insertedDisks+insertedNetworks > 0 {
-		if err := aggregateMinutes(ctx, q, serverID, batch.firstTS, batch.lastTS); err != nil {
+		if err := aggregate(ctx, q, serverID, batch.firstTS, batch.lastTS); err != nil {
 			return IngestResult{}, err
 		}
 	}

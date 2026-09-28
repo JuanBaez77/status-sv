@@ -59,8 +59,8 @@ func TestMaintainCoversEveryTableWithItsRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Maintain: %v", err)
 	}
-	if result != (Result{Created: 12, Dropped: 6}) {
-		t.Errorf("resultado = %+v, se esperaba 12 creadas y 6 borradas", result)
+	if result != (Result{Created: 18, Dropped: 9}) {
+		t.Errorf("resultado = %+v, se esperaba 18 creadas y 9 borradas", result)
 	}
 
 	want := map[string]struct{ from, to, before time.Time }{
@@ -70,6 +70,9 @@ func TestMaintainCoversEveryTableWithItsRetention(t *testing.T) {
 		"metrics_1m":           {now.AddDate(0, 0, -30), now.AddDate(0, 0, 32), now.AddDate(0, 0, -30)},
 		"metrics_1m_disks":     {now.AddDate(0, 0, -30), now.AddDate(0, 0, 32), now.AddDate(0, 0, -30)},
 		"metrics_1m_networks":  {now.AddDate(0, 0, -30), now.AddDate(0, 0, 32), now.AddDate(0, 0, -30)},
+		"metrics_1h":           {now.AddDate(0, 0, -365), now.AddDate(0, 0, 32), now.AddDate(0, 0, -365)},
+		"metrics_1h_disks":     {now.AddDate(0, 0, -365), now.AddDate(0, 0, 32), now.AddDate(0, 0, -365)},
+		"metrics_1h_networks":  {now.AddDate(0, 0, -365), now.AddDate(0, 0, 32), now.AddDate(0, 0, -365)},
 	}
 	if len(fake.ensured) != len(want) || len(fake.dropped) != len(want) {
 		t.Fatalf("se mantuvieron %d y %d tablas, se esperaban %d", len(fake.ensured), len(fake.dropped), len(want))
@@ -98,7 +101,7 @@ func TestMaintainKeepsGoingWhenATableFails(t *testing.T) {
 	if !errors.Is(err, errBroken) {
 		t.Fatalf("el error no deja ver la causa: %v", err)
 	}
-	if result.Created != 10 || len(fake.dropped) != 5 {
+	if result.Created != 16 || len(fake.dropped) != 8 {
 		t.Errorf("con una tabla rota, se mantuvieron %d y se borró en %d", result.Created/2, len(fake.dropped))
 	}
 	var tables []string

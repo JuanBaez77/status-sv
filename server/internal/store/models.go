@@ -32,6 +32,48 @@ type EnrollmentToken struct {
 	ServerID   *uuid.UUID
 }
 
+type Metrics1h struct {
+	ServerID         uuid.UUID
+	Bucket           time.Time
+	Samples          int32
+	CpuUsedMin       float32
+	CpuUsedAvg       float32
+	CpuUsedMax       float32
+	CpuIowaitAvg     float32
+	CpuIowaitMax     float32
+	CpuStealAvg      float32
+	CpuCores         int16
+	MemTotalBytes    int64
+	MemUsedMinBytes  int64
+	MemUsedAvgBytes  int64
+	MemUsedMaxBytes  int64
+	SwapTotalBytes   int64
+	SwapUsedAvgBytes int64
+	SwapUsedMaxBytes int64
+	Load1Avg         float32
+	Load5Avg         float32
+	Load15Avg        float32
+}
+
+type Metrics1hDisk struct {
+	ServerID          uuid.UUID
+	Bucket            time.Time
+	Mountpoint        string
+	TotalBytes        int64
+	UsedMaxBytes      int64
+	AvailableMinBytes int64
+}
+
+type Metrics1hNetwork struct {
+	ServerID    uuid.UUID
+	Bucket      time.Time
+	Interface   string
+	RxAvgPerSec float64
+	RxMaxPerSec float64
+	TxAvgPerSec float64
+	TxMaxPerSec float64
+}
+
 type Metrics1m struct {
 	ServerID         uuid.UUID
 	Bucket           time.Time
