@@ -1,0 +1,52 @@
+{
+  "v": 1,
+  "type": "projects_state",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "taken_at": "2026-09-20T12:00:00Z",
+    "source": {
+      "status": "ok"
+    },
+    "projects": [
+      {
+        "name": "cristales-baez",
+        "environment": "production",
+        "repo": "github.com/extendsystem/cristales-baez",
+        "branch": "main",
+        "runtime": "docker",
+        "workdir": "/srv/cristales-baez",
+        "compose_file": "docker-compose.yml",
+        "compose_project": "cristales-baez",
+        "healthcheck": {
+          "url": "https://cristales.example.com/health",
+          "expect_status": 200,
+          "timeout_seconds": 10
+        },
+        "health": {
+          "state": "passing",
+          "checked_at": "2026-09-20T11:59:30Z",
+          "status_code": 200,
+          "latency_ms": 84
+        }
+      },
+      {
+        "name": "facturas",
+        "environment": "staging",
+        "repo": "git@github.com:extendsystem/facturas.git",
+        "branch": "release/2026.09",
+        "runtime": "systemd",
+        "workdir": "/srv/facturas",
+        "units": [
+          "gunicorn@facturas.service"
+        ]
+      }
+    ],
+    "invalid": [
+      {
+        "file": "cotizador.yaml",
+        "error": "healthcheck.url: la URL tiene que ser http o https"
+      }
+    ]
+  }
+}

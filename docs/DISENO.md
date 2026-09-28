@@ -538,7 +538,7 @@ Acceso
 
 Proyectos
 
-- [ ] Mensajes `projects_state` y `projects_state_ack` en `proto/`, con topes y archivos golden.
+- [x] Mensajes `projects_state` y `projects_state_ack` en `proto/`, con topes y archivos golden.
 - [ ] Parser estricto de `project.yaml` en el agent (`agent/internal/projectspec`).
 - [ ] El agent lee `/etc/status-sv/projects.d`, revisa cada 30 s si cambió y manda solo si cambió.
 - [ ] Tabla `projects` y persistencia por servidor en una transacción; el ligado con `runtime_units`

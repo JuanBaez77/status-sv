@@ -59,6 +59,8 @@ func TestGoldenEnvelopes(t *testing.T) {
 		{name: "metrics_ack", msg: proto.MetricsAck{Accepted: 1, LastTS: goldenTS}},
 		{name: "runtime_state", msg: validRuntimeState()},
 		{name: "runtime_state_ack", msg: proto.RuntimeStateAck{TakenAt: goldenTS}},
+		{name: "projects_state", msg: validProjectsState()},
+		{name: "projects_state_ack", msg: proto.ProjectsStateAck{TakenAt: goldenTS}},
 		{name: "command", msg: proto.Command{Operation: proto.OpGetLogs, GetLogs: &proto.GetLogsParams{Kind: proto.LogService, Target: "nginx.service", Lines: 200}}},
 		{
 			name: "command_ack",
@@ -137,6 +139,8 @@ func TestEveryMessageTypeIsAccepted(t *testing.T) {
 		proto.MetricsAck{},
 		proto.RuntimeState{},
 		proto.RuntimeStateAck{},
+		proto.ProjectsState{},
+		proto.ProjectsStateAck{},
 		proto.Command{},
 		proto.CommandAck{},
 		proto.ErrorMessage{},
