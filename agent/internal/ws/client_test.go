@@ -48,6 +48,8 @@ type fakeControlPlane struct {
 	// contestarles, igual que con las métricas.
 	runtimeStates []proto.RuntimeState
 	runtimeMode   metricsMode
+	// projectsStates son los proyectos recibidos, que se confirman siempre.
+	projectsStates []proto.ProjectsState
 
 	// acks recibe las respuestas del agent a los comandos.
 	acks chan proto.CommandAck
@@ -115,6 +117,12 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 				if acks != nil {
 					acks <- ack
 				}
+			}
+			continue
+		}
+		if envelope.Type == proto.TypeProjectsState {
+			if err := f.handleProjects(r.Context(), conn, envelope); err != nil {
+				return
 			}
 			continue
 		}

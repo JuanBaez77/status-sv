@@ -11,6 +11,7 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
 	"github.com/JuanBaez77/status-sv/agent/internal/journal"
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
+	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
 	"github.com/JuanBaez77/status-sv/agent/internal/ws"
@@ -67,6 +68,12 @@ func runAgent(ctx context.Context, args []string) error {
 		client.SetCommands(commands.NewExecutor(parts.dockerClient, journal.NewReader(), parts.assembler.Knows, log))
 		runner := runtimestate.NewRunner(parts.assembler, outbox, log, parts.dockerSource, parts.systemdSource)
 		wg.Go(func() { runner.Run(ctx) })
+
+		// Los proyectos declarados en el servidor (ADR-012), en solo lectura.
+		projectsOutbox := projects.NewOutbox()
+		client.SetProjects(projectsOutbox)
+		declared := projects.NewRunner(cfg.ProjectsDir, projectsOutbox, log)
+		wg.Go(func() { declared.Run(ctx) })
 	}
 
 	err = client.Run(ctx)
