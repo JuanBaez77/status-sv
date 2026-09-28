@@ -466,7 +466,7 @@ Servidor
 - [x] Tablas `runtime_units` y `runtime_sources`: cada foto reemplaza lo de cada fuente según su estado
       (con `error` se conserva lo anterior), en una transacción, y una foto más vieja que la guardada
       se confirma sin aplicarse. Este PR se adelantó al envío del agent: el receptor antes que el emisor.
-- [ ] `GET /v1/servers/{id}/runtime` detrás de la sesión, y el estado nuevo empujado por el
+- [x] `GET /v1/servers/{id}/runtime` detrás de la sesión, y el estado nuevo empujado por el
       WebSocket del panel a quien esté suscripto.
 
 Panel
