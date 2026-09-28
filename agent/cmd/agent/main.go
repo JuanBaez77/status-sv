@@ -6,6 +6,7 @@
 //	agent enroll --server-url URL    canjea un token por la credencial del agent
 //	agent run                        mantiene el canal abierto
 //	agent sample                     imprime una muestra de métricas, sin conectarse
+//	agent runtime                    imprime la foto de contenedores, servicios y procesos
 //	agent version                    imprime la versión
 package main
 
@@ -48,6 +49,8 @@ func run(ctx context.Context, args []string) error {
 		return runEnroll(ctx, args[1:])
 	case "run":
 		return runAgent(ctx, args[1:])
+	case "runtime":
+		return runRuntime(ctx, args[1:])
 	case "sample":
 		return runSample(ctx, args[1:])
 	case "version", "--version", "-version":
@@ -70,6 +73,8 @@ Uso:
   agent run                         mantiene el canal abierto con el control plane
   agent sample [--interval 1s]      imprime una muestra de métricas como JSON, sin
                                     conectarse: sirve para ver qué lee el agent
+  agent runtime [--interval 1s]     imprime la foto de contenedores, servicios y
+                                    procesos como JSON, sin conectarse
   agent version                     imprime la versión
 
 Configuración (variables de entorno):
@@ -78,6 +83,9 @@ Configuración (variables de entorno):
                            porque los argumentos se ven con ps)
   STATUSSV_STATE_FILE      archivo de estado (por defecto %s)
   STATUSSV_LOG_LEVEL       debug, info, warn o error (por defecto info)
+  STATUSSV_DOCKER_SOCKET   socket de Docker (por defecto /run/docker.sock)
+  STATUSSV_SYSTEMD_EXCLUDE patrones de servicios que no se muestran, separados
+                           por comas, además de los de siempre
   STATUSSV_LOG_FORMAT      json o text (por defecto json)
 `, name, config.DefaultStateFile())
 }
