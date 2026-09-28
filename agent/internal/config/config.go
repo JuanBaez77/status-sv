@@ -39,6 +39,9 @@ type Config struct {
 	// SystemdExclude son patrones de servicios que no se muestran, además de
 	// los de siempre (systemd.DefaultExclude).
 	SystemdExclude []string
+	// ProjectsDir es donde una persona declara los proyectos del servidor
+	// (ADR-012). Se cambia solo para desarrollar o probar.
+	ProjectsDir string
 
 	LogLevel slog.Level
 	LogJSON  bool
@@ -52,6 +55,7 @@ func Load() (Config, error) {
 		EnrollToken:  strings.TrimSpace(os.Getenv("STATUSSV_ENROLL_TOKEN")),
 		LogJSON:      !strings.EqualFold(envOr("STATUSSV_LOG_FORMAT", "json"), "text"),
 		DockerSocket: envOr("STATUSSV_DOCKER_SOCKET", "/run/docker.sock"),
+		ProjectsDir:  envOr("STATUSSV_PROJECTS_DIR", "/etc/status-sv/projects.d"),
 	}
 
 	level, err := envLevel("STATUSSV_LOG_LEVEL", slog.LevelInfo)

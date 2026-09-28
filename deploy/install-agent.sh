@@ -23,6 +23,9 @@ readonly STATE_DIR="/var/lib/status-sv"
 readonly STATE_FILE="${STATE_DIR}/agent.json"
 readonly DROPIN_DIR="/etc/systemd/system/${SERVICE}.service.d"
 readonly DROPIN_DOCKER="${DROPIN_DIR}/10-docker.conf"
+# Los proyectos del servidor los declara una persona; el agent solo los lee
+# (ADR-012).
+readonly PROJECTS_DIR="/etc/status-sv/projects.d"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_DIR
@@ -95,8 +98,12 @@ paso "instalando el binario y la unidad"
 install -o root -g root -m 0755 "${BINARY_SRC}" "${BINARY_DEST}"
 install -o root -g root -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0700 "${STATE_DIR}"
+install -d -o root -g root -m 0755 "$(dirname "${PROJECTS_DIR}")"
+# Si ya existe, "install -d" no toca lo que tiene adentro.
+install -d -o root -g "${SERVICE_USER}" -m 0750 "${PROJECTS_DIR}"
 echo "${BINARY_DEST}"
 echo "${UNIT_DEST}"
+echo "${PROJECTS_DIR}"
 
 # --- Acceso a Docker ---
 

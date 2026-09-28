@@ -376,6 +376,42 @@ grupo `docker` (ver arriba). Corrido con `sudo -u statussv` tiene los grupos de 
 Para esconder más servicios que los de siempre, `STATUSSV_SYSTEMD_EXCLUDE` en la unidad, con
 patrones separados por comas (por ejemplo `snapd*,unattended-upgrades.service`).
 
+### Declarar un proyecto
+
+Cada proyecto es un archivo en `/etc/status-sv/projects.d/<nombre>.yaml` del propio servidor
+([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)). El instalador crea el directorio
+(`root:statussv 0750`); los archivos los escribe una persona con SSH y el agent solo los lee. El
+control plane no puede crear ni cambiar un proyecto.
+
+```bash
+sudo install -o root -g statussv -m 0640 /dev/stdin /etc/status-sv/projects.d/cristales-baez.yaml <<'YAML'
+name: cristales-baez
+environment: production
+repo: github.com/extendsystem/cristales-baez
+branch: main
+runtime: docker
+compose_file: docker-compose.yml
+workdir: /srv/cristales-baez
+healthcheck:
+  url: https://cristales.example.com/health
+YAML
+```
+
+El formato completo está en DISENO.md. Lo que conviene saber:
+
+- `name` tiene que ser igual al nombre del archivo, y cualquier campo desconocido es error.
+- Con Docker, el proyecto se liga a los contenedores por la etiqueta de Compose: si
+  `compose_project` falta, es el nombre del directorio de `workdir`, como hace Compose. Con systemd,
+  va la lista de servicios en `units`.
+- `deploy.pre` y `deploy.post` tienen que estar vacíos hasta el Sprint 4.
+
+El agent relee el directorio cada 30 s. Un archivo con errores queda afuera entero, y el motivo (el
+campo y la regla, nunca el valor) aparece en el panel y en el registro del agent:
+
+```bash
+journalctl -u statussv-agent --since '-5 min' | grep -i proyecto
+```
+
 ## 3. Actualizar
 
 **Control plane:** copiar el nuevo commit igual que en el paso 1, actualizar `STATUSSV_COMMIT` y
