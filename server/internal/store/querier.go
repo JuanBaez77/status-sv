@@ -12,6 +12,10 @@ import (
 )
 
 type Querier interface {
+	// AdvanceRuntimeTakenAt avanza la marca de la última foto de un servidor, solo
+	// si la nueva es más reciente. Cero filas quiere decir que la foto es vieja (un
+	// reenvío que llegó tarde) y no hay que aplicarla.
+	AdvanceRuntimeTakenAt(ctx context.Context, arg AdvanceRuntimeTakenAtParams) (int64, error)
 	// AggregateDisksByMinute guarda el peor momento de cada disco en el minuto: lo
 	// más usado y lo menos disponible.
 	AggregateDisksByMinute(ctx context.Context, arg AggregateDisksByMinuteParams) (int64, error)
@@ -51,6 +55,9 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredEnrollmentTokens(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
+	// DeleteRuntimeUnitsExcept borra las unidades de un tipo que ya no están en la
+	// foto. Con la lista vacía borra todas las de ese tipo.
+	DeleteRuntimeUnitsExcept(ctx context.Context, arg DeleteRuntimeUnitsExceptParams) (int64, error)
 	DeleteServer(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
 	// DeleteUserSessions cierra todas las sesiones de un usuario, por ejemplo al
@@ -117,6 +124,11 @@ type Querier interface {
 	// contador que baja o un hueco largo no son una tasa.
 	ListRawNetworks(ctx context.Context, arg ListRawNetworksParams) ([]ListRawNetworksRow, error)
 	ListRawSamples(ctx context.Context, arg ListRawSamplesParams) ([]ListRawSamplesRow, error)
+	// ListRuntimeSources devuelve el estado de las fuentes de un servidor.
+	ListRuntimeSources(ctx context.Context, serverID uuid.UUID) ([]ListRuntimeSourcesRow, error)
+	// ListRuntimeUnits devuelve las unidades de un servidor, agrupadas por tipo y
+	// en orden de nombre.
+	ListRuntimeUnits(ctx context.Context, serverID uuid.UUID) ([]ListRuntimeUnitsRow, error)
 	ListServers(ctx context.Context) ([]Server, error)
 	// LockServerName toma un lock consultivo sobre el nombre del servidor, que se
 	// suelta al terminar la transacción. Sin esto, dos enrolamientos simultáneos de
@@ -136,6 +148,13 @@ type Querier interface {
 	// minuto por sesión, para no escribir en cada pedido.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateServerHostname(ctx context.Context, arg UpdateServerHostnameParams) (Server, error)
+	// UpsertRuntimeSource guarda el resultado de leer una fuente.
+	UpsertRuntimeSource(ctx context.Context, arg UpsertRuntimeSourceParams) error
+	// UpsertRuntimeUnits guarda las unidades de un tipo, una fila por unidad, con
+	// cada columna como un arreglo (como la ingesta de métricas). Lo que falta
+	// viaja como un valor que no puede ocurrir y se vuelve NULL acá: el año 1 para
+	// las fechas y -1 para el consumo.
+	UpsertRuntimeUnits(ctx context.Context, arg UpsertRuntimeUnitsParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

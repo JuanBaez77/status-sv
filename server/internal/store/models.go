@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AgentCredential struct {
@@ -104,16 +105,47 @@ type MetricsRawNetwork struct {
 	TxBytes   int64
 }
 
+type RuntimeSource struct {
+	ServerID uuid.UUID
+	Source   string
+	Status   string
+	Detail   string
+	Omitted  int32
+	TakenAt  time.Time
+}
+
+type RuntimeUnit struct {
+	ServerID       uuid.UUID
+	Kind           string
+	UnitKey        string
+	Name           string
+	State          string
+	Health         string
+	LoadState      string
+	SubState       string
+	Image          string
+	ComposeProject string
+	ComposeService string
+	Pid            int32
+	UserName       string
+	Command        string
+	StartedAt      *time.Time
+	CpuPercent     pgtype.Float4
+	MemoryBytes    pgtype.Int8
+	SeenAt         time.Time
+}
+
 type Server struct {
-	ID           uuid.UUID
-	Name         string
-	Hostname     string
-	Labels       []byte
-	AgentVersion string
-	LastSeenAt   *time.Time
-	EnrolledAt   time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID             uuid.UUID
+	Name           string
+	Hostname       string
+	Labels         []byte
+	AgentVersion   string
+	LastSeenAt     *time.Time
+	EnrolledAt     time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	RuntimeTakenAt *time.Time
 }
 
 type Session struct {
