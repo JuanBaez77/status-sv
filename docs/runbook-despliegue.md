@@ -415,6 +415,10 @@ El formato completo está en DISENO.md. Lo que conviene saber:
   proxy, verificando el certificado y **sin seguir redirecciones**: si la URL responde 301, hay que
   declarar `expect_status: 301` o apuntar a la URL final. Si no se fijan, `expect_status` es 200 y
   `timeout_seconds` 10. Los pedidos llegan con el User-Agent `status-sv-agent/<versión>`.
+- Si el sitio pide usuario y contraseña en nginx (autenticación básica), por el dominio siempre da
+  401, aunque la app esté caída. En ese caso el healthcheck va al puerto local del contenedor
+  (`docker port <contenedor>`), por ejemplo `http://127.0.0.1:8010/health`. Antes de declararlo,
+  `curl -s -o /dev/null -w '%{http_code}' <url>` dice qué código poner en `expect_status`.
 
 El agent relee el directorio cada 30 s. Un archivo con errores queda afuera entero, y el motivo (el
 campo y la regla, nunca el valor) aparece en el panel y en el registro del agent:

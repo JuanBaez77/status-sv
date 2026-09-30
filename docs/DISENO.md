@@ -561,13 +561,40 @@ Calidad y despliegue
       listas para cuando se haga: se muda la base entera, así los agents no se reenrolan. Caddy toma
       la IP real de Cloudflare y comprime, como nginx. **Postergada** el 2026-09-30: ADR-007 sigue
       vigente.
-- [ ] Desplegar el sprint en `cristales-baez-prod`, detrás de su nginx (runbook, sección 3), y sumar
-      el agent del segundo servidor apuntando ahí. Incluye #41 (migración 00005) y las migraciones
-      de este sprint (00006 a 00008).
+- [x] Desplegar el sprint en `cristales-baez-prod`, detrás de su nginx (runbook, sección 3), y sumar
+      el agent del segundo servidor apuntando ahí. Incluye las migraciones de este sprint (00006 a
+      00008); la 00005 (#41) ya estaba aplicada.
 
 Terminado cuando dos VPS reales se ven en vivo en el panel, cada uno con al menos un proyecto ligado
 a sus contenedores o servicios; los rangos de 30 días y un año se dibujan desde `metrics_1h`; el
 login exige TOTP; se cumplen todas las metas de la Fase 1, y el CI está verde.
+
+**Cerrado el 2026-09-30** (commit `4376437`, desplegado en `cristales-baez-prod`): control plane y
+los dos agents en esa versión, y el login con TOTP dado de alta. `cristales-baez-prod` declara
+`cristales-baez` (8 contenedores, healthcheck 200 en 54 ms). `sv-gcg` declara `bot-ypf`,
+`gcg-alertas` y `gcg-alertas-nbcargo`, los tres válidos; los healthchecks de los dos primeros pasan,
+y `gcg-alertas-nbcargo` va sin healthcheck porque no tiene dominio propio. Las metas de Lighthouse,
+latencia, RAM y CPU se verifican en cada PR del CI; en producción no se midieron esta vez.
+
+Lecciones del despliegue:
+
+- **`bot-ypf` tiene autenticación básica en nginx**, así que por el dominio siempre responde 401,
+  esté la app viva o no. Su healthcheck va al puerto local del contenedor
+  (`http://127.0.0.1:8010/health`), sin pasar por nginx. Lo mismo vale para cualquier proyecto
+  protegido así.
+- **La raíz de un sitio no siempre sirve de healthcheck:** la de `gcg-alertas` da 404. Hay que buscar
+  una ruta que conteste la app (ahí, `/health`).
+- **En `sv-gcg`, `rm` pide confirmación** (es un alias de `rm -i`): los comandos que borran
+  temporales se detienen a preguntar.
+- **Bash interactivo expande `!!`** aunque esté entre comillas dobles. Un bloque para pegar en la
+  terminal no puede llevarlo.
+- **Actualizar `STATUSSV_VERSION` sin copiar el código nuevo** compila la versión vieja con la
+  etiqueta nueva. `migrate status` lo delata: lista solo las migraciones que conoce el binario.
+
+Queda para decidir antes del Sprint 4: [ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)
+pide mudar el control plane antes de las herramientas de escritura (el deploy del Sprint 4) y antes de
+un segundo cliente con agent. La mudanza está escrita en
+[ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) y en la sección 6 del runbook.
 
 **Sprints siguientes (resumen)**
 
