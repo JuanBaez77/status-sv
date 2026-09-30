@@ -280,8 +280,8 @@ Las metas se verifican desde el Sprint 1 con pruebas automáticas; si una se rom
 | RAM del agent en reposo | Menos de 30 MB | El agent mide su propia memoria y la manda en el latido; la prueba de carga la verifica. |
 | CPU del agent en reposo | Menos de 1% | Promedio de los latidos: 2 minutos en cada PR y 10 en el workflow nocturno. |
 | RAM del control plane con 10 agents | Menos de 100 MB | Prueba de carga con agents simulados, que usan el cliente del agent de verdad. |
-| Latencia métrica → pantalla | Menos de 2 s | Marca de tiempo en el agent contra render en el front. |
-| Carga inicial del panel | Menos de 1 s en conexión normal | Lighthouse en CI. |
+| Latencia métrica → pantalla | Menos de 2 s | Marca de tiempo en el agent contra el cuadro en que el panel la dibuja, en CI (`deploy/metas`). |
+| Carga inicial del panel | Menos de 1 s en conexión normal | Largest Contentful Paint de Lighthouse (perfil de escritorio) sobre el login y la lista, en CI. |
 | Tamaño del bundle del front | Menos de 300 KB comprimido | Análisis del build de Vite. |
 | Tamaño del binario del agent | Menos de 15 MB | Verificación en el build. |
 | Inicio de un deploy | Menos de 3 s desde la orden | Evento `deploy_event` de arranque. |
@@ -546,13 +546,16 @@ Proyectos
 - [ ] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
       y el cambio empujado por el WebSocket del panel.
 - [ ] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
-- [ ] Healthcheck pasivo desde el agent cada 60 s. **Línea de corte**: si el sprint se estira, pasa
-      al Sprint 4.
+- [x] Healthcheck pasivo desde el agent cada 60 s: `GET` sin seguir redirecciones, verificando el
+      certificado y sin leer el cuerpo. El resultado sale en `projects_state` solo cuando pasa de bien
+      a mal o al revés, y la hora del último chequeo con el reenvío de los 5 minutos.
 
 Calidad y despliegue
 
-- [ ] Lighthouse y latencia métrica → pantalla medidas en CI: son las dos metas de la Fase 1 que
-      faltaba verificar.
+- [x] Lighthouse y latencia métrica → pantalla medidas en CI (`deploy/metas`, en cada PR): el
+      control plane con el panel adentro y un agent de verdad, con los binarios en el runner. Se mide
+      sin compresión, el peor caso: LCP de 0,6 s en el login y en la lista (puntaje 100) y latencia
+      máxima de 150 ms, contra metas de 1 s y 2 s.
 - [x] [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md), que reemplaza a ADR-007, y la mudanza en
       el runbook (sección 6): se muda la base entera, así los agents no se reenrolan. Caddy toma la
       IP real de Cloudflare y comprime, como nginx.

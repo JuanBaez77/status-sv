@@ -1,5 +1,5 @@
-// Package projects lee los proyectos declarados en el servidor y decide cuándo
-// mandarlos al control plane (ADR-012).
+// Package projects lee los proyectos declarados en el servidor, prueba su
+// healthcheck y decide cuándo mandarlos al control plane (ADR-012).
 //
 // El directorio es de root y el agent solo lo lee. Se relee entero cada 30 s:
 // son unos pocos archivos chicos, y releerlos es más simple y más seguro que
@@ -149,37 +149,62 @@ func clean(s string, maxLen int) string {
 	return s
 }
 
-// Runner relee el directorio y deja en la bandeja las fotos que cambiaron.
+// Runner relee el directorio, prueba los healthchecks declarados y deja en la
+// bandeja las fotos que cambiaron.
 type Runner struct {
-	dir    string
-	outbox *Outbox
-	log    *slog.Logger
-	now    func() time.Time
+	dir     string
+	outbox  *Outbox
+	checker HealthChecker
+	log     *slog.Logger
+	now     func() time.Time
 
-	refresh, resend time.Duration
+	refresh, resend, healthEvery time.Duration
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// read es la última lectura del directorio, sin healthchecks; current es
+	// la última foto armada, con el resultado de cada uno.
+	read     proto.ProjectsState
 	current  proto.ProjectsState
+	health   map[string]healthEntry
 	lastSig  [sha256.Size]byte
 	lastSent time.Time
 }
 
-// NewRunner arma el Runner sobre un directorio.
-func NewRunner(dir string, o *Outbox, log *slog.Logger) *Runner {
+// healthEntry es el último healthcheck de un proyecto y lo que se probó: si
+// alguien cambia la URL, el resultado viejo ya no vale.
+type healthEntry struct {
+	spec   proto.HealthcheckSpec
+	result proto.HealthResult
+}
+
+// NewRunner arma el Runner sobre un directorio. Con checker nil no se prueban
+// los healthchecks.
+func NewRunner(dir string, o *Outbox, checker HealthChecker, log *slog.Logger) *Runner {
 	return &Runner{
-		dir:     dir,
-		outbox:  o,
-		log:     log,
-		now:     time.Now,
-		refresh: DefaultRefresh,
-		resend:  DefaultResend,
+		dir:         dir,
+		outbox:      o,
+		checker:     checker,
+		log:         log,
+		now:         time.Now,
+		refresh:     DefaultRefresh,
+		resend:      DefaultResend,
+		healthEvery: DefaultHealthInterval,
+		health:      make(map[string]healthEntry),
 	}
 }
 
 // Run relee el directorio hasta que se cancela ctx: una vez al arrancar y
-// después en cada refresco.
+// después en cada refresco. Los healthchecks corren aparte, porque una prueba
+// puede tardar hasta 30 s y no tiene que demorar la lectura.
 func (r *Runner) Run(ctx context.Context) {
 	r.take(ctx)
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	if r.checker != nil {
+		wg.Go(func() { r.runHealth(ctx) })
+	}
+
 	ticker := time.NewTicker(r.refresh)
 	defer ticker.Stop()
 	for {
@@ -192,7 +217,7 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
-// Current devuelve los proyectos de la última lectura.
+// Current devuelve los proyectos de la última foto.
 func (r *Runner) Current() []proto.Project {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -201,20 +226,31 @@ func (r *Runner) Current() []proto.Project {
 
 func (r *Runner) take(ctx context.Context) {
 	state := Read(r.dir, r.now())
-	sig := signature(state)
-
 	r.mu.Lock()
+	r.read = state
+	r.mu.Unlock()
+	r.publish(ctx)
+}
+
+// publish arma la foto con la última lectura y los últimos healthchecks, y la
+// deja en la bandeja si cambió algo o si pasó el tiempo de reenvío.
+func (r *Runner) publish(ctx context.Context) {
+	r.mu.Lock()
+	state := r.withHealth(r.read)
+	sig := signature(state)
 	r.current = state
 	unchanged := sig == r.lastSig && r.now().Sub(r.lastSent) < r.resend
 	if !unchanged {
 		r.lastSig, r.lastSent = sig, r.now()
+		// Adentro del candado: la lectura y los healthchecks publican desde
+		// dos goroutines, y una foto vieja no puede quedar después de una nueva.
+		r.outbox.Put(state)
 	}
 	r.mu.Unlock()
 	if unchanged {
 		return
 	}
 
-	r.outbox.Put(state)
 	r.log.InfoContext(ctx, "proyectos declarados leídos",
 		"directorio", r.dir,
 		"fuente", state.Source.Status,
@@ -226,9 +262,101 @@ func (r *Runner) take(ctx context.Context) {
 	}
 }
 
-// signature resume lo que muestra una foto, sin la marca de tiempo.
+// withHealth copia la lectura y le suma a cada proyecto su último healthcheck,
+// si se probó con lo que declara hoy. Se llama con r.mu tomado.
+func (r *Runner) withHealth(read proto.ProjectsState) proto.ProjectsState {
+	state := read
+	state.Projects = slices.Clone(read.Projects)
+	for i, p := range state.Projects {
+		entry, ok := r.health[p.Name]
+		if p.Healthcheck == nil || !ok || entry.spec != *p.Healthcheck {
+			continue
+		}
+		result := entry.result
+		state.Projects[i].Health = &result
+	}
+	return state
+}
+
+// runHealth prueba los healthchecks al arrancar y después cada minuto.
+func (r *Runner) runHealth(ctx context.Context) {
+	r.checkHealth(ctx)
+	ticker := time.NewTicker(r.healthEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.checkHealth(ctx)
+		}
+	}
+}
+
+// checkHealth prueba en paralelo el healthcheck de cada proyecto de la última
+// lectura y publica. Con 50 proyectos como máximo y 30 s de timeout, una
+// vuelta nunca se superpone con la siguiente.
+func (r *Runner) checkHealth(ctx context.Context) {
+	r.mu.Lock()
+	projects := slices.Clone(r.read.Projects)
+	r.mu.Unlock()
+
+	results := make([]proto.HealthResult, len(projects))
+	var wg sync.WaitGroup
+	for i, p := range projects {
+		if p.Healthcheck == nil {
+			continue
+		}
+		spec := *p.Healthcheck
+		wg.Go(func() { results[i] = r.checker.Check(ctx, spec) })
+	}
+	wg.Wait()
+	// Al apagar, las pruebas cortadas no son una caída del proyecto.
+	if ctx.Err() != nil {
+		return
+	}
+
+	r.mu.Lock()
+	next := make(map[string]healthEntry, len(projects))
+	for i, p := range projects {
+		if p.Healthcheck == nil {
+			continue
+		}
+		entry := healthEntry{spec: *p.Healthcheck, result: results[i]}
+		before, had := r.health[p.Name]
+		next[p.Name] = entry
+		if had && before.spec == entry.spec && before.result.State == entry.result.State {
+			continue
+		}
+		r.logHealth(ctx, p.Name, entry.result)
+	}
+	r.health = next
+	r.mu.Unlock()
+
+	r.publish(ctx)
+}
+
+// logHealth anota el primer resultado de un proyecto y cada cambio de estado.
+func (r *Runner) logHealth(ctx context.Context, name string, h proto.HealthResult) {
+	attrs := []any{"proyecto", name, "codigo", h.StatusCode, "latencia_ms", h.LatencyMS}
+	if h.State == proto.HealthPassing {
+		r.log.InfoContext(ctx, "healthcheck bien", attrs...)
+		return
+	}
+	r.log.WarnContext(ctx, "healthcheck mal", append(attrs, "detalle", h.Detail)...)
+}
+
+// signature resume lo que muestra una foto, sin la marca de tiempo. De cada
+// healthcheck cuenta solo si está bien o mal: la hora, la latencia y el
+// detalle viajan con el reenvío de los 5 minutos (ADR-012).
 func signature(s proto.ProjectsState) [sha256.Size]byte {
 	s.TakenAt = time.Time{}
+	s.Projects = slices.Clone(s.Projects)
+	for i, p := range s.Projects {
+		if p.Health != nil {
+			s.Projects[i].Health = &proto.HealthResult{State: p.Health.State}
+		}
+	}
 	raw, err := json.Marshal(s)
 	if err != nil {
 		return [sha256.Size]byte{}

@@ -118,7 +118,9 @@ export function ServerPage({ id }: { id: string }) {
           description="Este servidor está dado de alta pero el agent no mandó ninguna muestra."
         />
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        // data-sample-ts es la hora de la muestra que se está mostrando: con
+        // eso, la medición de CI (deploy/metas) ve cuándo se dibuja cada una.
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-sample-ts={sample.ts}>
           <Stat
             label="CPU"
             value={percent(sample.cpu_used_percent)}
