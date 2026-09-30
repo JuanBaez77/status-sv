@@ -1,0 +1,78 @@
+{
+  "v": 1,
+  "type": "deploy_event",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "deploy_id": "01924f9c-0000-7000-8000-000000000001",
+    "seq": 9,
+    "project": "cristales-baez",
+    "kind": "deploy",
+    "status": "succeeded",
+    "commit": "89abcdef0123456789abcdef0123456789abcdef",
+    "previous_commit": "0123456789abcdef0123456789abcdef01234567",
+    "started_at": "2026-09-20T12:00:00Z",
+    "finished_at": "2026-09-20T12:01:35Z",
+    "steps": [
+      {
+        "name": "preflight",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:00Z",
+        "finished_at": "2026-09-20T12:00:00Z"
+      },
+      {
+        "name": "fetch",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:00Z",
+        "finished_at": "2026-09-20T12:00:02Z",
+        "detail": "main en 89abcdef"
+      },
+      {
+        "name": "snapshot",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:02Z",
+        "finished_at": "2026-09-20T12:00:02Z",
+        "detail": "3 imágenes anotadas"
+      },
+      {
+        "name": "checkout",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:02Z",
+        "finished_at": "2026-09-20T12:00:03Z"
+      },
+      {
+        "name": "build",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:03Z",
+        "finished_at": "2026-09-20T12:01:10Z",
+        "output": [
+          "#8 naming to docker.io/library/cristales-baez-backend done"
+        ]
+      },
+      {
+        "name": "pre",
+        "service": "backend",
+        "status": "ok",
+        "started_at": "2026-09-20T12:01:10Z",
+        "finished_at": "2026-09-20T12:01:20Z",
+        "output": [
+          "Applying pedidos.0042_estado... OK",
+          "DATABASE_URL=postgres://app:****@db/app"
+        ]
+      },
+      {
+        "name": "up",
+        "status": "ok",
+        "started_at": "2026-09-20T12:01:20Z",
+        "finished_at": "2026-09-20T12:01:25Z"
+      },
+      {
+        "name": "healthcheck",
+        "status": "ok",
+        "started_at": "2026-09-20T12:01:25Z",
+        "finished_at": "2026-09-20T12:01:35Z",
+        "detail": "3 contenedores sanos y 200 tres veces"
+      }
+    ]
+  }
+}

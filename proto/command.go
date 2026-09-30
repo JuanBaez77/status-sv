@@ -14,8 +14,8 @@ import (
 // lista cerrada (regla 2 del proyecto): no existe una operación que ejecute
 // texto libre, y el agent rechaza cualquier otra.
 //
-// En el Sprint 2 hay una sola, de lectura. Las de escritura (deploy, rollback,
-// restart…) se agregan a esta lista cuando existan, con sus parámetros tipados.
+// Las de escritura (restart, stop, start…) se agregan a esta lista cuando
+// existan, con sus parámetros tipados.
 type Operation string
 
 // Operaciones que existen.
@@ -23,6 +23,11 @@ const (
 	// OpGetLogs trae los últimos renglones de log de un contenedor o de un
 	// servicio.
 	OpGetLogs Operation = "get_logs"
+	// OpDeploy despliega un proyecto declarado (ADR-015). El acuse dice si
+	// se aceptó; el avance llega después, en deploy_event.
+	OpDeploy Operation = "deploy"
+	// OpRollback vuelve un proyecto declarado a su último estado bueno.
+	OpRollback Operation = "rollback"
 )
 
 // Límites de los comandos y sus respuestas.
@@ -52,21 +57,44 @@ const (
 // Lleva los parámetros de su operación en su propio campo, tipado: no hay un
 // mapa de parámetros sueltos que cada operación interprete a su manera.
 type Command struct {
-	Operation Operation      `json:"operation"`
-	GetLogs   *GetLogsParams `json:"get_logs,omitempty"`
+	Operation Operation       `json:"operation"`
+	GetLogs   *GetLogsParams  `json:"get_logs,omitempty"`
+	Deploy    *DeployParams   `json:"deploy,omitempty"`
+	Rollback  *RollbackParams `json:"rollback,omitempty"`
 }
 
 // Type implementa Message.
 func (Command) Type() MessageType { return TypeCommand }
 
-// Validate implementa Message.
+// Validate implementa Message. Un comando trae los parámetros de su operación
+// y ningún otro: parámetros de más son un error, no algo que se ignora.
 func (c Command) Validate() error {
+	params := 0
+	for _, present := range []bool{c.GetLogs != nil, c.Deploy != nil, c.Rollback != nil} {
+		if present {
+			params++
+		}
+	}
+	if params > 1 {
+		return errors.New("el comando trae parámetros de más de una operación")
+	}
+
 	switch c.Operation {
 	case OpGetLogs:
 		if c.GetLogs == nil {
 			return errors.New("get_logs sin parámetros")
 		}
 		return c.GetLogs.Validate()
+	case OpDeploy:
+		if c.Deploy == nil {
+			return errors.New("deploy sin parámetros")
+		}
+		return c.Deploy.Validate()
+	case OpRollback:
+		if c.Rollback == nil {
+			return errors.New("rollback sin parámetros")
+		}
+		return c.Rollback.Validate()
 	case "":
 		return errors.New("falta la operación")
 	default:
@@ -134,16 +162,21 @@ const (
 	CommandUnavailable      CommandErrorCode = "unavailable"
 	CommandTimeout          CommandErrorCode = "timeout"
 	CommandInternal         CommandErrorCode = "internal"
+	// CommandDisabled es una operación de escritura que una persona no
+	// prendió en ese servidor (ADR-015).
+	CommandDisabled CommandErrorCode = "disabled"
 )
 
 var knownCommandCodes = map[CommandErrorCode]bool{
 	CommandUnknownOperation: true, CommandInvalidParams: true, CommandUnknownTarget: true,
 	CommandBusy: true, CommandUnavailable: true, CommandTimeout: true, CommandInternal: true,
+	CommandDisabled: true,
 }
 
 // CommandAck es la respuesta del agent a un comando: el acuse y el resultado
-// juntos, porque get_logs termina enseguida. Las operaciones largas de las
-// fases siguientes (un deploy) informan su avance aparte, con deploy_event.
+// juntos, porque get_logs termina enseguida. Un deploy o un rollback se
+// contestan apenas se aceptan (o se rechazan), sin resultado: el avance y el
+// final llegan aparte, en deploy_event, con el ID del comando.
 type CommandAck struct {
 	CommandID uuid.UUID        `json:"command_id"`
 	Status    CommandStatus    `json:"status"`

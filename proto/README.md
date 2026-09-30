@@ -42,6 +42,8 @@ El formato es JSON con un envelope versionado; el porqué está en
 | `projects_state_ack` | Servidor → agent | Respuesta al anterior | La marca de tiempo de los proyectos que se guardaron |
 | `command` | Servidor → agent | A demanda | Una operación de la lista cerrada, con sus parámetros tipados |
 | `command_ack` | Agent → servidor | Respuesta al anterior | Cómo terminó el comando y su resultado |
+| `deploy_event` | Agent → servidor | Al cambiar de paso un deploy, y hasta que se confirma el final | La foto completa del deploy (ver abajo) |
+| `deploy_event_ack` | Servidor → agent | Respuesta al anterior | El deploy y la secuencia que se guardaron |
 | `error` | Servidor → agent | Ante un rechazo | Código de una lista cerrada, texto para el log y el ID del mensaje rechazado |
 
 La credencial de `enroll_ack` viaja **una sola vez**: el control plane guarda solo su hash y el
@@ -120,11 +122,13 @@ entrara, el agent deja afuera lo menos importante y lo cuenta en `omitted`.
 
 `command` le pide al agent una **operación de una lista cerrada** (regla 2 del proyecto). No
 existe una operación que ejecute texto libre: cada una lleva sus parámetros en su propio campo,
-tipados y validados. En el Sprint 2 la lista tiene una sola, de lectura:
+tipados y validados. Con parámetros de otra operación además de los suyos, el comando es inválido:
 
 | Operación | Parámetros | Qué hace |
 | --- | --- | --- |
 | `get_logs` | `kind` (`container` o `service`), `target` (ID completo del contenedor o nombre de la unidad) y `lines` (1 a 1000) | Los últimos renglones del log, del más viejo al más nuevo |
+| `deploy` | `project` (un proyecto declarado) y, opcional, `commit` (SHA completo de 40 caracteres hexadecimales en minúscula; sin él, la punta de la rama declarada) | Despliega el proyecto (ADR-015). El acuse dice si se aceptó; el avance llega en `deploy_event` |
+| `rollback` | `project` | Vuelve el proyecto a su último estado bueno, sin recompilar |
 
 El ID del envelope es el ID del comando. El agent lo usa para no ejecutar dos veces un comando
 repetido (devuelve la misma respuesta) y lo devuelve en `command_ack.command_id`.
@@ -138,13 +142,34 @@ repetido (devuelve la misma respuesta) y lo devuelve en `command_ack.command_id`
 
 **La respuesta**, `command_ack`, trae el estado (`ok`, `rejected` o `failed`), un código de una lista
 cerrada si no terminó bien (`unknown_operation`, `invalid_params`, `unknown_target`, `busy`,
-`unavailable`, `timeout`, `internal`) y, si terminó bien, el resultado. Los renglones de log salen del
+`unavailable`, `timeout`, `internal`, `disabled`) y, si terminó bien, el resultado. Los renglones de log salen del
 agent **sin secuencias de escape de terminal, con los secretos enmascarados y recién después
 recortados** a 2048 bytes (ADR-011). Si mil renglones no entran en un mensaje, se dejan afuera los
 más viejos y se marca `truncated`.
 
-Las operaciones largas de las fases siguientes (un deploy) van a contestar igual al terminar, e
-informar su avance aparte con `deploy_event`.
+`disabled` es un `deploy` o un `rollback` en un servidor donde una persona no prendió el deploy
+(`STATUSSV_DEPLOY_ENABLED`, ADR-015). El control plane no tiene forma de prenderlo.
+
+## Deploy: la foto entera, con secuencia
+
+Un `deploy` o un `rollback` se contestan con `command_ack` apenas el agent los acepta o los rechaza
+(proyecto no declarado, deploy apagado, otro deploy en curso). El avance viaja después en
+`deploy_event`, cuyo `deploy_id` es el ID del comando:
+
+| Tipo | Dirección | Contenido |
+| --- | --- | --- |
+| `deploy_event` | Agent → servidor | La foto completa del deploy: proyecto, tipo, estado (`running`, `succeeded`, `failed`, `rolled_back`), commit desplegado y anterior, código de error de una lista cerrada, y cada paso con su estado y los últimos 20 renglones de su salida |
+| `deploy_event_ack` | Servidor → agent | `deploy_id` y `seq` de la foto que se guardó |
+
+Cada foto reemplaza a la anterior del mismo deploy, así que perder una no importa: `seq` crece con
+cada una y el control plane **ignora una foto con `seq` menor o igual a la guardada**. El agent
+manda de nuevo la foto final hasta que llega su acuse, también después de reconectar o de
+reiniciarse: vive en su diario en disco.
+
+La salida de cada paso pasa por el mismo filtro que los logs (sin escapes de terminal, secretos
+enmascarados y recién después recortada a 200 bytes). Con todos los topes al máximo y salida común,
+la foto ocupa unos 115 KB; si trae muchos caracteres que JSON escapa, el agent deja afuera los
+renglones más viejos para no pasar de 256 KiB.
 
 ## Reglas de versionado
 

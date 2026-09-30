@@ -31,6 +31,7 @@ const (
 	TypeRuntimeState  MessageType = "runtime_state"
 	TypeProjectsState MessageType = "projects_state"
 	TypeCommandAck    MessageType = "command_ack"
+	TypeDeployEvent   MessageType = "deploy_event"
 )
 
 // Mensajes del control plane hacia el agent.
@@ -41,6 +42,7 @@ const (
 	TypeRuntimeStateAck  MessageType = "runtime_state_ack"
 	TypeProjectsStateAck MessageType = "projects_state_ack"
 	TypeCommand          MessageType = "command"
+	TypeDeployEventAck   MessageType = "deploy_event_ack"
 	TypeError            MessageType = "error"
 )
 
@@ -67,6 +69,8 @@ var knownTypes = map[MessageType]bool{
 	TypeProjectsStateAck: true,
 	TypeCommand:          true,
 	TypeCommandAck:       true,
+	TypeDeployEvent:      true,
+	TypeDeployEventAck:   true,
 	TypeError:            true,
 }
 
