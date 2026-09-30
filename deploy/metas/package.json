@@ -1,0 +1,14 @@
+{
+  "name": "status-sv-metas",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Mide en CI las dos metas del panel: Lighthouse y la latencia métrica → pantalla.",
+  "scripts": {
+    "medir": "node medir.mjs"
+  },
+  "devDependencies": {
+    "lighthouse": "13.5.0",
+    "playwright-core": "1.63.0"
+  }
+}
