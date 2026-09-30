@@ -5,6 +5,10 @@
 .env
 .env.*
 !.env.example
+# Los secretos del control plane viven en deploy/ del servidor: el build corre en
+# /opt/status-sv y no los necesita.
+deploy/.env
+deploy/secrets/
 bin/
 web/node_modules/
 web/dist/
