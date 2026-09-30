@@ -21,6 +21,42 @@ type AgentCredential struct {
 	RevokedReason *string
 }
 
+type AuditLog struct {
+	ID         uuid.UUID
+	At         time.Time
+	Actor      string
+	ActorType  string
+	Action     string
+	TargetType string
+	TargetID   string
+	Result     string
+	Ip         string
+	Detail     []byte
+}
+
+type Deploy struct {
+	ID              uuid.UUID
+	ServerID        uuid.UUID
+	ProjectID       *uuid.UUID
+	ProjectName     string
+	Environment     string
+	Kind            string
+	RequestedCommit string
+	DeployedCommit  string
+	PreviousCommit  string
+	Status          string
+	Code            string
+	Message         string
+	RequestedBy     *uuid.UUID
+	RequestedByName string
+	RequestedAt     time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	Seq             int32
+	Steps           []byte
+	UpdatedAt       time.Time
+}
+
 type EnrollmentToken struct {
 	ID         uuid.UUID
 	TokenHash  []byte
