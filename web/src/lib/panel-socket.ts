@@ -35,12 +35,21 @@ export type LiveProjects = {
   server_id: string
 }
 
+/** LiveDeploy avisa que cambió un deploy: no trae el deploy, el panel lo vuelve a pedir. */
+export type LiveDeploy = {
+  server_id: string
+  project_id: string | null
+  deploy_id: string
+  status: string
+}
+
 /** PanelStatus dice si lo que se ve es de ahora. */
 export type PanelStatus = 'connecting' | 'live' | 'reconnecting'
 
 type SampleListener = (sample: LiveSample) => void
 type RuntimeListener = (runtime: LiveRuntime) => void
 type ProjectsListener = (projects: LiveProjects) => void
+type DeployListener = (deploy: LiveDeploy) => void
 type StatusListener = (status: PanelStatus) => void
 
 /**
@@ -59,6 +68,7 @@ export class PanelSocket {
   #listeners = new Map<string, Set<SampleListener>>()
   #runtimeListeners = new Map<string, Set<RuntimeListener>>()
   #projectsListeners = new Map<string, Set<ProjectsListener>>()
+  #deployListeners = new Map<string, Set<DeployListener>>()
   /**
    * #refs cuenta cuántos oyentes tiene cada servidor, de cualquier tipo: la
    * suscripción al control plane es por servidor y trae muestras y fotos.
@@ -96,6 +106,14 @@ export class PanelSocket {
     return this.#add(this.#projectsListeners, serverID, listener)
   }
 
+  /**
+   * subscribeDeploys avisa cuando cambia un deploy de un servidor y devuelve
+   * cómo darse de baja.
+   */
+  subscribeDeploys(serverID: string, listener: DeployListener): () => void {
+    return this.#add(this.#deployListeners, serverID, listener)
+  }
+
   /** getStatus y onStatus son el par que espera useSyncExternalStore. */
   getStatus = (): PanelStatus => this.#status
 
@@ -113,6 +131,7 @@ export class PanelSocket {
     this.#listeners.clear()
     this.#runtimeListeners.clear()
     this.#projectsListeners.clear()
+    this.#deployListeners.clear()
     this.#refs.clear()
     this.#attempt = 0
     this.#setStatus('connecting')
@@ -190,6 +209,11 @@ export class PanelSocket {
       case 'projects': {
         const projects = message as LiveProjects
         this.#projectsListeners.get(projects.server_id)?.forEach((listener) => listener(projects))
+        break
+      }
+      case 'deploy': {
+        const deploy = message as LiveDeploy
+        this.#deployListeners.get(deploy.server_id)?.forEach((listener) => listener(deploy))
         break
       }
       case 'error':

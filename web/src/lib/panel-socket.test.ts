@@ -183,6 +183,20 @@ describe('PanelSocket', () => {
     expect(FakeWebSocket.last.requests).toEqual([{ type: 'subscribe', server_ids: [serverA] }])
   })
 
+  it('avisa cuando cambia un deploy de un servidor', () => {
+    const panel = new PanelSocket(openFake)
+    const listener = vi.fn()
+
+    panel.subscribeDeploys(serverA, listener)
+    FakeWebSocket.last.connect()
+    const change = { type: 'deploy', server_id: serverA, project_id: 'p1', deploy_id: 'd1', status: 'running' }
+    FakeWebSocket.last.receive(change)
+    FakeWebSocket.last.receive({ ...change, server_id: serverB })
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith(change)
+  })
+
   it('aguanta un mensaje que no es JSON', () => {
     const panel = new PanelSocket(openFake)
     const listener = vi.fn()

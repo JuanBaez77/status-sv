@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { Link } from 'wouter'
 
+import { DeploysCard } from '@/components/deploy-panel'
 import { ProjectStatusBadge } from '@/components/project-status'
 import { ContainerRow, ServiceRow } from '@/components/runtime-sections'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -95,6 +96,8 @@ export function ProjectPage({ id }: { id: string }) {
           </CardContent>
         </Card>
       </div>
+
+      <DeploysCard project={p} />
 
       <Units project={p} />
     </section>
