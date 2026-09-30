@@ -68,6 +68,10 @@ func TestGoldenEnvelopes(t *testing.T) {
 				{TS: goldenTS, Stream: "stderr", Text: "2026/09/20 12:00:00 [error] conexión rechazada"},
 			}}},
 		},
+		{name: "command_deploy", msg: proto.Command{Operation: proto.OpDeploy, Deploy: &proto.DeployParams{Project: "cristales-baez", Commit: shaV2}}},
+		{name: "command_rollback", msg: proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: "cristales-baez"}}},
+		{name: "deploy_event", msg: validDeployEvent()},
+		{name: "deploy_event_ack", msg: proto.DeployEventAck{DeployID: goldenID, Seq: 9}},
 		{name: "error", msg: proto.NewError(proto.CodeInvalidToken, "el token no existe o ya se usó", goldenID)},
 	}
 
@@ -143,6 +147,8 @@ func TestEveryMessageTypeIsAccepted(t *testing.T) {
 		proto.ProjectsStateAck{},
 		proto.Command{},
 		proto.CommandAck{},
+		proto.DeployEvent{},
+		proto.DeployEventAck{},
 		proto.ErrorMessage{},
 	}
 
