@@ -150,6 +150,41 @@ jobs:
       - name: Prueba de punta a punta
         run: ./deploy/e2e/run.sh
 
+  deploy:
+    name: "Deploy de punta a punta: bueno, roto, rollback y agent reiniciado"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: statussv
+          POSTGRES_PASSWORD: statussv
+          POSTGRES_DB: statussv_deploy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U statussv -d statussv_deploy"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # El control plane y un agent de verdad, con el deploy prendido, sobre
+      # el Docker del runner: despliega un proyecto Compose de muestra por la
+      # API, como lo pide el panel (ADR-015). Mide la meta de inicio de un
+      # deploy y la deja en el resumen del job.
+      - name: Deploy de punta a punta
+        env:
+          DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_deploy?sslmode=disable
+        run: ./deploy/e2e/deploy.sh
+
   laboratorio:
     name: "Laboratorio: la unidad del agent con el drop-in de deploy"
     runs-on: ubuntu-latest
