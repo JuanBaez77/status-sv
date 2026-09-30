@@ -404,12 +404,23 @@ El formato completo está en DISENO.md. Lo que conviene saber:
   `compose_project` falta, es el nombre del directorio de `workdir`, como hace Compose. Con systemd,
   va la lista de servicios en `units`.
 - `deploy.pre` y `deploy.post` tienen que estar vacíos hasta el Sprint 4.
+- Si declara `healthcheck`, el agent hace un `GET` a esa URL cada 60 s desde el propio servidor, sin
+  proxy, verificando el certificado y **sin seguir redirecciones**: si la URL responde 301, hay que
+  declarar `expect_status: 301` o apuntar a la URL final. Si no se fijan, `expect_status` es 200 y
+  `timeout_seconds` 10. Los pedidos llegan con el User-Agent `status-sv-agent/<versión>`.
 
 El agent relee el directorio cada 30 s. Un archivo con errores queda afuera entero, y el motivo (el
 campo y la regla, nunca el valor) aparece en el panel y en el registro del agent:
 
 ```bash
 journalctl -u statussv-agent --since '-5 min' | grep -i proyecto
+```
+
+Cada cambio del healthcheck (el primer resultado, y cada vez que pasa de bien a mal o al revés)
+queda en el registro:
+
+```bash
+journalctl -u statussv-agent --since '-1 hour' | grep -i healthcheck
 ```
 
 ## 3. Actualizar
