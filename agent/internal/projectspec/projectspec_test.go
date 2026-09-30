@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -58,6 +59,76 @@ func TestParseDocker(t *testing.T) {
 	}
 }
 
+// withPre reemplaza la lista vacía de deploy.pre del proyecto Docker por lo
+// que se le pase, ya indentado.
+func withPre(steps string) string {
+	return strings.Replace(dockerYAML, "  pre: []", "  pre:\n"+strings.TrimSuffix(steps, "\n"), 1)
+}
+
+func TestParseSpecSteps(t *testing.T) {
+	yaml := withPre(`    - service: backend
+      command: ["python", "manage.py", "migrate", "--noinput"]
+      timeout_seconds: 600
+    - service: backend.worker_1
+      command: [./scripts/cargar datos.sh, "--con espacios", "ñandú"]`)
+	yaml = strings.Replace(yaml, "  post: []", "  post:\n    - service: web\n      command: [curl, -fsS, http://127.0.0.1/warmup]", 1)
+
+	spec, err := ParseSpec("cristales-baez.yaml", []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseSpec: %v", err)
+	}
+	if spec.Project.Name != "cristales-baez" {
+		t.Errorf("proyecto = %+v", spec.Project)
+	}
+	if len(spec.Pre) != 2 || len(spec.Post) != 1 {
+		t.Fatalf("pasos = %+v / %+v", spec.Pre, spec.Post)
+	}
+	first := spec.Pre[0]
+	if first.Service != "backend" || strings.Join(first.Command, "|") != "python|manage.py|migrate|--noinput" || first.Timeout != 600*time.Second {
+		t.Errorf("primer paso = %+v", first)
+	}
+	// Los argumentos se pasan tal cual: sin separar por espacios ni interpretar.
+	if got := spec.Pre[1].Command; len(got) != 3 || got[1] != "--con espacios" || got[2] != "ñandú" {
+		t.Errorf("segundo paso = %+v", got)
+	}
+	if spec.Pre[1].Timeout != DefaultStepTimeout {
+		t.Errorf("timeout por defecto = %s", spec.Pre[1].Timeout)
+	}
+	if spec.Post[0].Service != "web" || spec.Post[0].Command[1] != "-fsS" {
+		t.Errorf("paso post = %+v", spec.Post[0])
+	}
+
+	// Parse devuelve el mismo proyecto, sin los pasos: los pasos no viajan.
+	project, err := Parse("cristales-baez.yaml", []byte(yaml))
+	if err != nil || project.Name != spec.Project.Name || project.ComposeProject != spec.Project.ComposeProject {
+		t.Errorf("Parse = %+v, %v", project, err)
+	}
+}
+
+func TestParseSpecWithoutSteps(t *testing.T) {
+	for name, content := range map[string]string{
+		"listas vacías":  dockerYAML,
+		"sin deploy":     strings.Replace(dockerYAML, "deploy:\n  pre: []\n  post: []\n", "", 1),
+		"deploy vacío":   strings.Replace(dockerYAML, "deploy:\n  pre: []\n  post: []\n", "deploy:\n", 1),
+		"listas nulas":   strings.Replace(dockerYAML, "  pre: []\n  post: []\n", "  pre:\n  post:\n", 1),
+		"systemd vacías": systemdYAML + "deploy:\n  pre: []\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			filename := "cristales-baez.yaml"
+			if strings.HasPrefix(content, "name: facturas") {
+				filename = "facturas.yaml"
+			}
+			spec, err := ParseSpec(filename, []byte(content))
+			if err != nil {
+				t.Fatalf("ParseSpec: %v", err)
+			}
+			if len(spec.Pre) != 0 || len(spec.Post) != 0 {
+				t.Errorf("pasos = %+v / %+v", spec.Pre, spec.Post)
+			}
+		})
+	}
+}
+
 func TestParseSystemdWithDefaults(t *testing.T) {
 	project, err := Parse("facturas.yml", []byte(systemdYAML+"healthcheck:\n  url: http://127.0.0.1:8000/health\n"))
 	if err != nil {
@@ -88,8 +159,21 @@ func TestParseRejects(t *testing.T) {
 		{name: "dos documentos", filename: "cristales-baez.yaml", yaml: dockerYAML + "---\nname: otro\n", wantErr: "más de un documento"},
 		{name: "nombre distinto del archivo", filename: "otro.yaml", yaml: dockerYAML, wantErr: "igual al nombre del archivo"},
 		{name: "sin nombre", filename: "x.yaml", yaml: "environment: production\n", wantErr: "name: falta"},
-		{name: "pasos de deploy", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "  pre: []", "  pre:\n    - python manage.py migrate", 1), wantErr: "deploy.pre y deploy.post"},
-		{name: "pasos de deploy como mapa", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "  post: []", "  post: {run: x}", 1), wantErr: "deploy.pre y deploy.post"},
+		{name: "paso como texto de shell", filename: "cristales-baez.yaml", yaml: withPre("    - python manage.py migrate"), wantErr: "un paso {service, command, timeout_seconds}"},
+		{name: "pasos como mapa", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "  post: []", "  post: {run: x}", 1), wantErr: "una lista de pasos"},
+		{name: "paso sin servicio", filename: "cristales-baez.yaml", yaml: withPre("    - command: [ls]"), wantErr: "deploy.pre[0].service: falta"},
+		{name: "servicio que parece opción", filename: "cristales-baez.yaml", yaml: withPre("    - service: --privileged\n      command: [ls]"), wantErr: "deploy.pre[0].service"},
+		{name: "paso sin comando", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend"), wantErr: "deploy.pre[0].command: falta"},
+		{name: "comando como texto", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: python manage.py migrate"), wantErr: "YAML inválido"},
+		{name: "comando que empieza como opción", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [--entrypoint=sh]"), wantErr: "no puede empezar con -"},
+		{name: "argumento vacío", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [ls, \"\"]"), wantErr: "deploy.pre[0].command[1]"},
+		{name: "argumento con salto de línea", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [\"ls\\nrm\"]"), wantErr: "caracteres de control"},
+		{name: "argumento enorme", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [" + strings.Repeat("x", MaxStepArgLen+1) + "]"), wantErr: "deploy.pre[0].command[0]"},
+		{name: "demasiados argumentos", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [" + strings.Repeat("x, ", MaxStepArgs) + "x]"), wantErr: "argumentos y el máximo"},
+		{name: "timeout fuera de rango", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [ls]\n      timeout_seconds: 3600"), wantErr: "timeout_seconds"},
+		{name: "campo desconocido en un paso", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [ls]\n      shell: true"), wantErr: "el campo shell no existe"},
+		{name: "demasiados pasos", filename: "cristales-baez.yaml", yaml: withPre(strings.Repeat("    - service: backend\n      command: [ls]\n", MaxSteps+1)), wantErr: "pasos y el máximo"},
+		{name: "pasos con systemd", filename: "facturas.yaml", yaml: systemdYAML + "deploy:\n  post:\n    - service: web\n      command: [ls]\n", wantErr: "solo para runtime docker"},
 		{name: "rollback inventado", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "previous_image", "git_revert", 1), wantErr: "rollback"},
 		{name: "rollback con systemd", filename: "facturas.yaml", yaml: systemdYAML + "rollback: previous_image\n", wantErr: "rollback"},
 		{name: "tipo equivocado", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "expect_status: 200", "expect_status: doscientos", 1), wantErr: "YAML inválido"},
@@ -125,6 +209,8 @@ func TestParseErrorsNeverIncludeValues(t *testing.T) {
 		"repo":         strings.Replace(dockerYAML, "github.com/extendsystem/cristales-baez", secret+" ; rm", 1),
 		"rama":         strings.Replace(dockerYAML, "branch: main", "branch: "+secret+"..x", 1),
 		"pasos":        strings.Replace(dockerYAML, "  pre: []", "  pre: ["+secret+"]", 1),
+		"argumento":    withPre("    - service: backend\n      command: [\"ls\\n" + secret + "\"]"),
+		"servicio":     withPre("    - service: " + secret + "!\n      command: [ls]"),
 		"entorno":      strings.Replace(dockerYAML, "environment: production", "environment: "+secret, 1),
 		"lista rota":   strings.Replace(systemdYAML, "  - facturas-worker.service", "  - {"+secret+": 1}", 1),
 		"no es un map": secret + "\n",
