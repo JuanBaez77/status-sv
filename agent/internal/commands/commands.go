@@ -2,7 +2,8 @@
 //
 // Es la regla 2 del proyecto hecha código: el agent solo ejecuta operaciones de
 // una lista cerrada, con parámetros tipados, y solo sobre lo que él mismo vio.
-// En el Sprint 2 la lista tiene una sola operación, de lectura: get_logs.
+// get_logs se atiende acá; deploy y rollback se le pasan al motor de deploy
+// (ADR-015), que los acepta o rechaza enseguida y los corre aparte.
 package commands
 
 import (
@@ -48,6 +49,11 @@ type (
 	}
 )
 
+// Deployer atiende deploy y rollback. Lo cumple deploy.Engine.
+type Deployer interface {
+	Start(id uuid.UUID, cmd proto.Command) proto.CommandAck
+}
+
 // Known dice si el agent vio ese contenedor o servicio en su última foto. Un
 // comando sobre algo que el agent no conoce se rechaza, aunque el nombre sea
 // válido.
@@ -58,6 +64,7 @@ type Executor struct {
 	docker  containerLogs
 	journal serviceLogs
 	known   Known
+	deploy  Deployer
 	log     *slog.Logger
 
 	slots chan struct{}
@@ -80,11 +87,29 @@ func NewExecutor(d containerLogs, j serviceLogs, known Known, log *slog.Logger) 
 	}
 }
 
+// SetDeployer le da al ejecutor el motor de deploy. Sin él, deploy y rollback
+// se contestan como no disponibles (fuera de Linux, por ejemplo). Se llama
+// antes de atender comandos.
+func (e *Executor) SetDeployer(d Deployer) {
+	e.deploy = d
+}
+
 // Handle ejecuta el comando id y devuelve la respuesta. Si el mismo comando ya
 // se ejecutó (el control plane lo reenvió porque no le llegó la respuesta),
 // devuelve la misma respuesta sin volver a ejecutarlo.
 func (e *Executor) Handle(ctx context.Context, id uuid.UUID, cmd proto.Command) proto.CommandAck {
 	if ack, ok := e.remembered(id); ok {
+		return ack
+	}
+
+	// Un deploy no ocupa uno de los lugares de los pedidos de logs: el motor
+	// contesta enseguida y lo corre aparte, de a uno.
+	if cmd.Operation == proto.OpDeploy || cmd.Operation == proto.OpRollback {
+		ack := reject(id, proto.CommandUnavailable, "este agent no tiene el motor de deploy")
+		if e.deploy != nil {
+			ack = e.deploy.Start(id, cmd)
+		}
+		e.remember(id, ack)
 		return ack
 	}
 

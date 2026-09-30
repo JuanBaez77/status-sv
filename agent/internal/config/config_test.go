@@ -98,3 +98,33 @@ func TestLoadTrimsWhitespace(t *testing.T) {
 		t.Errorf("EnrollToken = %q", cfg.EnrollToken)
 	}
 }
+
+func TestDeployIsOffByDefault(t *testing.T) {
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeployEnabled || cfg.AllowFileRepos {
+		t.Errorf("el deploy tiene que venir apagado: %+v", cfg)
+	}
+	if cfg.DeployKeysDir != "/etc/status-sv/keys" || cfg.KnownHosts != "/etc/status-sv/known_hosts" {
+		t.Errorf("rutas por defecto: %q, %q", cfg.DeployKeysDir, cfg.KnownHosts)
+	}
+}
+
+func TestDeploySwitch(t *testing.T) {
+	for value, want := range map[string]bool{"true": true, "TRUE": true, "1": true, "false": false, "0": false, " ": false} {
+		t.Setenv("STATUSSV_DEPLOY_ENABLED", value)
+		cfg, err := config.Load()
+		if err != nil || cfg.DeployEnabled != want {
+			t.Errorf("STATUSSV_DEPLOY_ENABLED=%q → %v, %v", value, cfg.DeployEnabled, err)
+		}
+	}
+	// Un typo no prende ni apaga nada sin avisar.
+	for _, value := range []string{"si", "yes", "verdadero", "on"} {
+		t.Setenv("STATUSSV_DEPLOY_ENABLED", value)
+		if _, err := config.Load(); err == nil {
+			t.Errorf("STATUSSV_DEPLOY_ENABLED=%q se aceptó", value)
+		}
+	}
+}

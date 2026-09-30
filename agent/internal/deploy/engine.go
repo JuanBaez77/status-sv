@@ -185,6 +185,9 @@ func (e *Engine) Start(id uuid.UUID, cmd proto.Command) proto.CommandAck {
 	if !e.cfg.Enabled {
 		return reject(id, proto.CommandDisabled, "el deploy está apagado en este servidor (STATUSSV_DEPLOY_ENABLED)")
 	}
+	if e.cfg.Git == "" || e.cfg.Docker == "" {
+		return reject(id, proto.CommandUnavailable, "falta git o docker en este servidor")
+	}
 
 	spec, err := e.load(e.cfg.ProjectsDir, name)
 	if err != nil {

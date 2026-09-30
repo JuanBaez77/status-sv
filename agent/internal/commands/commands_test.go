@@ -248,3 +248,57 @@ func TestRejectedExplainsUnreadableCommands(t *testing.T) {
 		t.Errorf("parámetros inválidos: %+v", ack)
 	}
 }
+
+// fakeDeployer anota los deploys que le llegan.
+type fakeDeployer struct {
+	mu   sync.Mutex
+	seen []uuid.UUID
+}
+
+func (f *fakeDeployer) Start(id uuid.UUID, _ proto.Command) proto.CommandAck {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen = append(f.seen, id)
+	return proto.CommandAck{CommandID: id, Status: proto.CommandOK, Message: "deploy aceptado"}
+}
+
+func TestDeployGoesToTheEngine(t *testing.T) {
+	d := &fakeDocker{block: make(chan struct{})}
+	e := NewExecutor(d, nil, knowsAll, quietLog())
+	deployCmd := proto.Command{Operation: proto.OpDeploy, Deploy: &proto.DeployParams{Project: "tienda"}}
+
+	// Sin motor, no está disponible.
+	if ack := e.Handle(context.Background(), uuid.New(), deployCmd); ack.Code != proto.CommandUnavailable {
+		t.Fatalf("sin motor: %+v", ack)
+	}
+
+	deployer := &fakeDeployer{}
+	e.SetDeployer(deployer)
+
+	// Aunque los pedidos de logs ocupen todos los lugares, el deploy entra.
+	var wg sync.WaitGroup
+	for range maxConcurrent {
+		wg.Go(func() { e.Handle(context.Background(), uuid.New(), logsCmd(proto.LogContainer, containerID, 10)) })
+	}
+	defer func() {
+		close(d.block)
+		wg.Wait()
+	}()
+
+	id := uuid.New()
+	ack := e.Handle(context.Background(), id, deployCmd)
+	if ack.Status != proto.CommandOK {
+		t.Fatalf("deploy: %+v", ack)
+	}
+	rollback := e.Handle(context.Background(), uuid.New(), proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: "tienda"}})
+	if rollback.Status != proto.CommandOK {
+		t.Fatalf("rollback: %+v", rollback)
+	}
+	// Repetido, contesta lo mismo sin volver a llamar al motor.
+	e.Handle(context.Background(), id, deployCmd)
+	deployer.mu.Lock()
+	defer deployer.mu.Unlock()
+	if len(deployer.seen) != 2 {
+		t.Errorf("el motor recibió %d pedidos, se esperaban 2", len(deployer.seen))
+	}
+}

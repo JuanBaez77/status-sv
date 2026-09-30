@@ -53,6 +53,8 @@ type fakeControlPlane struct {
 
 	// acks recibe las respuestas del agent a los comandos.
 	acks chan proto.CommandAck
+	// deployEvents son las fotos de deploy recibidas, que se confirman siempre.
+	deployEvents []proto.DeployEvent
 }
 
 type metricsMode int
@@ -117,6 +119,20 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 				if acks != nil {
 					acks <- ack
 				}
+			}
+			continue
+		}
+		if envelope.Type == proto.TypeDeployEvent {
+			ev, err := proto.Decode[proto.DeployEvent](envelope)
+			if err != nil {
+				continue
+			}
+			f.mu.Lock()
+			f.deployEvents = append(f.deployEvents, ev)
+			f.mu.Unlock()
+			ack, err := proto.Marshal(proto.DeployEventAck{DeployID: ev.DeployID, Seq: ev.Seq})
+			if err != nil || conn.Write(r.Context(), websocket.MessageText, ack) != nil {
+				return
 			}
 			continue
 		}
