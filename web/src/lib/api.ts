@@ -409,3 +409,78 @@ export const projects = {
   list: () => api.get<ProjectList>('/v1/projects'),
   get: (id: string) => api.get<ProjectDetail>(`/v1/projects/${encodeURIComponent(id)}`),
 }
+
+/**
+ * DeployStatus es cómo va un deploy (ADR-015). `pending` es que el control
+ * plane lo anotó y el agent todavía no mandó su primera foto.
+ */
+export type DeployStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+
+export type DeployKind = 'deploy' | 'rollback'
+
+export type StepName =
+  | 'preflight'
+  | 'fetch'
+  | 'snapshot'
+  | 'checkout'
+  | 'build'
+  | 'pre'
+  | 'up'
+  | 'healthcheck'
+  | 'post'
+  | 'rollback'
+
+/** DeployStep es un paso del deploy con su resultado y los últimos renglones de su salida. */
+export type DeployStep = {
+  name: StepName
+  /** service va en los pasos declarados (pre y post). */
+  service?: string
+  status: 'running' | 'ok' | 'failed' | 'skipped'
+  started_at?: string
+  finished_at?: string
+  detail?: string
+  output?: string[]
+}
+
+export type DeploySummary = {
+  id: string
+  kind: DeployKind
+  /** requested_commit falta si se pidió la punta de la rama. */
+  requested_commit?: string
+  commit?: string
+  previous_commit?: string
+  status: DeployStatus
+  code?: string
+  message?: string
+  requested_by: string
+  requested_at: string
+  started_at?: string
+  finished_at?: string
+}
+
+export type DeployDetail = DeploySummary & {
+  project_id: string | null
+  project_name: string
+  server_id: string
+  server_name: string
+  environment: 'production' | 'staging'
+  steps: DeployStep[]
+}
+
+/** DeployRequest es el pedido: confirm es el nombre del proyecto, escrito a mano. */
+export type DeployRequest = {
+  confirm: string
+  commit?: string
+  /** totp_code es un código nuevo de la app; hace falta en producción (ADR-017). */
+  totp_code?: string
+}
+
+export const deploys = {
+  history: (projectID: string) =>
+    api.get<{ deploys: DeploySummary[] }>(`/v1/projects/${encodeURIComponent(projectID)}/deploys`),
+  get: (id: string) => api.get<DeployDetail>(`/v1/deploys/${encodeURIComponent(id)}`),
+  start: (projectID: string, req: DeployRequest) =>
+    api.post<DeployDetail>(`/v1/projects/${encodeURIComponent(projectID)}/deploys`, req),
+  rollback: (projectID: string, req: DeployRequest) =>
+    api.post<DeployDetail>(`/v1/projects/${encodeURIComponent(projectID)}/rollback`, req),
+}
