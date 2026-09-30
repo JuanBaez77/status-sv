@@ -146,6 +146,20 @@ jobs:
       - name: Prueba de punta a punta
         run: ./deploy/e2e/run.sh
 
+  laboratorio:
+    name: "Laboratorio: la unidad del agent con el drop-in de deploy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # Corre la unidad endurecida de verdad bajo el systemd del runner, con una
+      # sonda que hace como statussv lo que hace el motor de deploy (git,
+      # docker compose y la API de Docker) contra un Docker de verdad
+      # (ADR-015). Si alguien endurece la unidad de más, esto lo ve.
+      - name: Laboratorio del deploy
+        run: sudo bash ./deploy/laboratorio/deploy.sh
+
   metas:
     name: "Metas del panel: Lighthouse y latencia métrica → pantalla"
     runs-on: ubuntu-latest
