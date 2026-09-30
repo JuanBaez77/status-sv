@@ -97,7 +97,7 @@ function ContainersCard({ runtime }: { runtime: ServerRuntime }) {
   )
 }
 
-function ContainerRow({ serverID, container: c }: { serverID: string; container: RuntimeContainer }) {
+export function ContainerRow({ serverID, container: c }: { serverID: string; container: RuntimeContainer }) {
   const project = c.compose_project && `${c.compose_project}${c.compose_service ? ` / ${c.compose_service}` : ''}`
   return (
     <Row
@@ -135,7 +135,7 @@ function ServicesCard({ runtime }: { runtime: ServerRuntime }) {
   )
 }
 
-function ServiceRow({ serverID, service: s }: { serverID: string; service: RuntimeService }) {
+export function ServiceRow({ serverID, service: s }: { serverID: string; service: RuntimeService }) {
   return (
     <Row
       title={s.unit.replace(/\.service$/, '')}

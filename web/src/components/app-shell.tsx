@@ -1,10 +1,11 @@
 import { LogOut, Server } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Link } from 'wouter'
+import { Link, useLocation } from 'wouter'
 
 import { Button } from '@/components/ui/button'
 import { useLogout } from '@/hooks/use-session'
 import type { Session } from '@/lib/api'
+import { cn } from '@/lib/utils'
 
 type AppShellProps = {
   session: Session
@@ -33,6 +34,25 @@ function RecoveryCodesWarning({ left }: { left: number | undefined }) {
   )
 }
 
+/** NavLink es una sección del panel; la actual queda marcada. */
+function NavLink({ href, children }: { href: string; children: ReactNode }) {
+  const [location] = useLocation()
+  const active =
+    href === '/' ? location === '/' || location.startsWith('/servers') : location.startsWith(href)
+  return (
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'rounded-md px-2 py-1 text-muted-foreground hover:text-foreground',
+        active && 'bg-muted text-foreground',
+      )}
+    >
+      {children}
+    </Link>
+  )
+}
+
 /** AppShell es el marco del panel: la barra de arriba y el contenido. */
 export function AppShell({ session, children }: AppShellProps) {
   const logout = useLogout()
@@ -45,6 +65,11 @@ export function AppShell({ session, children }: AppShellProps) {
             <Server className="size-4 text-primary" aria-hidden />
             status-sv
           </Link>
+
+          <nav aria-label="Secciones" className="flex items-center gap-1 text-sm">
+            <NavLink href="/">Servidores</NavLink>
+            <NavLink href="/projects">Proyectos</NavLink>
+          </nav>
 
           <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
             <span>{session.username}</span>
