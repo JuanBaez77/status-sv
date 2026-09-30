@@ -114,8 +114,8 @@ const (
 )
 
 // Project es un proyecto declarado y válido. Viaja lo que el control plane y
-// el panel necesitan para mostrarlo y ligarlo con sus unidades; los pasos de
-// deploy todavía no existen (Sprint 4).
+// el panel necesitan para mostrarlo y ligarlo con sus unidades. Los pasos
+// declarados del deploy no viajan: los usa solo el agent (ADR-016).
 type Project struct {
 	Name        string         `json:"name"`
 	Environment Environment    `json:"environment"`

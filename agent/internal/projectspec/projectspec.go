@@ -8,8 +8,8 @@
 // Las reglas de cada campo están en proto.Project.Validate: el parser arma el
 // proyecto y lo valida con eso, así la regla se escribe una sola vez. Lo que
 // agrega acá es lo que solo tiene sentido sobre el archivo: el tamaño, los
-// campos desconocidos, que el nombre coincida con el del archivo y que todavía
-// no haya pasos de deploy.
+// campos desconocidos, que el nombre coincida con el del archivo y los pasos
+// declarados del deploy (ADR-016), que no viajan al control plane.
 package projectspec
 
 import (
@@ -20,6 +20,9 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -68,13 +71,49 @@ type healthcheck struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-// deploySteps son los pasos previos y posteriores del deploy. Su formato lo
-// define el Sprint 4; hasta entonces tienen que venir vacíos (ADR-012). Se leen
-// como nodos para poder rechazar cualquier contenido sin intentar entenderlo.
+// deploySteps son los pasos previos y posteriores del deploy (ADR-016).
 type deploySteps struct {
-	Pre  yaml.Node `yaml:"pre"`
-	Post yaml.Node `yaml:"post"`
+	Pre  []step `yaml:"pre"`
+	Post []step `yaml:"post"`
 }
+
+// step es un paso declarado tal como se escribe.
+type step struct {
+	Service        string   `yaml:"service"`
+	Command        []string `yaml:"command"`
+	TimeoutSeconds int      `yaml:"timeout_seconds"`
+}
+
+// Límites de los pasos declarados (ADR-016).
+const (
+	MaxSteps            = 5
+	MaxStepArgs         = 32
+	MaxStepArgLen       = 256
+	DefaultStepTimeout  = 300 * time.Second
+	maxStepTimeoutSecs  = 1800
+	maxStepServiceChars = 63
+)
+
+// Spec es un proyecto declarado con lo que solo usa el agent: los pasos del
+// deploy. Project es lo que viaja al control plane; los pasos no, porque un
+// comando podría traer algo que no tiene por qué salir del servidor.
+type Spec struct {
+	Project proto.Project
+	Pre     []Step
+	Post    []Step
+}
+
+// Step es un paso declarado: un comando que corre con docker compose run en
+// un servicio del proyecto, con la imagen recién compilada.
+type Step struct {
+	Service string
+	Command []string
+	Timeout time.Duration
+}
+
+// serviceName es el formato de un servicio de Compose: empieza con letra o
+// número, así nunca se lee como una opción.
+var serviceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // NameFromFile devuelve el nombre de proyecto que corresponde a un archivo, o
 // ErrNotProjectFile si no es un archivo de proyecto.
@@ -91,12 +130,22 @@ func NameFromFile(filename string) (string, error) {
 // Parse lee un project.yaml y devuelve el proyecto validado. filename es el
 // nombre del archivo, del que sale el nombre que tiene que declarar.
 func Parse(filename string, data []byte) (proto.Project, error) {
-	expected, err := NameFromFile(filename)
+	spec, err := ParseSpec(filename, data)
 	if err != nil {
 		return proto.Project{}, err
 	}
+	return spec.Project, nil
+}
+
+// ParseSpec lee un project.yaml como Parse y devuelve además los pasos
+// declarados del deploy, validados.
+func ParseSpec(filename string, data []byte) (Spec, error) {
+	expected, err := NameFromFile(filename)
+	if err != nil {
+		return Spec{}, err
+	}
 	if len(data) > MaxFileBytes {
-		return proto.Project{}, fmt.Errorf("el archivo pesa %d bytes y el máximo es %d", len(data), MaxFileBytes)
+		return Spec{}, fmt.Errorf("el archivo pesa %d bytes y el máximo es %d", len(data), MaxFileBytes)
 	}
 
 	var f file
@@ -104,26 +153,23 @@ func Parse(filename string, data []byte) (proto.Project, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&f); err != nil {
 		if errors.Is(err, io.EOF) {
-			return proto.Project{}, errors.New("el archivo está vacío")
+			return Spec{}, errors.New("el archivo está vacío")
 		}
-		return proto.Project{}, yamlError(err)
+		return Spec{}, yamlError(err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return proto.Project{}, errors.New("el archivo tiene más de un documento YAML")
+		return Spec{}, errors.New("el archivo tiene más de un documento YAML")
 	}
 
 	switch {
 	case f.Name == "":
-		return proto.Project{}, errors.New("name: falta")
+		return Spec{}, errors.New("name: falta")
 	case f.Name != expected:
-		return proto.Project{}, fmt.Errorf("name: tiene que ser igual al nombre del archivo (%s)", expected)
-	}
-	if f.Deploy != nil && (!emptyNode(f.Deploy.Pre) || !emptyNode(f.Deploy.Post)) {
-		return proto.Project{}, errors.New("deploy.pre y deploy.post: tienen que estar vacíos hasta que se defina el formato de los pasos (Sprint 4)")
+		return Spec{}, fmt.Errorf("name: tiene que ser igual al nombre del archivo (%s)", expected)
 	}
 	if f.Rollback != "" && (f.Rollback != RollbackPreviousImage || f.Runtime != string(proto.RuntimeDocker)) {
-		return proto.Project{}, fmt.Errorf("rollback: el único valor aceptado es %s, y solo con runtime docker", RollbackPreviousImage)
+		return Spec{}, fmt.Errorf("rollback: el único valor aceptado es %s, y solo con runtime docker", RollbackPreviousImage)
 	}
 
 	project := proto.Project{
@@ -156,9 +202,75 @@ func Parse(filename string, data []byte) (proto.Project, error) {
 	}
 
 	if err := project.Validate(); err != nil {
-		return proto.Project{}, err
+		return Spec{}, err
 	}
-	return project, nil
+
+	spec := Spec{Project: project}
+	if f.Deploy != nil {
+		if (len(f.Deploy.Pre) > 0 || len(f.Deploy.Post) > 0) && project.Runtime != proto.RuntimeDocker {
+			return Spec{}, errors.New("deploy.pre y deploy.post: por ahora son solo para runtime docker (los de systemd llegan en el Sprint 5)")
+		}
+		var err error
+		if spec.Pre, err = parseSteps("deploy.pre", f.Deploy.Pre); err != nil {
+			return Spec{}, err
+		}
+		if spec.Post, err = parseSteps("deploy.post", f.Deploy.Post); err != nil {
+			return Spec{}, err
+		}
+	}
+	return spec, nil
+}
+
+// parseSteps valida los pasos declarados de una lista (ADR-016). Como el resto
+// de los errores, nombran el campo y la regla, nunca el valor.
+func parseSteps(field string, raw []step) ([]Step, error) {
+	if len(raw) > MaxSteps {
+		return nil, fmt.Errorf("%s: trae %d pasos y el máximo es %d", field, len(raw), MaxSteps)
+	}
+	var steps []Step
+	for i, s := range raw {
+		where := fmt.Sprintf("%s[%d]", field, i)
+		switch {
+		case s.Service == "":
+			return nil, fmt.Errorf("%s.service: falta", where)
+		case len(s.Service) > maxStepServiceChars || !serviceName.MatchString(s.Service):
+			return nil, fmt.Errorf("%s.service: tiene que ser un nombre de servicio de Compose (letras, números, _ . -)", where)
+		case len(s.Command) == 0:
+			return nil, fmt.Errorf("%s.command: falta; es una lista de argumentos, como [\"python\", \"manage.py\", \"migrate\"]", where)
+		case len(s.Command) > MaxStepArgs:
+			return nil, fmt.Errorf("%s.command: trae %d argumentos y el máximo es %d", where, len(s.Command), MaxStepArgs)
+		case strings.HasPrefix(s.Command[0], "-"):
+			return nil, fmt.Errorf("%s.command: el primer argumento no puede empezar con -", where)
+		case s.TimeoutSeconds < 0 || s.TimeoutSeconds > maxStepTimeoutSecs:
+			return nil, fmt.Errorf("%s.timeout_seconds: tiene que estar entre 1 y %d", where, maxStepTimeoutSecs)
+		}
+		for j, arg := range s.Command {
+			if arg == "" || len(arg) > MaxStepArgLen || !printable(arg) {
+				return nil, fmt.Errorf("%s.command[%d]: vacío, de más de %d bytes o con caracteres de control", where, j, MaxStepArgLen)
+			}
+		}
+		timeout := DefaultStepTimeout
+		if s.TimeoutSeconds > 0 {
+			timeout = time.Duration(s.TimeoutSeconds) * time.Second
+		}
+		steps = append(steps, Step{Service: s.Service, Command: s.Command, Timeout: timeout})
+	}
+	return steps, nil
+}
+
+// printable acepta texto UTF-8 válido sin caracteres de control: un argumento
+// con un salto de línea o una secuencia de escape es un error, no algo que se
+// pasa tal cual.
+func printable(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // composeUnsafe es lo que Docker Compose saca del nombre del directorio para
@@ -171,20 +283,6 @@ var composeUnsafe = regexp.MustCompile(`[^a-z0-9_-]`)
 func DefaultComposeProject(workdir string) string {
 	name := composeUnsafe.ReplaceAllString(strings.ToLower(path.Base(workdir)), "")
 	return strings.TrimLeft(name, "_-")
-}
-
-// emptyNode dice si un nodo es nulo, falta o es una lista vacía.
-func emptyNode(n yaml.Node) bool {
-	switch n.Kind {
-	case 0:
-		return true
-	case yaml.ScalarNode:
-		return n.Tag == "!!null"
-	case yaml.SequenceNode:
-		return len(n.Content) == 0
-	default:
-		return false
-	}
 }
 
 // backticked son los valores que el paquete yaml cita en sus errores, y
@@ -200,6 +298,8 @@ var (
 func yamlError(err error) error {
 	msg := backticked.ReplaceAllString(err.Error(), "(valor)")
 	msg = unknownField.ReplaceAllString(msg, "el campo $1 no existe")
+	// Los pasos se leen en un tipo de Go; el error lo nombra por cómo se escribe.
+	msg = strings.NewReplacer("[]projectspec.step", "una lista de pasos", "projectspec.step", "un paso {service, command, timeout_seconds}").Replace(msg)
 	msg = strings.TrimPrefix(msg, "yaml: ")
 	if len(msg) > proto.MaxProjectErrorLen-16 {
 		msg = strings.ToValidUTF8(msg[:proto.MaxProjectErrorLen-16], "")
