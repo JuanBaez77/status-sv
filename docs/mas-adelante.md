@@ -51,3 +51,16 @@ roadmap de [DISENO.md](DISENO.md).
   [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) y en la sección 6 del runbook, y Juan la
   postergó el 2026-09-30. ADR-007 pide hacerla antes de las alertas, de un segundo cliente con
   agent o de las herramientas de escritura (el deploy del Sprint 4).
+
+## Lo que deja afuera el deploy del Sprint 4
+
+- **Registros privados de imágenes.** El agent no tiene credenciales de ningún registro: los
+  proyectos compilan en el servidor y bajan imágenes públicas (ver
+  [adr/ADR-015-motor-de-deploy-docker.md](adr/ADR-015-motor-de-deploy-docker.md)).
+- **Verificar el CI del commit en GitHub** antes de desplegarlo. Hoy alcanza con que el commit
+  esté en la rama protegida; consultar la API de GitHub necesita un token y entra con el MCP.
+- **Sacar los servicios huérfanos** (`up --remove-orphans`) cuando el commit nuevo ya no declara
+  un servicio. Hoy queda andando y lo saca una persona.
+- **Vista de auditoría en el panel.** `audit_log` existe desde el Sprint 4; la vista es del Sprint 5.
+- **Limpieza de imágenes viejas** de los proyectos desplegados. El agent solo quita sus etiquetas
+  de rollback; el `prune` lo decide quien administra el servidor.

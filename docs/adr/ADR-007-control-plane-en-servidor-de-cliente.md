@@ -1,6 +1,6 @@
 # ADR-007: El control plane vive en el servidor de un cliente, detrás de su nginx
 
-- **Estado:** aceptada. La mudanza a un VPS propio está escrita en [ADR-014](ADR-014-control-plane-en-vps-propio.md), propuesta y postergada el 2026-09-30.
+- **Estado:** aceptada. La mudanza a un VPS propio está escrita en [ADR-014](ADR-014-control-plane-en-vps-propio.md), propuesta y postergada el 2026-09-30. El deploy del Sprint 4 se construye con un interruptor por servidor, apagado ([ADR-015](ADR-015-motor-de-deploy-docker.md)): prenderlo en producción exige antes la mudanza o enmendar este ADR.
 - **Fecha:** 2026-09-21
 
 ## Contexto

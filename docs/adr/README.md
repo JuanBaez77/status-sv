@@ -43,3 +43,6 @@ Qué más se evaluó y por qué se descartó.
 | [012](ADR-012-proyectos-declarados-en-el-servidor.md) | Los proyectos se declaran en archivos del propio servidor | aceptada |
 | [013](ADR-013-segundo-factor-totp.md) | Segundo factor TOTP obligatorio en el panel | aceptada |
 | [014](ADR-014-control-plane-en-vps-propio.md) | El control plane vive en un VPS propio, detrás de Caddy | propuesta (postergada) |
+| [015](ADR-015-motor-de-deploy-docker.md) | Motor de deploy de proyectos Docker | aceptada |
+| [016](ADR-016-pasos-declarados-del-deploy.md) | Pasos declarados del deploy (`deploy.pre` y `deploy.post`) | aceptada |
+| [017](ADR-017-deploy-desde-el-panel-y-auditoria.md) | El deploy se dispara desde el panel, con confirmación, y queda en `audit_log` | aceptada |
