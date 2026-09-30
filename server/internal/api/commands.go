@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/JuanBaez77/status-sv/proto"
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 )
 
@@ -80,6 +81,13 @@ func (p *pendingCommands) resolve(serverID uuid.UUID, ack proto.CommandAck) bool
 
 // sendCommand manda un comando al agent de un servidor y espera su respuesta.
 func (s *Server) sendCommand(ctx context.Context, serverID uuid.UUID, cmd proto.Command) (proto.CommandAck, error) {
+	return s.sendCommandWithID(ctx, serverID, uuid.Nil, cmd)
+}
+
+// sendCommandWithID es sendCommand con el ID del comando elegido por quien
+// llama: el de un deploy es el ID del deploy, que el agent devuelve en cada
+// foto. Con uuid.Nil se genera uno.
+func (s *Server) sendCommandWithID(ctx context.Context, serverID, id uuid.UUID, cmd proto.Command) (proto.CommandAck, error) {
 	conn := s.hub.get(serverID)
 	if conn == nil {
 		return proto.CommandAck{}, errAgentOffline
@@ -88,6 +96,9 @@ func (s *Server) sendCommand(ctx context.Context, serverID uuid.UUID, cmd proto.
 	envelope, err := proto.Encode(cmd)
 	if err != nil {
 		return proto.CommandAck{}, fmt.Errorf("armar el comando: %w", err)
+	}
+	if id != uuid.Nil {
+		envelope.ID = id
 	}
 	raw, err := json.Marshal(envelope)
 	if err != nil {
@@ -186,8 +197,16 @@ func (s *Server) handleServerLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ack, err := s.sendCommand(ctx, serverID, proto.Command{Operation: proto.OpGetLogs, GetLogs: &params})
-	// Quién pidió qué queda en el registro. Cuando exista audit_log (Sprint 5)
-	// va también ahí.
+	// Quién pidió qué queda en el registro y en la auditoría (ADR-017).
+	result := string(ack.Status)
+	if err != nil {
+		result = "error"
+	}
+	s.record(ctx, audit.Entry{
+		Actor: SessionFrom(ctx).Username, ActorType: audit.ActorUser, Action: audit.ActionLogsRequest,
+		TargetType: "server", TargetID: server.ID.String(), Result: result, IP: s.clientIP(r),
+		Detail: map[string]any{"servidor": server.Name, "tipo": string(params.Kind), "objetivo": params.Target, "renglones": params.Lines},
+	})
 	s.log.InfoContext(ctx, "logs pedidos",
 		"usuario", SessionFrom(ctx).Username,
 		"servidor", server.Name,

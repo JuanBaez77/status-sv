@@ -60,6 +60,8 @@ func runServe(ctx context.Context, args []string) error {
 	background.Go(func() { sessions.RunCleanup(ctx) })
 
 	apiServer := api.New(cfg, pool, log)
+	// Los deploys que el agent nunca confirmó se cierran solos.
+	background.Go(func() { apiServer.RunDeployExpiry(ctx) })
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

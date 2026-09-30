@@ -12,7 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/config"
+	"github.com/JuanBaez77/status-sv/server/internal/deploys"
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/panel"
@@ -47,6 +49,9 @@ type Server struct {
 	counters      *counterCache
 	loginLimiter  *ipLimiter
 	totpLimiter   *ipLimiter
+	deploys       *deploys.Service
+	audit         *audit.Recorder
+	deployLimiter *ipLimiter
 }
 
 // New arma el servidor de la API.
@@ -68,6 +73,9 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		counters:      newCounterCache(),
 		loginLimiter:  newIPLimiter(loginPerMinute, loginBurst, limiterTTL),
 		totpLimiter:   newIPLimiter(totpPerMinute, totpBurst, limiterTTL),
+		deploys:       deploys.NewService(pool),
+		audit:         audit.NewRecorder(store.New(pool)),
+		deployLimiter: newIPLimiter(deployRequestsPerMinute, deployRequestsBurst, limiterTTL),
 	}
 }
 
@@ -102,6 +110,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/servers/{id}/runtime", s.requireSession(http.HandlerFunc(s.handleServerRuntime)))
 	mux.Handle("GET /v1/projects", s.requireSession(http.HandlerFunc(s.handleListProjects)))
 	mux.Handle("GET /v1/projects/{id}", s.requireSession(http.HandlerFunc(s.handleGetProject)))
+	mux.Handle("GET /v1/projects/{id}/deploys", s.requireSession(http.HandlerFunc(s.handleProjectDeploys)))
+	mux.Handle("POST /v1/projects/{id}/deploys", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleDeploy))))
+	mux.Handle("POST /v1/projects/{id}/rollback", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRollback))))
+	mux.Handle("GET /v1/deploys/{id}", s.requireSession(http.HandlerFunc(s.handleGetDeploy)))
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si

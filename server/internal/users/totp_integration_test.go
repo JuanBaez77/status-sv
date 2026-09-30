@@ -282,3 +282,45 @@ func TestTOTPSecretIsBoundToItsUser(t *testing.T) {
 		t.Errorf("VerifyTOTP con un secreto copiado = %v, se esperaba que no se pudiera descifrar", err)
 	}
 }
+
+// Una acción que pide confirmación (un deploy en producción) acepta un código
+// nuevo una sola vez, y no acepta el que ya se usó para entrar.
+func TestConfirmAction(t *testing.T) {
+	_, s, c := setup(t)
+	if _, err := s.CreateUser(t.Context(), "juan", password); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	var secret []byte
+	token := loginFull(t, s, c, &secret)
+	session, err := s.Authenticate(t.Context(), token)
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+
+	// El código del login ya está usado.
+	if err := s.ConfirmAction(t.Context(), session, codeAt(secret, c)); !errors.Is(err, ErrInvalidCode) {
+		t.Fatalf("con el código del login = %v, se esperaba ErrInvalidCode", err)
+	}
+	c.Advance(auth.TOTPPeriod)
+	code := codeAt(secret, c)
+	if err := s.ConfirmAction(t.Context(), session, code); err != nil {
+		t.Fatalf("ConfirmAction: %v", err)
+	}
+	if err := s.ConfirmAction(t.Context(), session, code); !errors.Is(err, ErrInvalidCode) {
+		t.Fatalf("el mismo código dos veces = %v", err)
+	}
+	if err := s.ConfirmAction(t.Context(), session, "000000"); !errors.Is(err, ErrInvalidCode) {
+		t.Fatalf("un código inventado = %v", err)
+	}
+	// Una sesión a medias no confirma nada.
+	half := session
+	half.Stage = StageTOTPPending
+	c.Advance(auth.TOTPPeriod)
+	if err := s.ConfirmAction(t.Context(), half, codeAt(secret, c)); !errors.Is(err, ErrWrongStage) {
+		t.Fatalf("sesión a medias = %v", err)
+	}
+	// Un código equivocado no cierra la sesión.
+	if _, err := s.Authenticate(t.Context(), token); err != nil {
+		t.Fatalf("la sesión se cerró: %v", err)
+	}
+}
