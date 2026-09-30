@@ -64,6 +64,9 @@ type Querier interface {
 	// lote entero fallaría y el agent lo reenviaría para siempre.
 	// AggregateSamplesByMinute agrega CPU, memoria y carga.
 	AggregateSamplesByMinute(ctx context.Context, arg AggregateSamplesByMinuteParams) (int64, error)
+	// ApplyDeployEvent guarda la foto que mandó el agent, solo si es más nueva
+	// que la guardada y viene del servidor al que se le pidió el deploy.
+	ApplyDeployEvent(ctx context.Context, arg ApplyDeployEventParams) (Deploy, error)
 	// ConsumeEnrollmentToken marca el token como usado y lo ata al servidor que creó.
 	// La condición used_at IS NULL hace que el segundo intento no devuelva ninguna
 	// fila, así que un token no se puede usar dos veces ni aunque dos agents lo
@@ -75,6 +78,10 @@ type Querier interface {
 	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAgentCredential(ctx context.Context, arg CreateAgentCredentialParams) (AgentCredential, error)
+	// Deploys y auditoría (ADR-015 y ADR-017, migración 00009).
+	// CreateDeploy anota un deploy pedido, antes de mandárselo al agent. Si ya
+	// hay uno activo en el proyecto, el índice único lo rechaza.
+	CreateDeploy(ctx context.Context, arg CreateDeployParams) error
 	CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) (EnrollmentToken, error)
 	CreateServer(ctx context.Context, arg CreateServerParams) (Server, error)
 	// CreateSession abre una sesión. El instante lo pone la aplicación, igual que
@@ -99,6 +106,9 @@ type Querier interface {
 	// DeleteUserSessions cierra todas las sesiones de un usuario, por ejemplo al
 	// cambiar la contraseña.
 	DeleteUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
+	// DeploySeq devuelve la última foto aplicada de un deploy de un servidor. Sin
+	// filas, el deploy no existe o es de otro servidor.
+	DeploySeq(ctx context.Context, arg DeploySeqParams) (int32, error)
 	// DropMetricPartitions borra las particiones que terminan antes de before_ts y
 	// devuelve cuántas borró.
 	DropMetricPartitions(ctx context.Context, arg DropMetricPartitionsParams) (int32, error)
@@ -110,12 +120,17 @@ type Querier interface {
 	// devuelve cuántas creó. La lógica vive en una función de la migración 00002,
 	// que escapa los nombres de las tablas: desde Go no se arma DDL con texto.
 	EnsureMetricPartitions(ctx context.Context, arg EnsureMetricPartitionsParams) (int32, error)
+	// ExpirePendingDeploys cierra los deploys que siguen pendientes pasado el
+	// plazo: el agent nunca confirmó que los recibió.
+	ExpirePendingDeploys(ctx context.Context, arg ExpirePendingDeploysParams) ([]Deploy, error)
 	// GetActiveCredentialByHash es la consulta de autenticación del agent: busca por
 	// hash y solo devuelve la credencial si no fue revocada.
 	GetActiveCredentialByHash(ctx context.Context, secretHash []byte) (AgentCredential, error)
 	// GetActiveSession busca la sesión de un token si sigue viva: ni pasó su
 	// vencimiento absoluto ni se usó por última vez antes de idle_cutoff.
 	GetActiveSession(ctx context.Context, arg GetActiveSessionParams) (GetActiveSessionRow, error)
+	// GetDeploy devuelve un deploy con el nombre de su servidor.
+	GetDeploy(ctx context.Context, id uuid.UUID) (GetDeployRow, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
 	// GetEnrollmentTokenByHashForUpdate bloquea la fila del token hasta el final de
 	// la transacción. Es lo que hace que dos enrolamientos simultáneos con el mismo
@@ -127,6 +142,9 @@ type Querier interface {
 	GetServerByName(ctx context.Context, name string) (Server, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// InsertAudit agrega un renglón a la auditoría. Es la única escritura que
+	// existe sobre audit_log.
+	InsertAudit(ctx context.Context, arg InsertAuditParams) error
 	// InsertInvalidProjectFiles guarda los archivos inválidos de una lectura.
 	InsertInvalidProjectFiles(ctx context.Context, arg InsertInvalidProjectFilesParams) (int64, error)
 	// InsertRawDisks guarda los discos de un lote, una fila por disco y por muestra.
@@ -171,6 +189,9 @@ type Querier interface {
 	ListMinuteNetworks(ctx context.Context, arg ListMinuteNetworksParams) ([]ListMinuteNetworksRow, error)
 	ListMinuteSamples(ctx context.Context, arg ListMinuteSamplesParams) ([]ListMinuteSamplesRow, error)
 	ListPendingEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
+	// ListProjectDeploys devuelve la historia de un proyecto, del más nuevo al
+	// más viejo, sin los pasos (que se piden con el detalle).
+	ListProjectDeploys(ctx context.Context, arg ListProjectDeploysParams) ([]ListProjectDeploysRow, error)
 	// ListProjectReadErrors devuelve los servidores cuya última lectura del
 	// directorio de proyectos falló: lo que se muestra de ellos puede estar viejo.
 	ListProjectReadErrors(ctx context.Context) ([]ListProjectReadErrorsRow, error)
@@ -194,6 +215,9 @@ type Querier interface {
 	// un servidor que todavía no existe intentan crearlo los dos y el segundo choca
 	// contra el índice único.
 	LockServerName(ctx context.Context, name string) error
+	// RejectDeploy cierra un deploy que el agent no aceptó (o que no llegó a
+	// mandarse), mientras siga pendiente.
+	RejectDeploy(ctx context.Context, arg RejectDeployParams) (Deploy, error)
 	// ResetTOTP borra el segundo factor de un usuario: el próximo login pide el alta.
 	ResetTOTP(ctx context.Context, id uuid.UUID) (int64, error)
 	RevokeActiveCredentialsForServer(ctx context.Context, arg RevokeActiveCredentialsForServerParams) (int64, error)
