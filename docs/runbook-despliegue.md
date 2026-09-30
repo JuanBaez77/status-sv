@@ -134,6 +134,13 @@ docker compose -f docker-compose.prod.yml --env-file .env --profile caddy up -d
 Si el certificado no sale, `docker compose ... logs caddy`: casi siempre es el DNS todavía no
 propagado o el puerto 80 cerrado.
 
+**Con Cloudflare adelante** ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)): el primer
+certificado se pide con el registro en *DNS only* (nube gris), porque a través del proxy Let's
+Encrypt no llega a Caddy. Cuando `logs caddy` dice `certificate obtained successfully`, se prende
+el proxy (nube naranja) con el modo SSL en **Full (strict)**. Las renovaciones pasan solas a
+través del proxy. Caddy toma la IP real de `CF-Connecting-IP` solo si la conexión viene de un rango
+de Cloudflare (están en `deploy/Caddyfile`), y comprime el panel.
+
 **Detrás de nginx** — sin Caddy:
 
 ```bash
@@ -492,7 +499,121 @@ WHERE server_id = (SELECT id FROM servers WHERE name = '<NOMBRE>') AND revoked_a
 El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, un token nuevo e
 `install-agent.sh --reenroll`.
 
-## 6. Qué no hacer
+## 6. Mudar el control plane a otro VPS
+
+Es lo que pide [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) para salir de
+`cristales-baez-prod`, y sirve igual para cualquier mudanza. Se muda la base entera: los agents
+conservan su credencial y, como el dominio no cambia, **reconectan solos**; no se tocan.
+
+El corte (del paso 3 al 5) tiene que durar **menos de 10 minutos**: es lo que cada agent guarda de
+métricas en memoria sin conexión. Un agent reintenta como mucho cada minuto, así que en el peor caso
+vuelve un minuto después de que el control plane nuevo responda. Conviene tener los comandos a mano
+y los dos servidores abiertos antes de empezar.
+
+**1. Preparar el VPS nuevo** sin cortar nada: la sección 0 entera (usuario, SSH, firewall con 22, 80
+y 443, Docker), y de la sección 1 *Copiar el código* y *Configuración y secretos*, con el mismo
+`STATUSSV_DOMAIN` y una clave de TOTP **nueva**. Si el servidor viejo ya tenía TOTP en uso, en
+cambio, hay que copiar su `deploy/secrets/totp.key` tal cual (con `scp` a tu máquina y de ahí al
+nuevo, con dueño 10001 y 0400): sin esa clave, los segundos factores guardados no se pueden leer.
+Después, solo la base:
+
+```bash
+# En el VPS nuevo:
+cd /opt/status-sv/deploy
+docker compose -f docker-compose.prod.yml --env-file .env build
+docker compose -f docker-compose.prod.yml --env-file .env up -d postgres
+```
+
+**2. Bajar el TTL.** En Cloudflare, el registro del dominio con TTL de 1 minuto (con la nube
+naranja ya es *Auto*, que es 5 minutos; alcanza).
+
+**3. Cortar y volcar el servidor viejo.** Primero se detiene el control plane, para que no quede
+nada escrito después del volcado:
+
+```bash
+# En el servidor viejo:
+cd /opt/status-sv/deploy
+docker compose -f docker-compose.prod.yml --env-file .env stop server
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres \
+  pg_dump -U statussv -d statussv -Fc > /root/statussv-mudanza.dump
+ls -lh /root/statussv-mudanza.dump
+```
+
+```bash
+# En tu máquina: de uno al otro, sin guardarlo en ningún lado más.
+scp -i ~/.ssh/statussv_deploy root@<IP-VIEJA>:/root/statussv-mudanza.dump /tmp/
+scp -i ~/.ssh/statussv_deploy /tmp/statussv-mudanza.dump root@<IP-NUEVA>:/root/
+rm /tmp/statussv-mudanza.dump
+```
+
+**4. Restaurar y migrar en el nuevo.** Las migraciones pendientes se aplican sobre los datos
+restaurados, no antes:
+
+```bash
+# En el VPS nuevo:
+cd /opt/status-sv/deploy
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres \
+  pg_restore -U statussv -d statussv --no-owner --exit-on-error < /root/statussv-mudanza.dump
+docker compose -f docker-compose.prod.yml --env-file .env run --rm -T server migrate up </dev/null
+docker compose -f docker-compose.prod.yml --env-file .env --profile caddy up -d
+```
+
+**5. Apuntar el dominio.** En Cloudflare, el registro A del dominio pasa a `<IP-NUEVA>` **con la
+nube gris**, para que Caddy pueda pedir el certificado:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env logs -f caddy   # hasta "certificate obtained"
+curl -s https://<DOMINIO>/readyz                                          # {"status":"ready"}
+```
+
+Con el certificado, la nube naranja de nuevo y el modo SSL en Full (strict). Mientras está gris,
+Cloudflare Access no protege el panel: que dure solo lo que tarda el certificado.
+
+**6. Verificar.** Los agents tienen que volver solos en uno o dos minutos:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres psql -U statussv -d statussv -c \
+  "SELECT name, agent_version, round(extract(epoch FROM now() - last_seen_at)) AS hace_s FROM servers ORDER BY name"
+```
+
+En el panel: cada servidor en línea, y en el gráfico de la última hora a lo sumo un hueco del
+largo del corte si pasó de 10 minutos. Si la base traía sesiones, la migración 00007 las cerró:
+el primer login pide dar de alta el segundo factor.
+
+**7. Limpiar el servidor viejo**, recién con todo verificado. Sus contenedores se quitan, pero el
+volumen de la base queda una semana como respaldo:
+
+```bash
+# En el servidor viejo:
+cd /opt/status-sv/deploy
+docker compose -f docker-compose.prod.yml --env-file .env down      # sin -v: el volumen queda
+rm /root/statussv-mudanza.dump
+
+# El sitio de nginx de status-sv. El respaldo primero, y el sitio del cliente antes y después.
+tar -czf /root/nginx-backup-$(date +%Y%m%d-%H%M%S).tar.gz /etc/nginx
+curl -sI https://<OTRO-SITIO-DEL-SERVIDOR> | head -1
+rm /etc/nginx/sites-enabled/status-sv /etc/nginx/sites-available/status-sv
+nginx -t && systemctl reload nginx
+curl -sI https://<OTRO-SITIO-DEL-SERVIDOR> | head -1    # tiene que seguir igual
+
+# El certificado de certbot del dominio: el dominio ya no apunta acá, y su
+# renovación fallaría todos los días.
+certbot delete --cert-name <DOMINIO> --non-interactive
+```
+
+El agent de ese servidor sigue corriendo como antes. Pasada la semana:
+`docker volume rm status-sv_postgres-data` y `rm -rf /opt/status-sv`. En el VPS nuevo, también:
+`rm /root/statussv-mudanza.dump`.
+
+**Si algo sale mal antes del paso 7**, se vuelve atrás apuntando el dominio a la IP vieja y
+levantando de nuevo el control plane viejo (`up -d server`): su base quedó como estaba en el
+volcado. Lo que los agents hayan mandado al nuevo en el medio se pierde.
+
+**Endurecimiento opcional.** Con todo andando detrás de Cloudflare, los puertos 80 y 443 del VPS
+se pueden cerrar a todo lo que no venga de los rangos de Cloudflare. Si se hace, para pedir un
+certificado desde cero (por ejemplo, si se perdió `caddy-data`) hay que abrirlos de nuevo.
+
+## 7. Qué no hacer
 
 - **No publicar el puerto de PostgreSQL.** Docker lo expondría a internet por fuera del firewall.
 - **No pasar tokens como argumento.** Quedan visibles en `ps` para cualquier usuario del sistema.
@@ -500,7 +621,7 @@ El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, u
   pueden pedir por semana.
 - **No commitear `deploy/.env`.** Ya está en `.gitignore`, pero conviene revisarlo en cada PR.
 
-## 7. Lecciones de los despliegues
+## 8. Lecciones de los despliegues
 
 Salieron al desplegar en `cristales-baez-prod` y cuestan tiempo si se redescubren:
 

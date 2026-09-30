@@ -1,6 +1,6 @@
 # ADR-007: El control plane vive en el servidor de un cliente, detrás de su nginx
 
-- **Estado:** aceptada
+- **Estado:** reemplazada por [ADR-014](ADR-014-control-plane-en-vps-propio.md)
 - **Fecha:** 2026-09-21
 
 ## Contexto
