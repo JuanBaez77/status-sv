@@ -35,11 +35,11 @@ Qué más se evaluó y por qué se descartó.
 | [004](ADR-004-modulo-go-unico-y-goose.md) | Un único módulo Go y migraciones con goose | aceptada |
 | [005](ADR-005-alcance-single-tenant.md) | status-sv es una herramienta interna single-tenant | aceptada |
 | [006](ADR-006-autenticacion-de-agents.md) | Autenticación de agents con token de un solo uso y credencial propia | aceptada |
-| [007](ADR-007-control-plane-en-servidor-de-cliente.md) | El control plane vive en el servidor de un cliente, detrás de su nginx | reemplazada por ADR-014 |
+| [007](ADR-007-control-plane-en-servidor-de-cliente.md) | El control plane vive en el servidor de un cliente, detrás de su nginx | aceptada |
 | [008](ADR-008-tablas-de-metricas.md) | Tablas de métricas, con discos e interfaces aparte, y particiones que maneja el control plane | aceptada |
 | [009](ADR-009-agregado-por-minuto-en-la-ingesta.md) | El agregado por minuto se recalcula en la ingesta, no en un job | aceptada |
 | [010](ADR-010-usuarios-y-sesiones-del-panel.md) | Usuarios del panel con argon2id y sesiones en la base | aceptada |
 | [011](ADR-011-acceso-a-docker-y-journald.md) | Cómo el agent observa Docker y systemd | aceptada |
 | [012](ADR-012-proyectos-declarados-en-el-servidor.md) | Los proyectos se declaran en archivos del propio servidor | aceptada |
 | [013](ADR-013-segundo-factor-totp.md) | Segundo factor TOTP obligatorio en el panel | aceptada |
-| [014](ADR-014-control-plane-en-vps-propio.md) | El control plane vive en un VPS propio, detrás de Caddy | aceptada |
+| [014](ADR-014-control-plane-en-vps-propio.md) | El control plane vive en un VPS propio, detrás de Caddy | propuesta (postergada) |

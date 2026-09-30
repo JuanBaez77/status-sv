@@ -501,8 +501,9 @@ El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, u
 
 ## 6. Mudar el control plane a otro VPS
 
-Es lo que pide [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) para salir de
-`cristales-baez-prod`, y sirve igual para cualquier mudanza. Se muda la base entera: los agents
+Es la mudanza que propone [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) para salir de
+`cristales-baez-prod`, **postergada** el 2026-09-30: hoy el control plane sigue ahí, detrás de su
+nginx. Queda escrita para cuando se haga, y sirve igual para cualquier mudanza. Se muda la base entera: los agents
 conservan su credencial y, como el dominio no cambia, **reconectan solos**; no se tocan.
 
 El corte (del paso 3 al 5) tiene que durar **menos de 10 minutos**: es lo que cada agent guarda de

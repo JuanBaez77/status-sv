@@ -87,7 +87,7 @@ Go en agent y servidor, PostgreSQL como base, y React con Vite para el panel. La
 | Estado del front | TanStack Query + WebSocket | Datos en vivo sin polling. |
 | Contratos | JSON versionado en `proto/` ([ADR-003](adr/ADR-003-contratos-json-versionado.md)) | Un solo origen para los mensajes agent ↔ servidor, legible al depurar. |
 | Smoke tests | Playwright | En un worker aparte, porque el navegador es pesado. |
-| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un VPS dedicado, con Cloudflare adelante ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md), que reemplaza a ADR-007). |
+| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; hoy corre detrás del nginx de un cliente ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)). La mudanza a un VPS propio está escrita y postergada ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)). |
 
 **Sobre PostgreSQL**
 
@@ -518,7 +518,8 @@ abrían las tomó Juan el 2026-09-28: [ADR-012](adr/ADR-012-proyectos-declarados
 (dónde viven los proyectos, cómo se ligan y el healthcheck), [ADR-013](adr/ADR-013-segundo-factor-totp.md)
 (TOTP) y mover el control plane a un VPS propio en este sprint, como pide
 [ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md) antes del segundo servidor y de la
-escritura del Sprint 4.
+escritura del Sprint 4. El 2026-09-30 Juan postergó la mudanza: el control plane sigue en
+`cristales-baez-prod` y el segundo servidor se suma con su agent apuntando ahí.
 
 Métricas
 
@@ -556,11 +557,13 @@ Calidad y despliegue
       control plane con el panel adentro y un agent de verdad, con los binarios en el runner. Se mide
       sin compresión, el peor caso: LCP de 0,6 s en el login y en la lista (puntaje 100) y latencia
       máxima de 150 ms, contra metas de 1 s y 2 s.
-- [x] [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md), que reemplaza a ADR-007, y la mudanza en
-      el runbook (sección 6): se muda la base entera, así los agents no se reenrolan. Caddy toma la
-      IP real de Cloudflare y comprime, como nginx.
-- [ ] Hacer la mudanza al VPS propio y sumar el agent del segundo servidor: los dos agents apuntando
-      ahí. Incluye desplegar #41 (migración 00005) y lo que llegó en este sprint (00006 a 00008).
+- [x] [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) y la mudanza en el runbook (sección 6),
+      listas para cuando se haga: se muda la base entera, así los agents no se reenrolan. Caddy toma
+      la IP real de Cloudflare y comprime, como nginx. **Postergada** el 2026-09-30: ADR-007 sigue
+      vigente.
+- [ ] Desplegar el sprint en `cristales-baez-prod`, detrás de su nginx (runbook, sección 3), y sumar
+      el agent del segundo servidor apuntando ahí. Incluye #41 (migración 00005) y las migraciones
+      de este sprint (00006 a 00008).
 
 Terminado cuando dos VPS reales se ven en vivo en el panel, cada uno con al menos un proyecto ligado
 a sus contenedores o servicios; los rangos de 30 días y un año se dibujan desde `metrics_1h`; el
