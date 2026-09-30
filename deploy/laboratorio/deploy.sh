@@ -42,6 +42,9 @@ limpiar() {
   systemctl stop ${NAME} 2>/dev/null
   systemctl reset-failed ${NAME} 2>/dev/null
   rm -rf "${UNIT}" "${DROPIN_DIR}"
+  # Lo que deja el instalador en el caso D.
+  systemctl disable --now statussv-agent >/dev/null 2>&1
+  rm -rf /etc/systemd/system/statussv-agent.service /etc/systemd/system/statussv-agent.service.d /usr/local/bin/statussv-agent
   systemctl daemon-reload
   [ -d "${WD}" ] && docker compose --project-directory "${WD}" -f "${WD}/compose.yml" -p lab down --rmi local >/dev/null 2>&1
   docker image rm statussv-rollback/lab-web:sonda >/dev/null 2>&1
@@ -186,6 +189,58 @@ drop_in_deploy() { # $1 = con techos (si) o sin techos (no)
   } >"${DROPIN_DIR}/20-deploy.conf"
 }
 
+# caso_instalador es el caso D: deploy/install-agent.sh --enable-deploy con el
+# agent de verdad sobre el mismo proyecto. Tiene que escribir 20-deploy.conf con
+# el workdir declarado, dejar el servicio andando con el deploy prendido y que
+# deploy-check, corrido como statussv, diga que se puede desplegar.
+caso_instalador() {
+  paso "caso D: el instalador con --enable-deploy"
+  vuelve_a_v1
+  install -d -m 0755 /etc/status-sv/projects.d
+  cat >/etc/status-sv/projects.d/lab.yaml <<EOF
+name: lab
+environment: staging
+repo: file://${ORIGEN}
+branch: main
+runtime: docker
+compose_file: compose.yml
+compose_project: lab
+workdir: ${WD}
+EOF
+  # Un agent ya enrolado contra un control plane que no existe: el instalador
+  # no enrola, y el servicio reintenta conectar sin morirse.
+  install -d -o statussv -g statussv -m 0700 /var/lib/status-sv
+  cat >/var/lib/status-sv/agent.json <<EOF
+{"server_url":"http://127.0.0.1:9","server_id":"01924f9c-0000-7000-8000-0000000000aa","server_name":"lab","credential":"svagt_credencial-del-laboratorio","enrolled_at":"2026-09-30T12:00:00Z"}
+EOF
+  chown statussv:statussv /var/lib/status-sv/agent.json
+  chmod 0600 /var/lib/status-sv/agent.json
+  install -m 0755 "${AGENT_BIN}" /tmp/statussv-agent-lab
+
+  local salida
+  if ! salida="$(STATUSSV_DEPLOY_ALLOW_FILE_REPOS=true bash "${DIR}/../install-agent.sh" --enable-deploy /tmp/statussv-agent-lab 2>&1)"; then
+    printf '%s\n' "${salida}"
+    rojo "caso D: el instalador falló"
+    return 1
+  fi
+  printf '%s\n' "${salida}" | sed -n '/==> deploy/,$p'
+
+  local dropin=/etc/systemd/system/statussv-agent.service.d/20-deploy.conf fallas=0
+  grep -qx "ReadWritePaths=-${WD}" "${dropin}" || { rojo "el drop-in no tiene el workdir"; fallas=1; }
+  grep -qx 'Environment=STATUSSV_DEPLOY_ENABLED=true' "${dropin}" || { rojo "el drop-in no prende el deploy"; fallas=1; }
+  grep -q 'lab se puede desplegar' <<<"${salida}" || { rojo "deploy-check no aprobó el proyecto"; fallas=1; }
+  systemctl is-active --quiet statussv-agent || { rojo "el servicio no quedó andando"; fallas=1; }
+  journalctl -u statussv-agent --no-pager -o cat | grep -q 'el deploy está prendido' || { rojo "el agent no dice que el deploy está prendido"; fallas=1; }
+
+  # Apagarlo saca el drop-in.
+  bash "${DIR}/../install-agent.sh" --disable-deploy /tmp/statussv-agent-lab >/dev/null 2>&1
+  [ ! -e "${dropin}" ] || { rojo "--disable-deploy no sacó el drop-in"; fallas=1; }
+  rm -f /tmp/statussv-agent-lab
+
+  if [ "${fallas}" -eq 0 ]; then verde "caso D: el instalador prende y apaga el deploy"; else rojo "caso D: algo no dio lo esperado"; fi
+  return "${fallas}"
+}
+
 resultado=0
 
 paso "caso A: sin el drop-in de deploy"
@@ -207,5 +262,12 @@ vuelve_a_v1
 paso "caso B: con el drop-in de deploy completo"
 drop_in_deploy si
 if corre; then verde "caso B: todo lo que el motor necesita anda"; else rojo "caso B: algo no dio lo esperado"; resultado=1; fi
+
+if [ -n "${AGENT_BIN:-}" ]; then
+  caso_instalador || resultado=1
+else
+  echo
+  echo "caso D: se salta (AGENT_BIN no apunta a un binario del agent)"
+fi
 
 exit "${resultado}"

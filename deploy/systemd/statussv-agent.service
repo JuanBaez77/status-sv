@@ -9,6 +9,9 @@
 # (10-docker.conf) solo si el servidor tiene el grupo docker, porque systemd no
 # arranca un servicio cuyo grupo suplementario no existe. El porqué de todo esto
 # está en docs/adr/ADR-011-acceso-a-docker-y-journald.md.
+#
+# El deploy tampoco está acá: viene apagado, y el instalador lo prende con
+# --enable-deploy en el drop-in 20-deploy.conf (ADR-015).
 
 [Unit]
 Description=Agent de status-sv

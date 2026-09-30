@@ -410,7 +410,9 @@ El formato completo está en DISENO.md. Lo que conviene saber:
 - Con Docker, el proyecto se liga a los contenedores por la etiqueta de Compose: si
   `compose_project` falta, es el nombre del directorio de `workdir`, como hace Compose. Con systemd,
   va la lista de servicios en `units`.
-- `deploy.pre` y `deploy.post` tienen que estar vacíos hasta el Sprint 4.
+- `deploy.pre` y `deploy.post` son los pasos declarados del deploy ([ADR-016](adr/ADR-016-pasos-declarados-del-deploy.md)):
+  un servicio de Compose y un comando como lista (`command: ["python", "manage.py", "migrate"]`).
+  Solo con Docker. Ver "Prender el deploy" más abajo.
 - Si declara `healthcheck`, el agent hace un `GET` a esa URL cada 60 s desde el propio servidor, sin
   proxy, verificando el certificado y **sin seguir redirecciones**: si la URL responde 301, hay que
   declarar `expect_status: 301` o apuntar a la URL final. Si no se fijan, `expect_status` es 200 y
@@ -433,6 +435,113 @@ queda en el registro:
 ```bash
 journalctl -u statussv-agent --since '-1 hour' | grep -i healthcheck
 ```
+
+### Prender el deploy
+
+El agent puede desplegar los proyectos Docker declarados: trae la rama, compila, levanta, verifica
+y, si no queda sano, vuelve solo a lo anterior ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
+**Viene apagado en cada servidor.** Lo prende una persona acá, y el control plane no tiene forma de
+prenderlo.
+
+> **Antes de prenderlo en producción:** [ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)
+> pide mudar el control plane a un VPS propio ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md),
+> sección 6) antes de habilitar escritura, o enmendar ADR-007 aceptando el riesgo por escrito.
+
+Hace falta, por proyecto:
+
+**1. Git, Docker Compose y un `workdir` clonado.** El proyecto ya corre en el servidor desde un
+clon de git en su `workdir`, que no puede estar bajo `/home` ni `/root` (la unidad los esconde).
+
+**2. Una deploy key de solo lectura**, si el repo es privado (sin llave se trae por HTTPS, que
+sirve solo para repos públicos). Se genera en el servidor y la pública se carga en GitHub, en el
+repo del proyecto, *Settings → Deploy keys*, **sin** permiso de escritura:
+
+```bash
+sudo ssh-keygen -t ed25519 -N '' -C "status-sv $(hostname) <PROYECTO>" -f /etc/status-sv/keys/<PROYECTO>
+sudo chown statussv:statussv /etc/status-sv/keys/<PROYECTO>
+sudo chmod 0400 /etc/status-sv/keys/<PROYECTO>
+sudo cat /etc/status-sv/keys/<PROYECTO>.pub   # esto va a GitHub
+sudo rm /etc/status-sv/keys/<PROYECTO>.pub
+```
+
+Con llave, `repo: github.com/dueño/repo` se trae por `ssh://git@github.com/dueño/repo.git`. El agent
+no usa el `origin` del `workdir` ni las credenciales de root.
+
+**3. Los host keys de GitHub**, verificados contra los que publica GitHub
+(<https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints>):
+
+```bash
+ssh-keyscan -t ed25519 github.com | sudo tee /etc/status-sv/known_hosts
+ssh-keygen -lf /etc/status-sv/known_hosts   # la huella tiene que coincidir con la publicada
+```
+
+**4. Permisos del `workdir`.** El agent escribe con el grupo `statussv` en `.git` y en los
+directorios con archivos versionados; el dueño sigue siendo root y los datos que no están en git
+(volúmenes, `.env`) no se tocan. El `.env` tiene que ser legible por el grupo, porque
+`docker compose` lo lee:
+
+```bash
+cd /srv/<PROYECTO>
+sudo chgrp -R statussv .git && sudo chmod -R g+rwX .git
+sudo find .git -type d -exec chmod g+s {} +
+{ echo .; git ls-tree -r -d --name-only HEAD; } | while read -r d; do
+  sudo chgrp statussv "$d" && sudo chmod g+rwxs "$d"
+done
+[ -f .env ] && sudo chgrp statussv .env && sudo chmod g+r .env
+```
+
+**5. Pasos declarados, si hacen falta.** Las migraciones van en `deploy.pre`, que corre con la
+imagen nueva antes de levantarla. **Un rollback no deshace una migración**: tienen que ser
+compatibles hacia atrás.
+
+```yaml
+deploy:
+  pre:
+    - service: backend
+      command: ["python", "manage.py", "migrate", "--noinput"]
+      timeout_seconds: 300
+```
+
+**6. Prender el deploy.** Con el mismo instalador, en el servidor:
+
+```bash
+cd /opt/status-sv/deploy
+sudo ./install-agent.sh --enable-deploy /usr/local/bin/statussv-agent
+```
+
+Escribe el drop-in `20-deploy.conf` (el interruptor, escritura en el `workdir` de cada proyecto
+declarado, `UMask=0002`, `MemoryMax=512M` y `TasksMax=256`), reinicia el agent y corre
+`deploy-check` para cada proyecto, como el usuario del agent. `deploy-check` no cambia nada de lo
+que corre: revisa la declaración, la llave, los permisos, trae la rama (con la llave, así la prueba)
+y valida el archivo de Compose. Se puede correr solo cuando haga falta:
+
+```bash
+sudo runuser -u statussv -g statussv -G docker -- /usr/local/bin/statussv-agent deploy-check <PROYECTO>
+```
+
+Después de declarar un proyecto nuevo, correr el instalador otra vez (sin flags, o con
+`--enable-deploy`) para sumar su `workdir`. Para apagarlo:
+
+```bash
+sudo ./install-agent.sh --disable-deploy /usr/local/bin/statussv-agent
+```
+
+**Cómo se despliega:** desde la vista del proyecto en el panel. Hay que escribir el nombre del
+proyecto y, en producción, un código nuevo de la app de autenticación
+([ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md)). Todo queda en `audit_log`:
+
+```bash
+cd /opt/status-sv/deploy
+docker compose -f docker-compose.prod.yml exec postgres psql -U statussv -d statussv \
+  -c "SELECT at, actor, action, target_id, result, detail FROM audit_log ORDER BY at DESC LIMIT 20"
+```
+
+Lo que deja el deploy en el servidor:
+
+- La rama local del `workdir` apunta al commit desplegado (`git log` dice la verdad).
+- Las imágenes de los últimos tres estados buenos quedan etiquetadas
+  `statussv-rollback/<proyecto>/<servicio>:<commit>`, para volver atrás sin compilar.
+- El diario de cada deploy en `/var/lib/status-sv/deploys/`.
 
 ## 3. Actualizar
 
@@ -625,6 +734,13 @@ certificado desde cero (por ejemplo, si se perdió `caddy-data`) hay que abrirlo
 - **No borrar el volumen `caddy-data`.** Tiene los certificados, y Let's Encrypt limita cuántos se
   pueden pedir por semana.
 - **No commitear `deploy/.env`.** Ya está en `.gitignore`, pero conviene revisarlo en cada PR.
+- **No correr `docker image prune -a` en un servidor con el deploy prendido** sin mirar antes:
+  puede borrar las imágenes `statussv-rollback/...` a las que vuelve un rollback manual (el rollback
+  lo detecta y no arranca, pero ya no puede volver).
+- **No editar a mano archivos versionados en el `workdir` de un proyecto que se despliega.** El
+  deploy no los pisa: falla antes de empezar con "archivos cambiados a mano". Un arreglo va por PR.
+- **No prender el deploy en producción con el control plane en el servidor de un cliente** sin la
+  decisión de ADR-007 (mudarlo o enmendarlo).
 
 ## 8. Lecciones de los despliegues
 

@@ -115,8 +115,14 @@ func ReadSpec(dir, name string) (projectspec.Spec, error) {
 	}
 	var found []string
 	for _, ext := range []string{".yaml", ".yml"} {
-		if _, err := os.Lstat(filepath.Join(dir, name+ext)); err == nil {
+		_, err := os.Lstat(filepath.Join(dir, name+ext))
+		switch {
+		case err == nil:
 			found = append(found, name+ext)
+		case !errors.Is(err, fs.ErrNotExist):
+			// Un permiso que falta no es lo mismo que un proyecto que no
+			// existe: que el error lo diga.
+			return projectspec.Spec{}, fmt.Errorf("no se puede leer %s: %w", dir, err)
 		}
 	}
 	switch len(found) {
