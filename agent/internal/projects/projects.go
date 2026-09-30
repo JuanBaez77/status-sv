@@ -101,23 +101,69 @@ func Read(dir string, now time.Time) proto.ProjectsState {
 	return state
 }
 
+// ErrNotDeclared es que no hay un archivo de proyecto con ese nombre.
+var ErrNotDeclared = errors.New("el proyecto no está declarado en este servidor")
+
+// ReadSpec lee la declaración de un proyecto por su nombre, con sus pasos de
+// deploy. Es lo que usa el motor de deploy al arrancar cada deploy: se
+// despliega con lo que dice el archivo en ese momento. Aplica las mismas
+// reglas que Read: solo archivos regulares, y si están name.yaml y name.yml a
+// la vez, ninguno vale.
+func ReadSpec(dir, name string) (projectspec.Spec, error) {
+	if !proto.ValidProjectName(name) {
+		return projectspec.Spec{}, ErrNotDeclared
+	}
+	var found []string
+	for _, ext := range []string{".yaml", ".yml"} {
+		if _, err := os.Lstat(filepath.Join(dir, name+ext)); err == nil {
+			found = append(found, name+ext)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return projectspec.Spec{}, ErrNotDeclared
+	case 2:
+		return projectspec.Spec{}, errors.New("hay otro archivo con el mismo nombre de proyecto")
+	}
+	path := filepath.Join(dir, found[0])
+	info, err := os.Lstat(path)
+	if err != nil {
+		return projectspec.Spec{}, ErrNotDeclared
+	}
+	data, err := readRegular(path, fs.FileInfoToDirEntry(info))
+	if err != nil {
+		return projectspec.Spec{}, err
+	}
+	return projectspec.ParseSpec(found[0], data)
+}
+
 // readOne lee un archivo de proyecto. Solo acepta archivos regulares: un
 // enlace simbólico podría apuntar a cualquier archivo que el agent pueda leer.
 func readOne(path string, entry fs.DirEntry) (proto.Project, error) {
+	data, err := readRegular(path, entry)
+	if err != nil {
+		return proto.Project{}, err
+	}
+	return projectspec.Parse(filepath.Base(path), data)
+}
+
+// readRegular lee un archivo regular del directorio de proyectos, con el tope
+// de tamaño del parser.
+func readRegular(path string, entry fs.DirEntry) ([]byte, error) {
 	if !entry.Type().IsRegular() {
-		return proto.Project{}, errors.New("no es un archivo regular (los enlaces simbólicos no se siguen)")
+		return nil, errors.New("no es un archivo regular (los enlaces simbólicos no se siguen)")
 	}
 	f, err := os.Open(path) //nolint:gosec // la ruta sale del directorio de proyectos, que es de root
 	if err != nil {
-		return proto.Project{}, errors.New("no se puede abrir")
+		return nil, errors.New("no se puede abrir")
 	}
 	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, projectspec.MaxFileBytes+1))
 	if err != nil {
-		return proto.Project{}, errors.New("no se puede leer")
+		return nil, errors.New("no se puede leer")
 	}
-	return projectspec.Parse(filepath.Base(path), data)
+	return data, nil
 }
 
 // addInvalid anota un archivo inválido, con el nombre y el error recortados
