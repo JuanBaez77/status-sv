@@ -81,6 +81,67 @@ func (q *Queries) DeleteProjectsExcept(ctx context.Context, arg DeleteProjectsEx
 	return result.RowsAffected(), nil
 }
 
+const getProject = `-- name: GetProject :one
+SELECT p.id, p.server_id, p.name, p.environment, p.repo, p.branch, p.runtime, p.workdir, p.compose_file, p.compose_project, p.units, p.healthcheck_url, p.healthcheck_expect_status, p.healthcheck_timeout_seconds, p.health_state, p.health_checked_at, p.health_status_code, p.health_latency_ms, p.health_detail, p.seen_at, s.name AS server_name
+FROM projects p
+JOIN servers s ON s.id = p.server_id
+WHERE p.id = $1
+`
+
+type GetProjectRow struct {
+	ID                        uuid.UUID
+	ServerID                  uuid.UUID
+	Name                      string
+	Environment               string
+	Repo                      string
+	Branch                    string
+	Runtime                   string
+	Workdir                   string
+	ComposeFile               string
+	ComposeProject            string
+	Units                     []string
+	HealthcheckUrl            string
+	HealthcheckExpectStatus   int32
+	HealthcheckTimeoutSeconds int32
+	HealthState               string
+	HealthCheckedAt           *time.Time
+	HealthStatusCode          int32
+	HealthLatencyMs           int32
+	HealthDetail              string
+	SeenAt                    time.Time
+	ServerName                string
+}
+
+// GetProject devuelve un proyecto con el nombre de su servidor.
+func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (GetProjectRow, error) {
+	row := q.db.QueryRow(ctx, getProject, id)
+	var i GetProjectRow
+	err := row.Scan(
+		&i.ID,
+		&i.ServerID,
+		&i.Name,
+		&i.Environment,
+		&i.Repo,
+		&i.Branch,
+		&i.Runtime,
+		&i.Workdir,
+		&i.ComposeFile,
+		&i.ComposeProject,
+		&i.Units,
+		&i.HealthcheckUrl,
+		&i.HealthcheckExpectStatus,
+		&i.HealthcheckTimeoutSeconds,
+		&i.HealthState,
+		&i.HealthCheckedAt,
+		&i.HealthStatusCode,
+		&i.HealthLatencyMs,
+		&i.HealthDetail,
+		&i.SeenAt,
+		&i.ServerName,
+	)
+	return i, err
+}
+
 const insertInvalidProjectFiles = `-- name: InsertInvalidProjectFiles :execrows
 INSERT INTO project_invalid_files (server_id, file, error, seen_at)
 SELECT $1::uuid, unnest($2::text[]), unnest($3::text[]),
@@ -106,6 +167,165 @@ func (q *Queries) InsertInvalidProjectFiles(ctx context.Context, arg InsertInval
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listInvalidProjectFiles = `-- name: ListInvalidProjectFiles :many
+SELECT f.server_id, s.name AS server_name, f.file, f.error, f.seen_at
+FROM project_invalid_files f
+JOIN servers s ON s.id = f.server_id
+ORDER BY s.name, f.file
+`
+
+type ListInvalidProjectFilesRow struct {
+	ServerID   uuid.UUID
+	ServerName string
+	File       string
+	Error      string
+	SeenAt     time.Time
+}
+
+// ListInvalidProjectFiles devuelve los archivos que no se pudieron usar, de
+// todos los servidores.
+func (q *Queries) ListInvalidProjectFiles(ctx context.Context) ([]ListInvalidProjectFilesRow, error) {
+	rows, err := q.db.Query(ctx, listInvalidProjectFiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInvalidProjectFilesRow{}
+	for rows.Next() {
+		var i ListInvalidProjectFilesRow
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.ServerName,
+			&i.File,
+			&i.Error,
+			&i.SeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectReadErrors = `-- name: ListProjectReadErrors :many
+SELECT id, name, projects_detail, projects_taken_at
+FROM servers
+WHERE projects_status = 'error'
+ORDER BY name
+`
+
+type ListProjectReadErrorsRow struct {
+	ID              uuid.UUID
+	Name            string
+	ProjectsDetail  string
+	ProjectsTakenAt *time.Time
+}
+
+// ListProjectReadErrors devuelve los servidores cuya última lectura del
+// directorio de proyectos falló: lo que se muestra de ellos puede estar viejo.
+func (q *Queries) ListProjectReadErrors(ctx context.Context) ([]ListProjectReadErrorsRow, error) {
+	rows, err := q.db.Query(ctx, listProjectReadErrors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectReadErrorsRow{}
+	for rows.Next() {
+		var i ListProjectReadErrorsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProjectsDetail,
+			&i.ProjectsTakenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjects = `-- name: ListProjects :many
+SELECT p.id, p.server_id, p.name, p.environment, p.repo, p.branch, p.runtime, p.workdir, p.compose_file, p.compose_project, p.units, p.healthcheck_url, p.healthcheck_expect_status, p.healthcheck_timeout_seconds, p.health_state, p.health_checked_at, p.health_status_code, p.health_latency_ms, p.health_detail, p.seen_at, s.name AS server_name
+FROM projects p
+JOIN servers s ON s.id = p.server_id
+ORDER BY s.name, p.name
+`
+
+type ListProjectsRow struct {
+	ID                        uuid.UUID
+	ServerID                  uuid.UUID
+	Name                      string
+	Environment               string
+	Repo                      string
+	Branch                    string
+	Runtime                   string
+	Workdir                   string
+	ComposeFile               string
+	ComposeProject            string
+	Units                     []string
+	HealthcheckUrl            string
+	HealthcheckExpectStatus   int32
+	HealthcheckTimeoutSeconds int32
+	HealthState               string
+	HealthCheckedAt           *time.Time
+	HealthStatusCode          int32
+	HealthLatencyMs           int32
+	HealthDetail              string
+	SeenAt                    time.Time
+	ServerName                string
+}
+
+// ListProjects devuelve todos los proyectos, con el nombre de su servidor, en
+// orden de servidor y de nombre.
+func (q *Queries) ListProjects(ctx context.Context) ([]ListProjectsRow, error) {
+	rows, err := q.db.Query(ctx, listProjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectsRow{}
+	for rows.Next() {
+		var i ListProjectsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServerID,
+			&i.Name,
+			&i.Environment,
+			&i.Repo,
+			&i.Branch,
+			&i.Runtime,
+			&i.Workdir,
+			&i.ComposeFile,
+			&i.ComposeProject,
+			&i.Units,
+			&i.HealthcheckUrl,
+			&i.HealthcheckExpectStatus,
+			&i.HealthcheckTimeoutSeconds,
+			&i.HealthState,
+			&i.HealthCheckedAt,
+			&i.HealthStatusCode,
+			&i.HealthLatencyMs,
+			&i.HealthDetail,
+			&i.SeenAt,
+			&i.ServerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertProject = `-- name: UpsertProject :exec

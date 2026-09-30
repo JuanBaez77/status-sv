@@ -57,6 +57,11 @@ func (s *Server) handleProjectsState(ctx context.Context, conn *websocket.Conn, 
 		return nil
 	}
 
+	// Los paneles que miran este servidor vuelven a pedir los proyectos.
+	if applied {
+		s.publishProjects(ctx, server.ID)
+	}
+
 	s.log.InfoContext(ctx, "proyectos declarados",
 		"servidor", server.Name,
 		"aplicada", applied,

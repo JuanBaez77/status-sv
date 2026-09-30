@@ -121,6 +121,8 @@ type Querier interface {
 	// la transacción. Es lo que hace que dos enrolamientos simultáneos con el mismo
 	// token no compitan: el segundo espera y encuentra el token ya consumido.
 	GetEnrollmentTokenByHashForUpdate(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
+	// GetProject devuelve un proyecto con el nombre de su servidor.
+	GetProject(ctx context.Context, id uuid.UUID) (GetProjectRow, error)
 	GetServerByID(ctx context.Context, id uuid.UUID) (Server, error)
 	GetServerByName(ctx context.Context, name string) (Server, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -147,6 +149,9 @@ type Querier interface {
 	ListHourDisks(ctx context.Context, arg ListHourDisksParams) ([]ListHourDisksRow, error)
 	ListHourNetworks(ctx context.Context, arg ListHourNetworksParams) ([]ListHourNetworksRow, error)
 	ListHourSamples(ctx context.Context, arg ListHourSamplesParams) ([]ListHourSamplesRow, error)
+	// ListInvalidProjectFiles devuelve los archivos que no se pudieron usar, de
+	// todos los servidores.
+	ListInvalidProjectFiles(ctx context.Context) ([]ListInvalidProjectFilesRow, error)
 	// Consultas del panel. El estado (online, offline) no se guarda: sale de
 	// last_seen_at al consultar, como define docs/DISENO.md.
 	// ListLatestSamples devuelve la última muestra de cada servidor que mandó algo
@@ -166,6 +171,12 @@ type Querier interface {
 	ListMinuteNetworks(ctx context.Context, arg ListMinuteNetworksParams) ([]ListMinuteNetworksRow, error)
 	ListMinuteSamples(ctx context.Context, arg ListMinuteSamplesParams) ([]ListMinuteSamplesRow, error)
 	ListPendingEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
+	// ListProjectReadErrors devuelve los servidores cuya última lectura del
+	// directorio de proyectos falló: lo que se muestra de ellos puede estar viejo.
+	ListProjectReadErrors(ctx context.Context) ([]ListProjectReadErrorsRow, error)
+	// ListProjects devuelve todos los proyectos, con el nombre de su servidor, en
+	// orden de servidor y de nombre.
+	ListProjects(ctx context.Context) ([]ListProjectsRow, error)
 	ListRawDisks(ctx context.Context, arg ListRawDisksParams) ([]ListRawDisksRow, error)
 	// ListRawNetworks trae los contadores acumulados. Las tasas se calculan al
 	// armar la respuesta, con las mismas reglas que el agregado por minuto: un
