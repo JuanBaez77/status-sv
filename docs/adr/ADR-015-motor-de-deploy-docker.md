@@ -40,7 +40,8 @@ Las siete decisiones las tomó Juan el 2026-09-30, aceptando las recomendaciones
   intérprete de shell ni una cadena que alguien parsee. Cada valor que entra en un argumento viene
   del `project.yaml` validado o de un SHA de 40 caracteres hexadecimales.
 - El entorno del proceso hijo no se hereda: se arma con `PATH` fijo, `HOME` y `DOCKER_CONFIG` en
-  `/var/lib/status-sv`, `LANG=C`, `GIT_TERMINAL_PROMPT=0` y el `GIT_SSH_COMMAND` del punto 3.
+  `/var/lib/status-sv`, `LANG=C`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1` y el
+  `GIT_SSH_COMMAND` del punto 3.
 - Lo que el agent puede resolver por la API de Docker lo hace con su cliente propio (listar los
   contenedores del proyecto, leer sus imágenes, etiquetarlas), sin ejecutar nada.
 - Reimplementar Compose no tiene sentido: resuelve dependencias, redes, volúmenes, build y
@@ -139,11 +140,16 @@ queda andando, y lo saca una persona.
 
 **9. La unidad gana lo justo, en un drop-in que escribe el instalador.**
 
-`20-deploy.conf` lleva `STATUSSV_DEPLOY_ENABLED=true`, `ReadWritePaths=` con el `workdir` de cada
-proyecto declarado, `MemoryMax=512M` y `TasksMax=256`. El techo alto solo se usa durante un deploy:
-en reposo el agent sigue midiendo menos de 30 MB. Los `workdir` bajo `/home` no se aceptan
-(`ProtectHome=true` los esconde). El resto del endurecimiento no cambia; lo que haga falta se mide
-antes en el laboratorio.
+`20-deploy.conf` lleva `STATUSSV_DEPLOY_ENABLED=true`, `ReadWritePaths=-` con el `workdir` de cada
+proyecto declarado (el guion: si un `workdir` desaparece, la unidad igual arranca), `UMask=0002`,
+`MemoryMax=512M` y `TasksMax=256`. El techo alto solo se usa durante un deploy: en reposo el agent
+sigue midiendo menos de 30 MB. Los `workdir` bajo `/home` no se aceptan (`ProtectHome=true` los
+esconde). El resto del endurecimiento no cambia.
+
+`UMask=0002` es para lo que escribe `git`: con el `0077` de la unidad base, un archivo nuevo del
+commit quedaría `0600`, `docker build` lo copiaría así a la imagen y una app que no corre como root
+no lo podría leer. Los archivos propios del agent (su estado) se crean con permisos explícitos, así
+que no cambian.
 
 ## Consecuencias
 
@@ -167,6 +173,30 @@ antes en el laboratorio.
   `preflight` y no arranca.
 - Un registro privado de imágenes necesitaría credenciales en `DOCKER_CONFIG`. Hoy los proyectos
   compilan en el servidor y bajan imágenes públicas; queda en la lista de "más adelante".
+
+## Verificación
+
+Probado el 2026-09-30 en el job `laboratorio` del CI (`deploy/laboratorio/deploy.sh`), con systemd
+255, Docker 28.0.4, Compose 2.38.2 y git 2.55, corriendo la unidad real con una sonda que hace como
+`statussv` lo mismo que el motor, contra un proyecto Compose mínimo clonado por root:
+
+| Comprobación | Resultado |
+| --- | --- |
+| Sin `20-deploy.conf`: escribir en el `workdir` y `git fetch` | rechazados, como tiene que ser |
+| `git` sin `safe.directory` sobre un `workdir` de root | se niega; con `-c safe.directory` funciona |
+| `fetch` de un repo, `merge-base --is-ancestor`, `status` limpio y `checkout -B` | funcionan |
+| Modo del archivo nuevo después del checkout | `664` con `UMask=0002` |
+| Hook `post-checkout` plantado en el `workdir` | no corre (`core.hooksPath=/dev/null`) |
+| `ssh` a github.com con la deploy key, `BatchMode` y `known_hosts` propio | negocia; GitHub rechaza la llave, que es lo esperado |
+| `docker compose build`, `run --rm`, `up -d --no-build` | funcionan; el contenedor queda `healthy` y el sitio responde |
+| Etiquetar la imagen por la API de Docker | `201` |
+| Escribir en `/etc` o en el `workdir` de otro proyecto | rechazado |
+| Pico de memoria de la unidad con los techos base (64M) | **64 MiB: toca el techo** con un proyecto de juguete |
+| Pico de memoria y de tareas con `20-deploy.conf` | 45 MiB y 26 tareas |
+
+Con los techos de la unidad base el deploy de prueba terminó, pero la memoria llegó exactamente al
+máximo: con un build real no alcanza. De ahí `MemoryMax=512M`. `TasksMax=256` queda con margen
+sobre las 26 medidas.
 
 ## Alternativas consideradas
 
