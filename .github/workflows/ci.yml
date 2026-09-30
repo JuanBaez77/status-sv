@@ -37,7 +37,11 @@ jobs:
       - name: Análisis con go vet
         run: make vet
 
+      # STATUSSV_TEST_DOCKER prende las pruebas que usan el Docker del runner
+      # (el motor de deploy compila y levanta un proyecto de juguete).
       - name: Tests con detector de carreras
+        env:
+          STATUSSV_TEST_DOCKER: "1"
         run: make test-race
 
       - name: golangci-lint

@@ -91,7 +91,7 @@ queda andando, y lo saca una persona.
 **5. El rollback vuelve a la imagen anterior, sin recompilar.**
 
 - En `snapshot`, el agent lee por la API de Docker el ID de imagen de cada contenedor del proyecto
-  y lo etiqueta `statussv-rollback/<proyecto>-<servicio>:<sha corto>`. Se guardan las de los
+  y lo etiqueta `statussv-rollback/<proyecto>/<servicio>:<sha corto>`. Se guardan las de los
   últimos 3 deploys buenos; las más viejas se desetiquetan (no se borra ninguna imagen: eso lo
   decide el `prune` de quien administre el servidor).
 - Volver atrás es: reetiquetar cada ID anotado con el nombre de imagen que usaba el contenedor,

@@ -1,9 +1,10 @@
 // Package docker lee los contenedores de Docker hablando directo con su socket.
 //
 // Es un cliente propio y mínimo, no el SDK oficial, que suma entre 8 y 10 MB
-// al binario del agent para tres endpoints que devuelven JSON (ADR-011). Solo
-// hace pedidos de lectura: listar contenedores, inspeccionar uno y escuchar
-// el stream de eventos.
+// al binario del agent para tres endpoints que devuelven JSON (ADR-011). Para
+// observar hace pedidos de lectura: listar contenedores, inspeccionar uno y
+// escuchar el stream de eventos. El motor de deploy suma etiquetar imágenes
+// para poder volver atrás (ADR-015), en images.go.
 package docker
 
 import (
@@ -104,6 +105,7 @@ func (c *Client) List(ctx context.Context) ([]Container, error) {
 type Inspection struct {
 	State struct {
 		Status    string    `json:"Status"`
+		ExitCode  int       `json:"ExitCode"`
 		StartedAt time.Time `json:"StartedAt"`
 		Health    *struct {
 			Status string `json:"Status"`
