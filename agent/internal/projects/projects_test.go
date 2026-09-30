@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -172,5 +173,53 @@ func TestClean(t *testing.T) {
 	}
 	if got := clean(strings.Repeat("ñ", 100), 9); len(got) > 9 || !strings.HasPrefix(got, "ññññ") {
 		t.Errorf("clean cortó mal: %q", got)
+	}
+}
+
+func TestReadSpec(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "cristales-baez.yml", cristales+"deploy:\n  pre:\n    - service: backend\n      command: [python, manage.py, migrate]\n")
+	write(t, dir, "facturas.yaml", facturas)
+	write(t, dir, "roto.yaml", "name: roto\n")
+
+	spec, err := ReadSpec(dir, "cristales-baez")
+	if err != nil {
+		t.Fatalf("ReadSpec: %v", err)
+	}
+	if spec.Project.ComposeProject != "cristales-baez" || len(spec.Pre) != 1 || spec.Pre[0].Service != "backend" {
+		t.Errorf("spec = %+v", spec)
+	}
+	if _, err := ReadSpec(dir, "facturas"); err != nil {
+		t.Errorf("facturas: %v", err)
+	}
+	for _, name := range []string{"no-existe", "../etc/passwd", "", "Cristales"} {
+		if _, err := ReadSpec(dir, name); !errors.Is(err, ErrNotDeclared) {
+			t.Errorf("ReadSpec(%q) = %v, se esperaba ErrNotDeclared", name, err)
+		}
+	}
+	if _, err := ReadSpec(dir, "roto"); err == nil || errors.Is(err, ErrNotDeclared) {
+		t.Errorf("un archivo inválido tiene que dar su error: %v", err)
+	}
+
+	write(t, dir, "facturas.yml", facturas)
+	if _, err := ReadSpec(dir, "facturas"); err == nil {
+		t.Error("con .yaml y .yml a la vez no tendría que valer ninguno")
+	}
+}
+
+func TestReadSpecRejectsSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("los enlaces simbólicos necesitan permisos especiales en Windows")
+	}
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "afuera.yaml")
+	if err := os.WriteFile(outside, []byte(cristales), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "cristales-baez.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSpec(dir, "cristales-baez"); err == nil {
+		t.Fatal("ReadSpec siguió un enlace simbólico")
 	}
 }
