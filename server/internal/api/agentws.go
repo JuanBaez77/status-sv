@@ -84,6 +84,7 @@ func (s *Server) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 		metrics:  rate.NewLimiter(metricsPerSecond, metricsBurst),
 		runtime:  rate.NewLimiter(runtimePerSecond, runtimeBurst),
 		projects: rate.NewLimiter(projectsPerSecond, projectsBurst),
+		deploys:  rate.NewLimiter(deployEventsPerSecond, deployEventsBurst),
 	}
 	err = s.readLoop(ctx, conn, server, limits)
 
@@ -153,6 +154,9 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, s
 
 	case proto.TypeProjectsState:
 		return s.handleProjectsState(ctx, conn, server, limits.projects, envelope)
+
+	case proto.TypeDeployEvent:
+		return s.handleDeployEvent(ctx, conn, server, limits.deploys, envelope)
 
 	default:
 		s.replyError(ctx, conn, envelope.ID, proto.CodeInvalidMessage,

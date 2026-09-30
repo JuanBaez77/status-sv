@@ -27,6 +27,7 @@ type channelLimits struct {
 	metrics  *rate.Limiter
 	runtime  *rate.Limiter
 	projects *rate.Limiter
+	deploys  *rate.Limiter
 }
 
 // handleRuntimeState guarda una foto de runtime y le contesta al agent:

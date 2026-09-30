@@ -171,6 +171,43 @@ func (s *Service) VerifyTOTP(ctx context.Context, session Session, code, ip, use
 	return token, full, nil
 }
 
+// ConfirmAction verifica un código TOTP nuevo de una sesión completa, para una
+// acción que lo pide además de la sesión: desplegar en producción (ADR-017).
+// El código queda usado y no sirve dos veces. No acepta códigos de
+// recuperación: esos son para entrar, no para confirmar.
+//
+// Un código equivocado no cierra la sesión; lo que frena probar códigos es el
+// límite por IP del handler.
+func (s *Service) ConfirmAction(ctx context.Context, session Session, code string) error {
+	if !session.Full() {
+		return ErrWrongStage
+	}
+	user, err := s.user(ctx, session.UserID)
+	if err != nil {
+		return err
+	}
+	if user.TotpSecret == nil {
+		return ErrWrongStage
+	}
+	secret, err := s.totpKey.Open(user.TotpSecret, user.ID[:])
+	if err != nil {
+		return err
+	}
+	step, ok := auth.VerifyTOTP(secret, code, s.now(), user.TotpLastStep)
+	if !ok {
+		return ErrInvalidCode
+	}
+	n, err := s.q.AdvanceTOTPStep(ctx, store.AdvanceTOTPStepParams{ID: user.ID, Step: step})
+	if err != nil {
+		return fmt.Errorf("anotar el código usado: %w", err)
+	}
+	if n == 0 {
+		// Otro pedido usó el mismo código un instante antes.
+		return ErrInvalidCode
+	}
+	return nil
+}
+
 // VerifyRecoveryCode pasa una sesión a medias a completa con un código de
 // recuperación, que queda usado.
 func (s *Service) VerifyRecoveryCode(ctx context.Context, session Session, code, ip, userAgent string) (auth.Secret, Session, error) {
