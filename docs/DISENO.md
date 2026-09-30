@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-09-28
+Última actualización: 2026-09-30
 
 ## Visión y alcance
 
@@ -107,12 +107,12 @@ Catorce entidades cubren el MVP. Las métricas crudas y agregadas viven particio
 | `agent_credentials` | Hash de credencial por agent, fecha de emisión y revocación. | Se guarda solo el hash. |
 | `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
 | `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno, y el último resultado del healthcheck. | Nace del `project.yaml` que el agent lee en su servidor; el control plane no lo puede crear ni cambiar ([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)). |
-| `deploys` | Proyecto, referencia (commit o tag), estado, iniciador, tiempos, logs resumidos. | Estados: pending, approved, running, succeeded, failed, rolled_back. |
+| `deploys` | Proyecto, tipo (deploy o rollback), commit pedido y desplegado, commit anterior, estado, quién lo pidió, tiempos y la foto de sus pasos con los últimos renglones de cada uno. | Estados: pending, running, succeeded, failed, rolled_back (approved llega con las aprobaciones de la Fase 3). Un solo deploy activo por proyecto ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md), [ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md)). |
 | `runtime_units` | Último estado conocido de cada contenedor, servicio y proceso no gestionado de un servidor: nombre, estado, consumo y cuándo se lo vio. `runtime_sources` guarda si cada fuente (Docker, systemd, procesos) se pudo leer, y `servers.runtime_taken_at` la marca de la última foto. | Se reemplaza con cada `runtime_state`; no guarda historia. |
 | `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
 | `metrics_1m` | Lo mismo agregado por minuto: promedio y máximo de CPU, iowait, memoria y swap, el peor momento de cada disco y tasas de red. También con `metrics_1m_disks` y `metrics_1m_networks`. | Partición mensual, retención 30 días. |
 | `metrics_1h` | Agregado por hora desde `metrics_1m`: mínimo y promedio de los promedios por minuto, y máximo de los máximos. También con `metrics_1h_disks` y `metrics_1h_networks`. | Partición mensual, retención 1 año. |
-| `audit_log` | Actor, tipo de actor (persona o LLM), acción, objetivo, resultado, IP. | Solo inserciones. |
+| `audit_log` | Actor, tipo de actor (persona, LLM, agent o sistema), acción, objetivo, resultado, IP y un detalle corto. | Solo inserciones: un trigger rechaza UPDATE, DELETE y TRUNCATE. Entra en el Sprint 4 ([ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md)). |
 
 **Tablas de acceso**
 
@@ -154,7 +154,7 @@ El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Desp
 | Agent → servidor | `metrics` | Lote de muestras de CPU, RAM, disco, red y carga. | Cada 5 a 10 s |
 | Agent → servidor | `runtime_state` | Foto completa de contenedores, servicios y procesos no gestionados, con su estado y consumo. | Al cambiar algo, y cada tanto con el consumo al día |
 | Agent → servidor | `projects_state` | Proyectos declarados en el servidor, los archivos inválidos (sin su contenido) y el resultado del healthcheck. | Al cambiar algo, y cada 5 minutos |
-| Agent → servidor | `deploy_event` | Avance y resultado de un deploy. | Por evento |
+| Agent → servidor | `deploy_event` | Foto completa de un deploy: pasos, commits, resultado y los últimos renglones enmascarados de cada paso ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)). | Al cambiar de paso, y al reconectar si quedó sin confirmar |
 | Agent → servidor | `heartbeat` | Vivo y versión. | Cada 15 s |
 | Servidor → agent | `command` | Operación predefinida con parámetros validados. | A demanda |
 | Servidor → agent | `config_update` | Nuevos intervalos o proyectos declarados. | A demanda |
@@ -344,14 +344,21 @@ healthcheck:
   expect_status: 200
   timeout_seconds: 10      # de 1 a 30
 deploy:
-  pre: []                  # vacío hasta que el Sprint 4 defina los pasos declarados
-  post: []
+  pre:                     # después del build y antes del up (ADR-016)
+    - service: backend
+      command: ["python", "manage.py", "migrate", "--noinput"]
+      timeout_seconds: 300 # de 1 a 1800
+  post: []                 # después de verificar
 rollback: previous_image
 ```
 
 Un proyecto de systemd lleva `runtime: systemd` y, en vez de `compose_file` y `compose_project`,
 la lista de sus servicios en `units` (por ejemplo `[gunicorn-cristales.service]`). El campo `server`
-ya no existe: el servidor es el que tiene el archivo.
+ya no existe: el servidor es el que tiene el archivo. Los pasos `pre` y `post` son solo para Docker
+hasta el Sprint 5.
+
+Para desplegar, el agent trae el código de `repo` con la deploy key del proyecto, si tiene una, en
+`/etc/status-sv/keys/<nombre>` ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
 
 El ejemplo usa datos ilustrativos; los valores reales los definís vos por proyecto.
 
@@ -380,9 +387,9 @@ El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, 
 
 Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
 
-## Sprints 0 a 3
+## Sprints 0 a 4
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos) y el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, y el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -591,18 +598,84 @@ Lecciones del despliegue:
 - **Actualizar `STATUSSV_VERSION` sin copiar el código nuevo** compila la versión vieja con la
   etiqueta nueva. `migrate status` lo delata: lista solo las migraciones que conoce el binario.
 
-Queda para decidir antes del Sprint 4: [ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)
-pide mudar el control plane antes de las herramientas de escritura (el deploy del Sprint 4) y antes de
-un segundo cliente con agent. La mudanza está escrita en
-[ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) y en la sección 6 del runbook.
+Quedaba para decidir antes del Sprint 4 que [ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)
+pide mudar el control plane antes de las herramientas de escritura. Se resolvió al abrir el Sprint 4:
+el deploy se construye con un interruptor por servidor que viene apagado
+([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
+
+**Sprint 4 (2 semanas): deploy de proyectos Docker**
+
+Objetivo: desplegar desde el panel un proyecto Docker declarado, en la punta de su rama o en un
+commit de esa rama, con verificación, rollback automático, historial y auditoría. Las siete
+decisiones que lo abrían las tomó Juan el 2026-09-30, aceptando las recomendaciones del plan:
+[ADR-015](adr/ADR-015-motor-de-deploy-docker.md) (el motor), [ADR-016](adr/ADR-016-pasos-declarados-del-deploy.md)
+(los pasos declarados) y [ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md) (el disparo
+desde el panel y `audit_log`).
+
+- **El deploy viene apagado en cada agent.** Lo prende una persona en el servidor con el drop-in
+  `20-deploy.conf`. Prenderlo en producción exige antes mudar el control plane
+  ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)) o enmendar ADR-007 a sabiendas.
+- **El primer proyecto real** es uno de poco riesgo (`gcg-alertas-nbcargo`), no `cristales-baez`.
+
+Contrato
+
+- [ ] `command` con las operaciones `deploy` (proyecto y, opcional, un SHA de 40 caracteres) y
+      `rollback` (proyecto), y el código de rechazo `disabled`.
+- [ ] Mensajes `deploy_event` y `deploy_event_ack`: foto completa del deploy con número de
+      secuencia, topes de pasos y de renglones, y archivos golden.
+
+Agent
+
+- [ ] Laboratorio: la unidad con el drop-in de deploy ejecutando `git` (con `ssh`) y
+      `docker compose` como `statussv`, con `ReadWritePaths`, `MemoryMax` y el filtro de syscalls.
+      Se mide antes de programar.
+- [ ] `project.yaml` con el formato de `deploy.pre` y `deploy.post` (ADR-016).
+- [ ] `gitops`: `fetch` de la rama declarada, verificación de que el commit pedido es ancestro de
+      la punta, árbol limpio y checkout, con `git` endurecido y la deploy key del proyecto.
+- [ ] `compose`: `build`, `up`, `run` de los pasos y la foto y el reetiquetado de imágenes por la
+      API de Docker.
+- [ ] Motor de deploy: pasos en orden, ventana de verificación, rollback automático, diario en
+      disco, un deploy a la vez y la salida enmascarada y acotada.
+- [ ] El agent atiende `deploy` y `rollback`, respeta el interruptor, manda `deploy_event` y, si se
+      reinició a mitad de un deploy, vuelve atrás y lo informa.
+
+Servidor
+
+- [ ] Migración de `deploys` (con el índice que impide dos activos por proyecto) y `audit_log` de
+      solo inserción.
+- [ ] `POST /v1/projects/{id}/deploys`, `POST /v1/projects/{id}/rollback`, historial y detalle,
+      con el código TOTP en producción, el avance empujado por el WebSocket del panel y todo en
+      `audit_log`.
+
+Panel
+
+- [ ] Desplegar y volver atrás desde la vista de un proyecto, con confirmación; avance en vivo por
+      paso, con su salida; historial de deploys.
+
+Calidad y despliegue
+
+- [ ] Prueba de punta a punta del deploy en CI, con Docker de verdad y un proyecto Compose de
+      muestra: deploy bueno, deploy roto que vuelve atrás solo, dos pedidos a la vez y el agent
+      reiniciado a mitad de un deploy. Mide la meta de inicio de un deploy (menos de 3 s).
+- [ ] Instalador (`--enable-deploy` y el drop-in) y runbook: llaves, `known_hosts`, permisos del
+      `workdir` y cómo prender el deploy.
+- [ ] Desplegar el sprint y probar un deploy real en un proyecto de poco riesgo.
+
+Terminado cuando un proyecto Docker real se despliega desde el panel; un deploy roto a propósito
+vuelve atrás solo y el sitio sigue respondiendo; el historial y `audit_log` registran los dos; el
+agent sigue por debajo de 30 MB de RAM y 1% de CPU en reposo; y el CI está verde, con el e2e del
+deploy.
+
+Si el sprint se estira, la línea de corte son los pasos declarados: el formato queda fijado en
+ADR-016 y el parser sigue exigiéndolos vacíos.
 
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |
 | --- | --- | --- |
 | 3 | Proyectos y cierre de la Fase 1 | Lectura de `project.yaml`, vista de proyectos, agregado por hora, TOTP y segundo servidor en vivo. |
-| 4 | Deploy Docker | `deploy` con pull, build, healthcheck y rollback automático. |
-| 5 | Deploy systemd y auditoría | Deploy de gunicorn, historial de deploys y `audit_log`. |
+| 4 | Deploy Docker | `deploy` con `git fetch`, build, healthcheck y rollback automático; `audit_log` mínimo. |
+| 5 | Deploy systemd y auditoría | Deploy de gunicorn, vista de auditoría en el panel y el deploy desde cero. |
 | 6 | MCP de lectura y tokens | Herramientas de lectura, tokens con scopes, conexión con Claude Code. |
 | 7 | MCP de escritura y aprobaciones | `deploy`, `rollback` y `restart` con aprobación humana en el panel. |
 
@@ -615,7 +688,7 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 | Alcance que crece antes de tener el MVP | Alto | Las Fases 1 a 3 son el límite; las ideas nuevas van a la lista de "más adelante". |
 | Curva de aprendizaje de Go | Medio | El Sprint 0 arma algo real y acotado; el agent es chico y sirve para aprender. |
 | El control plane es un punto único de falla | Medio | Los proyectos siguen corriendo si cae; se agregan backups de PostgreSQL y un restore probado. |
-| Un deploy automático rompe producción | Alto | Healthcheck, rollback automático, aprobación humana y bloqueo de deploys simultáneos. |
+| Un deploy automático rompe producción | Alto | Healthcheck, rollback automático, aprobación humana, bloqueo de deploys simultáneos y un interruptor por servidor que viene apagado. |
 | Proyectos gunicorn fuera de systemd | Medio | Pasarlos a systemd durante la Fase 2; hasta entonces quedan en solo lectura. |
 | Prompt injection sobre el LLM | Alto | Herramientas acotadas, aprobaciones y auditoría (ver Seguridad). |
 | El volumen de métricas crece más de lo previsto | Bajo | Particionado y retención escalonada; TimescaleDB si hiciera falta. |
