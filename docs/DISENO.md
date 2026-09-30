@@ -87,7 +87,7 @@ Go en agent y servidor, PostgreSQL como base, y React con Vite para el panel. La
 | Estado del front | TanStack Query + WebSocket | Datos en vivo sin polling. |
 | Contratos | JSON versionado en `proto/` ([ADR-003](adr/ADR-003-contratos-json-versionado.md)) | Un solo origen para los mensajes agent ↔ servidor, legible al depurar. |
 | Smoke tests | Playwright | En un worker aparte, porque el navegador es pesado. |
-| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; hoy corre detrás del nginx de un cliente ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)). |
+| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un VPS dedicado, con Cloudflare adelante ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md), que reemplaza a ADR-007). |
 
 **Sobre PostgreSQL**
 
@@ -553,8 +553,11 @@ Calidad y despliegue
 
 - [ ] Lighthouse y latencia métrica → pantalla medidas en CI: son las dos metas de la Fase 1 que
       faltaba verificar.
-- [ ] Control plane en un VPS propio con Caddy, los dos agents apuntando ahí, y un ADR que reemplaza
-      a ADR-007. Incluye desplegar #41 (migración 00005).
+- [x] [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md), que reemplaza a ADR-007, y la mudanza en
+      el runbook (sección 6): se muda la base entera, así los agents no se reenrolan. Caddy toma la
+      IP real de Cloudflare y comprime, como nginx.
+- [ ] Hacer la mudanza al VPS propio y sumar el agent del segundo servidor: los dos agents apuntando
+      ahí. Incluye desplegar #41 (migración 00005) y lo que llegó en este sprint (00006 a 00008).
 
 Terminado cuando dos VPS reales se ven en vivo en el panel, cada uno con al menos un proyecto ligado
 a sus contenedores o servicios; los rangos de 30 días y un año se dibujan desde `metrics_1h`; el
