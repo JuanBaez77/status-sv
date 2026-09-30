@@ -546,8 +546,9 @@ Proyectos
 - [ ] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
       y el cambio empujado por el WebSocket del panel.
 - [ ] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
-- [ ] Healthcheck pasivo desde el agent cada 60 s. **Línea de corte**: si el sprint se estira, pasa
-      al Sprint 4.
+- [x] Healthcheck pasivo desde el agent cada 60 s: `GET` sin seguir redirecciones, verificando el
+      certificado y sin leer el cuerpo. El resultado sale en `projects_state` solo cuando pasa de bien
+      a mal o al revés, y la hora del último chequeo con el reenvío de los 5 minutos.
 
 Calidad y despliegue
 

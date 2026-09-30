@@ -125,7 +125,7 @@ func TestRunnerSendsOnlyChanges(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "facturas.yaml", facturas)
 	box := NewOutbox()
-	r := NewRunner(dir, box, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := NewRunner(dir, box, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	now := t0
 	r.now = func() time.Time { return now }
 

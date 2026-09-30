@@ -69,10 +69,11 @@ func runAgent(ctx context.Context, args []string) error {
 		runner := runtimestate.NewRunner(parts.assembler, outbox, log, parts.dockerSource, parts.systemdSource)
 		wg.Go(func() { runner.Run(ctx) })
 
-		// Los proyectos declarados en el servidor (ADR-012), en solo lectura.
+		// Los proyectos declarados en el servidor (ADR-012), en solo lectura,
+		// con su healthcheck pasivo cada minuto.
 		projectsOutbox := projects.NewOutbox()
 		client.SetProjects(projectsOutbox)
-		declared := projects.NewRunner(cfg.ProjectsDir, projectsOutbox, log)
+		declared := projects.NewRunner(cfg.ProjectsDir, projectsOutbox, projects.NewChecker(buildinfo.Version), log)
 		wg.Go(func() { declared.Run(ctx) })
 	}
 
