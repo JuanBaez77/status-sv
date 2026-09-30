@@ -46,3 +46,8 @@ roadmap de [DISENO.md](DISENO.md).
   checksum. El diseño ya lo pide para la Fase 4 (actualizaciones firmadas del agent).
 - **Revocar agents desde el panel.** Hoy se revoca con una sentencia SQL a mano (ver el runbook).
 - **Backups de PostgreSQL** del control plane, con un restore probado. Está en los riesgos del diseño.
+- **Mover el control plane a un VPS propio.** Hoy vive en el servidor de un cliente
+  ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)). La mudanza está escrita en
+  [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) y en la sección 6 del runbook, y Juan la
+  postergó el 2026-09-30. ADR-007 pide hacerla antes de las alertas, de un segundo cliente con
+  agent o de las herramientas de escritura (el deploy del Sprint 4).

@@ -1,7 +1,12 @@
 # ADR-014: El control plane vive en un VPS propio, detrás de Caddy
 
-- **Estado:** aceptada
+- **Estado:** propuesta
 - **Fecha:** 2026-09-30
+
+> **Postergada.** El 2026-09-30 Juan decidió no mudar el control plane por ahora: sigue en
+> `cristales-baez-prod`, detrás de su nginx, y [ADR-007](ADR-007-control-plane-en-servidor-de-cliente.md)
+> sigue vigente. Este ADR queda como el plan listo para cuando se haga, con la mudanza en la
+> sección 6 del runbook; se acepta recién ese día.
 
 ## Contexto
 
