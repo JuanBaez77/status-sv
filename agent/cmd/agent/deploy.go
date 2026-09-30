@@ -79,7 +79,9 @@ func hidden(workdir string) bool {
 // archivo de Compose y el acceso a Docker. Trae la rama declarada (eso solo
 // escribe refs/remotes/statussv), así se prueba también la deploy key.
 //
-// Se corre como el usuario del agent: sudo runuser -u statussv -- statussv-agent deploy-check tienda
+// Se corre como el usuario del agent, con sus grupos:
+//
+//	sudo runuser -u statussv -g statussv -G docker -- statussv-agent deploy-check tienda
 func runDeployCheck(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("deploy-check", flag.ContinueOnError)
 	if err := flags.Parse(args); err != nil {

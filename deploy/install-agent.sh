@@ -255,10 +255,12 @@ if [ "${DEPLOY_ON}" = true ] && [ -n "${PATHS}" ]; then
   while read -r proyecto _; do
     [ -n "${proyecto}" ] || continue
     paso "revisando el deploy de ${proyecto}"
-    # Con el grupo docker, como lo tiene el servicio por su drop-in.
+    # Con el grupo docker, como lo tiene el servicio por su drop-in. El -g hace
+    # falta: sin él, runuser usa el primer -G como grupo primario y statussv
+    # pierde su propio grupo (y la lectura de projects.d).
     # STATUSSV_DEPLOY_ALLOW_FILE_REPOS pasa solo si viene del entorno: es para
     # el laboratorio, que usa un repo file://.
-    runuser -u "${SERVICE_USER}" -G docker -- env STATUSSV_STATE_FILE="${STATE_FILE}" \
+    runuser -u "${SERVICE_USER}" -g "${SERVICE_USER}" -G docker -- env STATUSSV_STATE_FILE="${STATE_FILE}" \
       STATUSSV_PROJECTS_DIR="${PROJECTS_DIR}" STATUSSV_DEPLOY_ENABLED=true \
       ${STATUSSV_DEPLOY_ALLOW_FILE_REPOS:+STATUSSV_DEPLOY_ALLOW_FILE_REPOS="${STATUSSV_DEPLOY_ALLOW_FILE_REPOS}"} \
       "${BINARY_DEST}" deploy-check "${proyecto}" \

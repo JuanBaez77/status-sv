@@ -516,7 +516,7 @@ que corre: revisa la declaración, la llave, los permisos, trae la rama (con la 
 y valida el archivo de Compose. Se puede correr solo cuando haga falta:
 
 ```bash
-sudo runuser -u statussv -G docker -- /usr/local/bin/statussv-agent deploy-check <PROYECTO>
+sudo runuser -u statussv -g statussv -G docker -- /usr/local/bin/statussv-agent deploy-check <PROYECTO>
 ```
 
 Después de declarar un proyecto nuevo, correr el instalador otra vez (sin flags, o con
