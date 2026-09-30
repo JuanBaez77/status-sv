@@ -4,6 +4,8 @@ import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSession } from '@/hooks/use-session'
 import { LoginPage } from '@/pages/login'
+import { ProjectPage } from '@/pages/project'
+import { ProjectsPage } from '@/pages/projects'
 import { ServerPage } from '@/pages/server'
 import { ServersPage } from '@/pages/servers'
 import { TotpEnrollPage, TotpVerifyPage } from '@/pages/totp'
@@ -50,6 +52,10 @@ export default function App() {
         <Route path="/" component={ServersPage} />
 
         <Route path="/servers/:id">{(params) => <ServerPage id={params.id} />}</Route>
+
+        <Route path="/projects" component={ProjectsPage} />
+
+        <Route path="/projects/:id">{(params) => <ProjectPage id={params.id} />}</Route>
 
         <Route>
           <Card>

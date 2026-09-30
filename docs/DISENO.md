@@ -546,7 +546,7 @@ Proyectos
       se calcula al leer.
 - [x] `GET /v1/projects` y `GET /v1/projects/{id}` con el estado derivado (bien, degradado o caído),
       y el cambio empujado por el WebSocket del panel.
-- [ ] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
+- [x] Vista de proyectos en el panel (lista y detalle), con enlaces desde la vista de un servidor.
 - [x] Healthcheck pasivo desde el agent cada 60 s: `GET` sin seguir redirecciones, verificando el
       certificado y sin leer el cuerpo. El resultado sale en `projects_state` solo cuando pasa de bien
       a mal o al revés, y la hora del último chequeo con el reenvío de los 5 minutos.

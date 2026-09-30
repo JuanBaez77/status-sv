@@ -170,6 +170,19 @@ describe('PanelSocket', () => {
     expect(FakeWebSocket.sockets).toHaveLength(1)
   })
 
+  it('avisa cuando cambian los proyectos de un servidor', () => {
+    const panel = new PanelSocket(openFake)
+    const listener = vi.fn()
+
+    panel.subscribeProjects(serverA, listener)
+    FakeWebSocket.last.connect()
+    FakeWebSocket.last.receive({ type: 'projects', server_id: serverA })
+    FakeWebSocket.last.receive({ type: 'projects', server_id: serverB })
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(FakeWebSocket.last.requests).toEqual([{ type: 'subscribe', server_ids: [serverA] }])
+  })
+
   it('aguanta un mensaje que no es JSON', () => {
     const panel = new PanelSocket(openFake)
     const listener = vi.fn()
