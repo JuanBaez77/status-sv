@@ -145,3 +145,49 @@ jobs:
       # el latido llegue a la base y sobreviva a un reinicio del control plane.
       - name: Prueba de punta a punta
         run: ./deploy/e2e/run.sh
+
+  metas:
+    name: "Metas del panel: Lighthouse y latencia métrica → pantalla"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: statussv
+          POSTGRES_PASSWORD: statussv
+          POSTGRES_DB: statussv_metas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U statussv -d statussv_metas"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            deploy/metas/package-lock.json
+
+      - name: Dependencias del panel
+        run: npm ci --prefix web
+
+      # Levanta el control plane con el panel adentro y un agent de verdad, y
+      # mide la carga con Lighthouse y la latencia de cada muestra hasta que se
+      # dibuja. Los números quedan en el resumen del job.
+      - name: Medición de las metas
+        env:
+          DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_metas?sslmode=disable
+          CHROME_PATH: /usr/bin/google-chrome
+        run: ./deploy/metas/run.sh
