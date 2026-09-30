@@ -306,7 +306,7 @@ func (r *run) waitHealthy(ctx context.Context, tail *runner.Tail, window time.Du
 			passes = 0
 		}
 		if !r.e.now().Before(deadline) {
-			return "", deployError(proto.DeployUnhealthy, "no quedó bien en %s: %s", window, detail)
+			return "", deployError(proto.DeployUnhealthy, "no quedó bien en %d s: %s", int(window.Seconds()), detail)
 		}
 		if err := r.e.sleep(ctx, verifyInterval); err != nil {
 			return "", err

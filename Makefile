@@ -101,6 +101,10 @@ sqlc-check: ## Falla si el código generado no coincide con las queries
 test-e2e: ## Prueba de punta a punta con Docker: control plane, base y agent
 	./deploy/e2e/run.sh
 
+.PHONY: test-e2e-deploy
+test-e2e-deploy: ## Deploy de punta a punta con el Docker de la máquina (necesita DATABASE_URL)
+	./deploy/e2e/deploy.sh
+
 .PHONY: test-carga
 test-carga: ## Prueba de carga: 10 agents simulados y las metas de rendimiento
 	./deploy/carga/run.sh
