@@ -57,7 +57,8 @@ las dos cosas; en local sirve una máquina descartable con systemd y Docker (WSL
 instalado adentro, no el de Docker Desktop).
 
 ```bash
-sudo ./deploy.sh   # prepara, corre los tres casos y limpia lo suyo al salir
+sudo ./deploy.sh                           # prepara, corre los casos A, C y B y limpia al salir
+sudo AGENT_BIN=/tmp/statussv-agent ./deploy.sh   # además, el caso D con el instalador
 ```
 
 Arma un proyecto Compose mínimo con dos commits en un repo `file://`, lo clona como root en
@@ -70,6 +71,7 @@ deploy key. Después corre la unidad real con `sonda-deploy.sh`:
 | A | `10-docker.conf` | El `workdir` es de solo lectura y el `fetch` falla |
 | C | más `20-deploy.conf` sin subir los techos (64M, 64 tareas) | Solo se mide |
 | B | más `20-deploy.conf` completo | Todo lo que sigue anda |
+| D | `install-agent.sh --enable-deploy` con el agent de verdad (si `AGENT_BIN` apunta a su binario) | El drop-in con el `workdir` declarado, el servicio andando con el deploy prendido, `deploy-check` aprobando el proyecto y `--disable-deploy` sacando el drop-in |
 
 En el caso B, la sonda comprueba: `git` sin `safe.directory` se niega (el `workdir` es de root) y
 con él hace `fetch`, `merge-base --is-ancestor`, `status` limpio y `checkout -B`; el archivo nuevo

@@ -195,9 +195,18 @@ jobs:
       # Corre la unidad endurecida de verdad bajo el systemd del runner, con una
       # sonda que hace como statussv lo que hace el motor de deploy (git,
       # docker compose y la API de Docker) contra un Docker de verdad
-      # (ADR-015). Si alguien endurece la unidad de más, esto lo ve.
+      # (ADR-015). Si alguien endurece la unidad de más, esto lo ve. Con el
+      # binario del agent, además, prueba el instalador con --enable-deploy.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Binario del agent
+        run: CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/statussv-agent" ./agent/cmd/agent
+
       - name: Laboratorio del deploy
-        run: sudo bash ./deploy/laboratorio/deploy.sh
+        run: sudo AGENT_BIN="${RUNNER_TEMP}/statussv-agent" bash ./deploy/laboratorio/deploy.sh
 
   metas:
     name: "Metas del panel: Lighthouse y latencia métrica → pantalla"

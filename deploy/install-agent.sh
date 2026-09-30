@@ -13,6 +13,12 @@
 # Correrlo de nuevo actualiza el binario y la unidad sin volver a enrolar. Para
 # forzar un enrolamiento nuevo (con un token nuevo): --reenroll.
 #
+# El deploy (ADR-015) viene apagado. --enable-deploy lo prende en este servidor:
+# escribe el drop-in 20-deploy.conf con los workdir de los proyectos declarados
+# y revisa cada proyecto con deploy-check. Correr el script de nuevo, con el
+# deploy prendido, actualiza los workdir (por ejemplo, después de declarar un
+# proyecto nuevo). --disable-deploy lo apaga.
+#
 set -euo pipefail
 
 readonly SERVICE="statussv-agent"
@@ -23,6 +29,10 @@ readonly STATE_DIR="/var/lib/status-sv"
 readonly STATE_FILE="${STATE_DIR}/agent.json"
 readonly DROPIN_DIR="/etc/systemd/system/${SERVICE}.service.d"
 readonly DROPIN_DOCKER="${DROPIN_DIR}/10-docker.conf"
+readonly DROPIN_DEPLOY="${DROPIN_DIR}/20-deploy.conf"
+# Las deploy keys, una por proyecto, y los host keys del servidor de git
+# (ADR-015). Las pone una persona.
+readonly KEYS_DIR="/etc/status-sv/keys"
 # Los proyectos del servidor los declara una persona; el agent solo los lee
 # (ADR-012).
 readonly PROJECTS_DIR="/etc/status-sv/projects.d"
@@ -36,7 +46,7 @@ paso() { printf '\n==> %s\n' "$*"; }
 
 uso() {
   cat >&2 <<'USO'
-Uso: install-agent.sh [--reenroll] RUTA_AL_BINARIO
+Uso: install-agent.sh [--reenroll] [--enable-deploy | --disable-deploy] RUTA_AL_BINARIO
 
 Variables de entorno:
   STATUSSV_SERVER_URL     dirección del control plane (obligatoria al enrolar)
@@ -48,10 +58,14 @@ USO
 # --- Argumentos ---
 
 REENROLL=false
+# DEPLOY es enable, disable o keep (deja como está).
+DEPLOY=keep
 BINARY_SRC=""
 for arg in "$@"; do
   case "${arg}" in
     --reenroll) REENROLL=true ;;
+    --enable-deploy) DEPLOY=enable ;;
+    --disable-deploy) DEPLOY=disable ;;
     -h|--help) uso ;;
     -*) error "opción desconocida: ${arg}" ;;
     *) BINARY_SRC="${arg}" ;;
@@ -130,6 +144,56 @@ else
   echo "si instalás Docker después, corré este script de nuevo"
 fi
 
+# --- Deploy ---
+
+# El deploy viene apagado (ADR-015): lo prende una persona acá, con
+# --enable-deploy. El drop-in le da al agent lo justo para desplegar: el
+# interruptor, escritura en el workdir de cada proyecto declarado (el guion
+# hace que un workdir borrado no impida arrancar), un umask que deja legible
+# lo que escribe git, y más memoria y tareas para docker compose y git, que
+# corren como hijos del agent.
+DEPLOY_ON=false
+paso "deploy"
+if [ "${DEPLOY}" = disable ]; then
+  rm -f "${DROPIN_DEPLOY}"
+  echo "apagado"
+elif [ "${DEPLOY}" = enable ] || [ -f "${DROPIN_DEPLOY}" ]; then
+  getent group docker >/dev/null || error "para desplegar hace falta Docker (no existe el grupo docker)"
+  command -v git >/dev/null || error "para desplegar hace falta git"
+  docker compose version >/dev/null 2>&1 || error "para desplegar hace falta el plugin de Docker Compose"
+
+  install -d -o root -g "${SERVICE_USER}" -m 0750 "${KEYS_DIR}"
+  # deploy-paths lee los proyectos declarados; lo corre root, que es quien
+  # puede leer el directorio aunque falte el grupo.
+  if ! PATHS="$(STATUSSV_PROJECTS_DIR="${PROJECTS_DIR}" "${BINARY_DEST}" deploy-paths)"; then
+    error "no se pudieron leer los proyectos declarados en ${PROJECTS_DIR}"
+  fi
+
+  install -d -o root -g root -m 0755 "${DROPIN_DIR}"
+  install -o root -g root -m 0644 /dev/null "${DROPIN_DEPLOY}"
+  {
+    echo "# Lo escribe deploy/install-agent.sh --enable-deploy; no editar a mano."
+    echo "# El porqué de cada renglón está en docs/adr/ADR-015-motor-de-deploy-docker.md."
+    echo "[Service]"
+    echo "Environment=STATUSSV_DEPLOY_ENABLED=true"
+    echo "UMask=0002"
+    echo "MemoryMax=512M"
+    echo "TasksMax=256"
+    while read -r _ workdir; do
+      [ -n "${workdir}" ] && echo "ReadWritePaths=-${workdir}"
+    done <<<"${PATHS}"
+  } >"${DROPIN_DEPLOY}"
+  DEPLOY_ON=true
+  echo "prendido; proyectos que se pueden desplegar:"
+  if [ -z "${PATHS}" ]; then
+    echo "  ninguno todavía (declaralos en ${PROJECTS_DIR} y corré este script de nuevo)"
+  else
+    sed 's/^/  /' <<<"${PATHS}"
+  fi
+else
+  echo "apagado (para prenderlo: --enable-deploy)"
+fi
+
 systemctl daemon-reload
 
 # --- Enrolamiento ---
@@ -183,6 +247,23 @@ sleep 5
 if ! systemctl is-active --quiet "${SERVICE}"; then
   journalctl -u "${SERVICE}" -n 30 --no-pager >&2 || true
   error "el servicio no quedó corriendo"
+fi
+
+# Con el deploy prendido, cada proyecto se revisa como lo va a ver el agent:
+# con su usuario. No frena la instalación: dice qué falta arreglar.
+if [ "${DEPLOY_ON}" = true ] && [ -n "${PATHS}" ]; then
+  while read -r proyecto _; do
+    [ -n "${proyecto}" ] || continue
+    paso "revisando el deploy de ${proyecto}"
+    # Con el grupo docker, como lo tiene el servicio por su drop-in.
+    # STATUSSV_DEPLOY_ALLOW_FILE_REPOS pasa solo si viene del entorno: es para
+    # el laboratorio, que usa un repo file://.
+    runuser -u "${SERVICE_USER}" -G docker -- env STATUSSV_STATE_FILE="${STATE_FILE}" \
+      STATUSSV_PROJECTS_DIR="${PROJECTS_DIR}" STATUSSV_DEPLOY_ENABLED=true \
+      ${STATUSSV_DEPLOY_ALLOW_FILE_REPOS:+STATUSSV_DEPLOY_ALLOW_FILE_REPOS="${STATUSSV_DEPLOY_ALLOW_FILE_REPOS}"} \
+      "${BINARY_DEST}" deploy-check "${proyecto}" \
+      || echo "(el deploy de ${proyecto} no va a andar hasta arreglar lo de arriba; ver docs/runbook-despliegue.md)"
+  done <<<"${PATHS}"
 fi
 
 paso "listo"

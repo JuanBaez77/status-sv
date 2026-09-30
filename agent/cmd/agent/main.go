@@ -7,6 +7,8 @@
 //	agent run                        mantiene el canal abierto
 //	agent sample                     imprime una muestra de métricas, sin conectarse
 //	agent runtime                    imprime la foto de contenedores, servicios y procesos
+//	agent deploy-check PROYECTO      revisa que un proyecto se pueda desplegar
+//	agent deploy-paths               lista los workdirs que el deploy tiene que poder escribir
 //	agent version                    imprime la versión
 package main
 
@@ -53,6 +55,10 @@ func run(ctx context.Context, args []string) error {
 		return runRuntime(ctx, args[1:])
 	case "sample":
 		return runSample(ctx, args[1:])
+	case "deploy-check":
+		return runDeployCheck(ctx, args[1:])
+	case "deploy-paths":
+		return runDeployPaths(ctx, args[1:])
 	case "version", "--version", "-version":
 		fmt.Println(buildinfo.Line(name))
 		return nil
@@ -75,6 +81,10 @@ Uso:
                                     conectarse: sirve para ver qué lee el agent
   agent runtime [--interval 1s]     imprime la foto de contenedores, servicios y
                                     procesos como JSON, sin conectarse
+  agent deploy-check PROYECTO       revisa, sin tocar lo que corre, que el proyecto se
+                                    pueda desplegar (correrlo como el usuario del agent)
+  agent deploy-paths                lista los proyectos de Docker y su workdir, para el
+                                    drop-in del deploy
   agent version                     imprime la versión
 
 Configuración (variables de entorno):
@@ -87,6 +97,11 @@ Configuración (variables de entorno):
   STATUSSV_SYSTEMD_EXCLUDE patrones de servicios que no se muestran, separados
                            por comas, además de los de siempre
   STATUSSV_LOG_FORMAT      json o text (por defecto json)
+  STATUSSV_PROJECTS_DIR    proyectos declarados (por defecto /etc/status-sv/projects.d)
+  STATUSSV_DEPLOY_ENABLED  true prende el deploy en este servidor (por defecto apagado)
+  STATUSSV_DEPLOY_KEYS_DIR deploy keys, una por proyecto (por defecto /etc/status-sv/keys)
+  STATUSSV_KNOWN_HOSTS     host keys para traer código por SSH
+                           (por defecto /etc/status-sv/known_hosts)
 `, name, config.DefaultStateFile())
 }
 
