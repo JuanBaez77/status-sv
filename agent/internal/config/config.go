@@ -43,6 +43,18 @@ type Config struct {
 	// (ADR-012). Se cambia solo para desarrollar o probar.
 	ProjectsDir string
 
+	// DeployEnabled es el interruptor del deploy (ADR-015): lo prende una
+	// persona en el drop-in 20-deploy.conf, y sin él el agent rechaza todo
+	// deploy y rollback.
+	DeployEnabled bool
+	// DeployKeysDir es donde están las deploy keys, una por proyecto.
+	DeployKeysDir string
+	// KnownHosts son los host keys conocidos para traer código por SSH.
+	KnownHosts string
+	// AllowFileRepos acepta repos file://. Es solo para la prueba de punta a
+	// punta: en un servidor, el código viene de la red.
+	AllowFileRepos bool
+
 	LogLevel slog.Level
 	LogJSON  bool
 }
@@ -56,6 +68,9 @@ func Load() (Config, error) {
 		LogJSON:      !strings.EqualFold(envOr("STATUSSV_LOG_FORMAT", "json"), "text"),
 		DockerSocket: envOr("STATUSSV_DOCKER_SOCKET", "/run/docker.sock"),
 		ProjectsDir:  envOr("STATUSSV_PROJECTS_DIR", "/etc/status-sv/projects.d"),
+
+		DeployKeysDir: envOr("STATUSSV_DEPLOY_KEYS_DIR", "/etc/status-sv/keys"),
+		KnownHosts:    envOr("STATUSSV_KNOWN_HOSTS", "/etc/status-sv/known_hosts"),
 	}
 
 	level, err := envLevel("STATUSSV_LOG_LEVEL", slog.LevelInfo)
@@ -69,6 +84,13 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.SystemdExclude = exclude
+
+	if cfg.DeployEnabled, err = envBool("STATUSSV_DEPLOY_ENABLED"); err != nil {
+		return Config{}, err
+	}
+	if cfg.AllowFileRepos, err = envBool("STATUSSV_DEPLOY_ALLOW_FILE_REPOS"); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
 }
@@ -121,4 +143,17 @@ func envPatterns(key string) ([]string, error) {
 		patterns = append(patterns, p)
 	}
 	return patterns, nil
+}
+
+// envBool lee un interruptor: true o false, y vacío es false. Cualquier otra
+// cosa es un error: un typo no puede prender ni apagar algo sin avisar.
+func envBool(key string) (bool, error) {
+	switch raw := strings.ToLower(strings.TrimSpace(os.Getenv(key))); raw {
+	case "", "false", "0":
+		return false, nil
+	case "true", "1":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s tiene que ser true o false, llegó %q", key, raw)
+	}
 }

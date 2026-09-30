@@ -3,12 +3,17 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"log/slog"
+	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	"sync"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/collector"
 	"github.com/JuanBaez77/status-sv/agent/internal/commands"
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
+	"github.com/JuanBaez77/status-sv/agent/internal/deploy"
 	"github.com/JuanBaez77/status-sv/agent/internal/journal"
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
@@ -65,7 +70,21 @@ func runAgent(ctx context.Context, args []string) error {
 		client.SetRuntime(outbox)
 		parts := newRuntimeParts(cfg, log)
 		// Los comandos solo operan sobre lo que el agent vio en su última foto.
-		client.SetCommands(commands.NewExecutor(parts.dockerClient, journal.NewReader(), parts.assembler.Knows, log))
+		executor := commands.NewExecutor(parts.dockerClient, journal.NewReader(), parts.assembler.Knows, log)
+		client.SetCommands(executor)
+
+		// El motor de deploy (ADR-015). Viene apagado: lo prende una persona
+		// en el servidor. Apagado igual se arma, para contestar disabled y
+		// para mandar lo que haya quedado de antes.
+		deploys := deploy.NewOutbox()
+		engine, err := newDeployEngine(ctx, cfg, parts, deploys, log)
+		if err != nil {
+			return err
+		}
+		executor.SetDeployer(engine)
+		client.SetDeploys(deploys)
+		wg.Go(engine.Recover)
+		defer engine.Wait()
 		runner := runtimestate.NewRunner(parts.assembler, outbox, log, parts.dockerSource, parts.systemdSource)
 		wg.Go(func() { runner.Run(ctx) })
 
@@ -80,4 +99,33 @@ func runAgent(ctx context.Context, args []string) error {
 	err = client.Run(ctx)
 	wg.Wait()
 	return err
+}
+
+// newDeployEngine arma el motor de deploy con las piezas de verdad. git y
+// docker se buscan una vez, al arrancar: si faltan, el motor contesta que no
+// está disponible en vez de fallar a mitad de un deploy.
+func newDeployEngine(ctx context.Context, cfg config.Config, parts runtimeParts, out *deploy.Outbox, log *slog.Logger) (*deploy.Engine, error) {
+	engineCfg := deploy.Config{
+		Enabled:        cfg.DeployEnabled,
+		StateDir:       filepath.Dir(cfg.StateFile),
+		ProjectsDir:    cfg.ProjectsDir,
+		KeysDir:        cfg.DeployKeysDir,
+		KnownHosts:     cfg.KnownHosts,
+		Socket:         cfg.DockerSocket,
+		AllowFileRepos: cfg.AllowFileRepos,
+	}
+	if path, err := exec.LookPath("git"); err == nil {
+		engineCfg.Git = path
+	}
+	if path, err := exec.LookPath("docker"); err == nil {
+		engineCfg.Docker = path
+	}
+	if cfg.DeployEnabled {
+		log.InfoContext(ctx, "el deploy está prendido en este servidor", "git", engineCfg.Git, "docker", engineCfg.Docker)
+	}
+	engine, err := deploy.New(ctx, engineCfg, parts.dockerClient, projects.NewChecker(buildinfo.Version), projects.ReadSpec, out, log)
+	if err != nil {
+		return nil, fmt.Errorf("armar el motor de deploy: %w", err)
+	}
+	return engine, nil
 }

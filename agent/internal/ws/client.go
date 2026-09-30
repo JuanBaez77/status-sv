@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/JuanBaez77/status-sv/agent/internal/deploy"
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
@@ -61,6 +62,8 @@ type Client struct {
 	// commands ejecuta los comandos del control plane. Es opcional: sin él,
 	// todo comando se rechaza.
 	commands commandHandler
+	// deploys es la bandeja de las fotos de los deploys, también opcional.
+	deploys *deploy.Outbox
 
 	sampler *selfstat.Sampler
 	backoff *Backoff
@@ -216,8 +219,11 @@ func (c *Client) session(ctx context.Context) error {
 	if c.projects != nil {
 		c.projects.Restart()
 	}
+	if c.deploys != nil {
+		c.deploys.Restart()
+	}
 
-	errs := make(chan error, 5)
+	errs := make(chan error, 6)
 	go func() { errs <- c.heartbeatLoop(sessionCtx, conn) }()
 	go func() { errs <- c.metricsLoop(sessionCtx, conn) }()
 	go func() { errs <- c.readLoop(sessionCtx, conn) }()
@@ -226,6 +232,9 @@ func (c *Client) session(ctx context.Context) error {
 	}
 	if c.projects != nil {
 		go func() { errs <- c.projectsLoop(sessionCtx, conn) }()
+	}
+	if c.deploys != nil {
+		go func() { errs <- c.deploysLoop(sessionCtx, conn) }()
 	}
 
 	return <-errs
@@ -440,6 +449,8 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 			c.handleRuntimeAck(ctx, envelope)
 		case proto.TypeProjectsStateAck:
 			c.handleProjectsAck(ctx, envelope)
+		case proto.TypeDeployEventAck:
+			c.handleDeployAck(ctx, envelope)
 		case proto.TypeMetricsAck:
 			c.handleMetricsAck(ctx, envelope)
 		case proto.TypeError:
@@ -515,6 +526,11 @@ func (c *Client) handleServerError(ctx context.Context, envelope proto.Envelope)
 		}
 		if c.projects != nil && c.projects.Rejected(*message.InReplyTo, message.Retryable()) {
 			c.log.WarnContext(ctx, "el control plane rechazó los proyectos declarados",
+				"codigo", message.Code, "detalle", message.Message, "reintentable", message.Retryable())
+			return
+		}
+		if c.deploys != nil && c.deploys.Rejected(*message.InReplyTo, message.Retryable()) {
+			c.log.WarnContext(ctx, "el control plane rechazó una foto de deploy",
 				"codigo", message.Code, "detalle", message.Message, "reintentable", message.Retryable())
 			return
 		}

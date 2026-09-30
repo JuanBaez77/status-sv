@@ -282,7 +282,7 @@ func newHarness(t *testing.T, stateDir string) *harness {
 	h.api = &fakeAPI{missing: map[string]bool{}}
 	h.clock = &fakeClock{now: time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)}
 
-	cfg := Config{Enabled: true, StateDir: stateDir, ProjectsDir: "/etc/status-sv/projects.d"}
+	cfg := Config{Enabled: true, StateDir: stateDir, ProjectsDir: "/etc/status-sv/projects.d", Git: "/usr/bin/git", Docker: "/usr/bin/docker"}
 	load := func(_, name string) (projectspec.Spec, error) {
 		if name != "tienda" {
 			return projectspec.Spec{}, errors.New("no declarado")
@@ -691,5 +691,13 @@ func TestFitTrimsTheOldestOutput(t *testing.T) {
 	}
 	if len(fitted.Steps[0].Output) == proto.MaxStepOutputLines {
 		t.Error("no recortó nada")
+	}
+}
+
+func TestRejectsWithoutGitOrDocker(t *testing.T) {
+	h := newHarness(t, "")
+	h.engine.cfg.Docker = ""
+	if _, ack := h.start(proto.OpDeploy, ""); ack.Code != proto.CommandUnavailable {
+		t.Fatalf("acuse = %+v", ack)
 	}
 }
