@@ -7,6 +7,10 @@
 > `cristales-baez-prod`, detrás de su nginx, y [ADR-007](ADR-007-control-plane-en-servidor-de-cliente.md)
 > sigue vigente. Este ADR queda como el plan listo para cuando se haga, con la mudanza en la
 > sección 6 del runbook; se acepta recién ese día.
+>
+> El 2026-10-01 se eligió un paso intermedio: un servidor propio, pero compartido con otros
+> productos ([ADR-018](ADR-018-control-plane-en-servidor-propio-compartido.md)). El VPS dedicado
+> sigue siendo el destino, y ADR-018 dice antes de qué hay que llegar.
 
 ## Contexto
 

@@ -35,7 +35,7 @@ Qué más se evaluó y por qué se descartó.
 | [004](ADR-004-modulo-go-unico-y-goose.md) | Un único módulo Go y migraciones con goose | aceptada |
 | [005](ADR-005-alcance-single-tenant.md) | status-sv es una herramienta interna single-tenant | aceptada |
 | [006](ADR-006-autenticacion-de-agents.md) | Autenticación de agents con token de un solo uso y credencial propia | aceptada |
-| [007](ADR-007-control-plane-en-servidor-de-cliente.md) | El control plane vive en el servidor de un cliente, detrás de su nginx | aceptada |
+| [007](ADR-007-control-plane-en-servidor-de-cliente.md) | El control plane vive en el servidor de un cliente, detrás de su nginx | reemplazada por 018 |
 | [008](ADR-008-tablas-de-metricas.md) | Tablas de métricas, con discos e interfaces aparte, y particiones que maneja el control plane | aceptada |
 | [009](ADR-009-agregado-por-minuto-en-la-ingesta.md) | El agregado por minuto se recalcula en la ingesta, no en un job | aceptada |
 | [010](ADR-010-usuarios-y-sesiones-del-panel.md) | Usuarios del panel con argon2id y sesiones en la base | aceptada |
@@ -46,3 +46,4 @@ Qué más se evaluó y por qué se descartó.
 | [015](ADR-015-motor-de-deploy-docker.md) | Motor de deploy de proyectos Docker | aceptada |
 | [016](ADR-016-pasos-declarados-del-deploy.md) | Pasos declarados del deploy (`deploy.pre` y `deploy.post`) | aceptada |
 | [017](ADR-017-deploy-desde-el-panel-y-auditoria.md) | El deploy se dispara desde el panel, con confirmación, y queda en `audit_log` | aceptada |
+| [018](ADR-018-control-plane-en-servidor-propio-compartido.md) | El control plane vive en un servidor propio compartido, detrás de su nginx | aceptada |
