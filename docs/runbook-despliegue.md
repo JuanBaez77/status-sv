@@ -58,7 +58,7 @@ distribución del VPS.
 Hay dos formas de exponerlo, y el resto del despliegue es igual para las dos:
 
 - **Servidor dedicado:** Caddy toma los puertos 80 y 443 y pide el certificado solo.
-- **Servidor que ya tiene nginx** (por ejemplo, el de un cliente): el control plane queda en
+- **Servidor que ya tiene nginx** (el caso de [ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)): el control plane queda en
   `127.0.0.1` y nginx le pasa el tráfico desde un sitio propio, sin tocar los demás.
 
 ### Copiar el código
@@ -443,9 +443,11 @@ y, si no queda sano, vuelve solo a lo anterior ([ADR-015](adr/ADR-015-motor-de-d
 **Viene apagado en cada servidor.** Lo prende una persona acá, y el control plane no tiene forma de
 prenderlo.
 
-> **Antes de prenderlo en producción:** [ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)
-> pide mudar el control plane a un VPS propio ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md),
-> sección 6) antes de habilitar escritura, o enmendar ADR-007 aceptando el riesgo por escrito.
+> **Nunca en el servidor donde vive el control plane**
+> ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)): un compose puede pedir
+> `privileged` o montar el socket de Docker, y quien empuje a la rama de un proyecto de ese servidor
+> llegaría por el deploy a la base del control plane. En los demás servidores se prende recién con
+> el control plane ya mudado (sección 6).
 
 Hace falta, por proyecto:
 
@@ -614,9 +616,11 @@ El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, u
 
 ## 6. Mudar el control plane a otro VPS
 
-Es la mudanza que propone [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) para salir de
-`cristales-baez-prod`, **postergada** el 2026-09-30: hoy el control plane sigue ahí, detrás de su
-nginx. Queda escrita para cuando se haga, y sirve igual para cualquier mudanza. Se muda la base entera: los agents
+Sirve para cualquier mudanza. La decidida es la de
+[ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md): de `cristales-baez-prod` a
+`srv936263`, un servidor propio que **ya tiene nginx**. La del VPS dedicado con Caddy
+([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)) queda escrita para más adelante. Los pasos
+son los mismos, y donde cambian según el destino está dicho. Se muda la base entera: los agents
 conservan su credencial y, como el dominio no cambia, **reconectan solos**; no se tocan.
 
 El corte (del paso 3 al 5) tiene que durar **menos de 10 minutos**: es lo que cada agent guarda de
@@ -638,8 +642,27 @@ docker compose -f docker-compose.prod.yml --env-file .env build
 docker compose -f docker-compose.prod.yml --env-file .env up -d postgres
 ```
 
+**Si el destino ya tiene nginx y otros productos**, de la sección 0 no se toca ni su firewall ni su
+Docker. En cambio se releva, sin cambiar nada, que el puerto local esté libre y que ningún
+contenedor monte el socket de Docker ni corra `privileged` (ADR-018, regla 3); el segundo comando
+no tiene que imprimir nada:
+
+```bash
+# En el servidor nuevo:
+ss -tln | grep ':8090 '        # vacío: el puerto de STATUSSV_LOCAL_PORT está libre
+docker ps -q | xargs docker inspect \
+  --format '{{.Name}} privileged={{.HostConfig.Privileged}} {{range .Mounts}}{{.Source}} {{end}}' \
+  | grep -E 'privileged=true|docker.sock'
+```
+
+Y se deja lista la **configuración provisoria** de nginx de la sección 1 (*Detrás de nginx*), que
+solo atiende el desafío del certificado: mientras el dominio apunte al servidor viejo no recibe
+nada, y los demás sitios no se tocan.
+
 **2. Bajar el TTL.** En Cloudflare, el registro del dominio con TTL de 1 minuto (con la nube
-naranja ya es *Auto*, que es 5 minutos; alcanza).
+naranja ya es *Auto*, que es 5 minutos; alcanza). Si el registro va a seguir con la nube naranja
+durante toda la mudanza, este paso no hace falta: el cambio de IP lo hace Cloudflare en el momento
+y los agents no ven ningún cambio de DNS.
 
 **3. Cortar y volcar el servidor viejo.** Primero se detiene el control plane, para que no quede
 nada escrito después del volcado:
@@ -672,8 +695,35 @@ docker compose -f docker-compose.prod.yml --env-file .env run --rm -T server mig
 docker compose -f docker-compose.prod.yml --env-file .env --profile caddy up -d
 ```
 
-**5. Apuntar el dominio.** En Cloudflare, el registro A del dominio pasa a `<IP-NUEVA>` **con la
-nube gris**, para que Caddy pueda pedir el certificado:
+Con nginx en el destino, el último comando va sin `--profile caddy`, y se comprueba por adentro:
+`curl -s http://127.0.0.1:8090/readyz`.
+
+**5. Apuntar el dominio.** Depende de quién atienda el 443 en el destino.
+
+*Con nginx en el destino*, el registro A pasa a `<IP-NUEVA>` **sin apagar el proxy**, y enseguida
+se pide el certificado y se pasa a la configuración definitiva:
+
+```bash
+# En el servidor nuevo:
+certbot certonly --webroot -w /var/www/certbot -d <DOMINIO> \
+  --deploy-hook "systemctl reload nginx" --non-interactive
+cd /opt/status-sv
+deploy/nginx/render.sh final <DOMINIO> 127.0.0.1:8090 > /tmp/status-sv.conf
+install -m 0644 /tmp/status-sv.conf /etc/nginx/sites-available/status-sv
+nginx -t && systemctl reload nginx
+curl -s https://<DOMINIO>/readyz        # {"status":"ready"}
+```
+
+Entre el cambio de IP y la recarga de nginx (lo que tarda certbot, menos de un minuto) el servidor
+nuevo todavía no tiene un bloque HTTPS para el dominio. Con el modo SSL de la zona en **Full
+(strict)**, Cloudflare contesta 526 y nada llega a otro sitio de ese servidor: hay que mirar el
+modo **antes** de empezar. Si no es estricto, o si el certificado no sale a través del proxy, se
+hace como con Caddy: nube gris, certificado, configuración definitiva y nube naranja de nuevo. Con
+la nube gris un agent no manda nada a otro sitio, porque el certificado que recibe no es el del
+dominio y corta antes.
+
+*Con Caddy en el destino*, el registro A del dominio pasa a `<IP-NUEVA>` **con la nube gris**, para
+que Caddy pueda pedir el certificado:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env logs -f caddy   # hasta "certificate obtained"
@@ -739,8 +789,9 @@ certificado desde cero (por ejemplo, si se perdió `caddy-data`) hay que abrirlo
   lo detecta y no arranca, pero ya no puede volver).
 - **No editar a mano archivos versionados en el `workdir` de un proyecto que se despliega.** El
   deploy no los pisa: falla antes de empezar con "archivos cambiados a mano". Un arreglo va por PR.
-- **No prender el deploy en producción con el control plane en el servidor de un cliente** sin la
-  decisión de ADR-007 (mudarlo o enmendarlo).
+- **No prender el deploy en el servidor donde vive el control plane**
+  ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)), ni sumar ahí un
+  contenedor que monte el socket de Docker o corra `privileged`.
 
 ## 8. Lecciones de los despliegues
 

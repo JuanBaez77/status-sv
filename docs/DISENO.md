@@ -87,7 +87,7 @@ Go en agent y servidor, PostgreSQL como base, y React con Vite para el panel. La
 | Estado del front | TanStack Query + WebSocket | Datos en vivo sin polling. |
 | Contratos | JSON versionado en `proto/` ([ADR-003](adr/ADR-003-contratos-json-versionado.md)) | Un solo origen para los mensajes agent ↔ servidor, legible al depurar. |
 | Smoke tests | Playwright | En un worker aparte, porque el navegador es pesado. |
-| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; hoy corre detrás del nginx de un cliente ([ADR-007](adr/ADR-007-control-plane-en-servidor-de-cliente.md)). La mudanza a un VPS propio está escrita y postergada ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)). |
+| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; corre detrás del nginx de un servidor propio compartido con otros productos ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)), adonde se muda desde el servidor de un cliente al desplegar el Sprint 4. El VPS dedicado queda como destino ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)). |
 
 **Sobre PostgreSQL**
 
@@ -614,7 +614,10 @@ desde el panel y `audit_log`).
 
 - **El deploy viene apagado en cada agent.** Lo prende una persona en el servidor con el drop-in
   `20-deploy.conf`. Prenderlo en producción exige antes mudar el control plane
-  ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)) o enmendar ADR-007 a sabiendas.
+  ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)) o enmendar ADR-007 a sabiendas. El
+  2026-10-01 Juan eligió mudarlo a `srv936263`, un servidor propio compartido con otros productos
+  ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)): el deploy no se prende
+  nunca en el servidor donde vive el control plane.
 - **El primer proyecto real** es uno de poco riesgo (`gcg-alertas-nbcargo`), no `cristales-baez`.
 
 Contrato

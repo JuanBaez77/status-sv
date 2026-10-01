@@ -31,7 +31,9 @@ Las siete decisiones las tomó Juan el 2026-09-30, aceptando las recomendaciones
 - Con el deploy apagado, el agent rechaza `deploy` y `rollback` con el código `disabled`: el
   control plane no puede prenderlo, ni aunque esté comprometido.
 - Prenderlo en producción exige antes una de dos cosas: mudar el control plane (ADR-014) o
-  enmendar ADR-007 aceptando el riesgo por escrito. Se decide al desplegar el sprint.
+  enmendar ADR-007 aceptando el riesgo por escrito. Se decidió al desplegar el sprint: el control
+  plane se muda a un servidor propio, y el deploy no se prende nunca en el servidor donde él vive
+  ([ADR-018](ADR-018-control-plane-en-servidor-propio-compartido.md)).
 
 **2. El agent ejecuta `git` y `docker compose` con argumentos fijos, como `journalctl` en
 [ADR-011](ADR-011-acceso-a-docker-y-journald.md).**
