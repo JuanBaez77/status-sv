@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -235,12 +236,11 @@ func (e *Engine) release(id uuid.UUID) {
 
 // acked anota en el diario que el control plane confirmó la foto seq.
 func (e *Engine) acked(id uuid.UUID, seq int) {
-	j, err := e.store.loadJournal(id)
-	if err != nil || j.AckedSeq >= seq {
+	j, err := e.store.ackJournal(id, seq)
+	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
-	j.AckedSeq = seq
-	if err := e.store.saveJournal(j); err != nil {
+	if err != nil {
 		e.log.Warn("no se pudo anotar el acuse de un deploy", "deploy", id, "error", err)
 		return
 	}

@@ -1,9 +1,12 @@
 package deploy
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,6 +99,95 @@ func TestTrimJournalsKeepsRunningAndUnacked(t *testing.T) {
 	}
 	if _, err := s.loadJournal(oldest); err == nil {
 		t.Error("el diario más viejo sigue")
+	}
+}
+
+func TestAckJournalOnlyChangesTheAck(t *testing.T) {
+	s, err := newStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.Must(uuid.NewV7())
+	if _, err := s.ackJournal(id, 1); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("acuse de un deploy sin diario: %v", err)
+	}
+
+	// El deploy tiene el diario en memoria; el acuse lo anota en disco.
+	mem := &journal{Event: proto.DeployEvent{DeployID: id, Seq: 3, Project: "x", Status: proto.DeployRunning}, Touched: true}
+	if err := s.saveJournal(mem); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ackJournal(id, 2); err != nil {
+		t.Fatal(err)
+	}
+	// Un acuse más viejo no lo baja.
+	if j, err := s.ackJournal(id, 1); err != nil || j.AckedSeq != 2 {
+		t.Fatalf("acuse viejo: %+v, %v", j, err)
+	}
+
+	// La foto final, guardada desde la copia en memoria, no pierde el acuse.
+	mem.Event.Seq, mem.Event.Status = 4, proto.DeploySucceeded
+	if err := s.saveJournal(mem); err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.ackJournal(id, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Event.Status != proto.DeploySucceeded || j.Event.Seq != 4 || j.AckedSeq != 4 || !j.Touched {
+		t.Errorf("diario = %+v", j)
+	}
+}
+
+// Un acuse que llega mientras el deploy escribe su foto final no puede dejar
+// en disco una copia vieja: el deploy terminado figuraría en curso y el agent
+// lo volvería atrás al próximo arranque.
+func TestAckDoesNotOverwriteANewerJournal(t *testing.T) {
+	s, err := newStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const photos = 300
+	for range 5 {
+		id := uuid.Must(uuid.NewV7())
+		mem := &journal{Event: proto.DeployEvent{DeployID: id, Seq: 1, Project: "x", Status: proto.DeployRunning}}
+		if err := s.saveJournal(mem); err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for seq := 2; seq <= photos; seq++ {
+				mem.Event.Seq = seq
+				if seq == photos {
+					mem.Event.Status = proto.DeploySucceeded
+				}
+				if err := s.saveJournal(mem); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+		wg.Go(func() {
+			for seq := 1; seq < photos; seq++ {
+				if _, err := s.ackJournal(id, seq); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+		wg.Wait()
+
+		j, err := s.loadJournal(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j.Event.Status != proto.DeploySucceeded || j.Event.Seq != photos {
+			t.Fatalf("el diario quedó en %s, foto %d: un acuse pisó la foto final", j.Event.Status, j.Event.Seq)
+		}
+		if j.AckedSeq != photos-1 {
+			t.Fatalf("acked_seq = %d, se esperaba %d", j.AckedSeq, photos-1)
+		}
 	}
 }
 

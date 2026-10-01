@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -73,6 +74,12 @@ type journal struct {
 // store lee y escribe el diario y los estados buenos.
 type store struct {
 	dir string
+	// mu serializa las escrituras del diario. Lo escriben dos: el deploy, con
+	// cada foto, y el acuse de cada foto, que llega por el canal. Sin el
+	// candado, un acuse que leyó el diario antes de la foto final lo pisa
+	// después con su copia vieja, y un deploy terminado vuelve a figurar en
+	// curso: al próximo arranque, el agent lo volvería atrás.
+	mu sync.Mutex
 }
 
 func newStore(dir string) (*store, error) {
@@ -92,8 +99,32 @@ func (s *store) statePath(project string) string {
 	return filepath.Join(s.dir, "projects", project+".json")
 }
 
+// saveJournal guarda el diario como lo tiene el deploy. El acuse lo anota
+// ackJournal por su lado, así que se conserva el más alto de los dos.
 func (s *store) saveJournal(j *journal) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if disk, err := s.loadJournal(j.Event.DeployID); err == nil && disk.AckedSeq > j.AckedSeq {
+		j.AckedSeq = disk.AckedSeq
+	}
 	return writeJSON(s.journalPath(j.Event.DeployID), j)
+}
+
+// ackJournal anota que el control plane confirmó la foto seq y devuelve el
+// diario como quedó. Lee y escribe con el candado tomado: lo único que cambia
+// es el acuse, sobre lo último que guardó el deploy.
+func (s *store) ackJournal(id uuid.UUID, seq int) (*journal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, err := s.loadJournal(id)
+	if err != nil {
+		return nil, err
+	}
+	if j.AckedSeq >= seq {
+		return j, nil
+	}
+	j.AckedSeq = seq
+	return j, writeJSON(s.journalPath(id), j)
 }
 
 func (s *store) loadJournal(id uuid.UUID) (*journal, error) {
