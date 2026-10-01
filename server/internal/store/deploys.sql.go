@@ -27,6 +27,7 @@ SET status          = $1,
 WHERE id = $11
   AND server_id = $12
   AND seq < $8
+  AND (seq = 0 OR status IN ('pending', 'running'))
 RETURNING id, server_id, project_id, project_name, environment, kind, requested_commit, deployed_commit, previous_commit, status, code, message, requested_by, requested_by_name, requested_at, started_at, finished_at, seq, steps, updated_at
 `
 
@@ -47,6 +48,11 @@ type ApplyDeployEventParams struct {
 
 // ApplyDeployEvent guarda la foto que mandó el agent, solo si es más nueva
 // que la guardada y viene del servidor al que se le pidió el deploy.
+//
+// Un deploy que el agent ya cerró no se vuelve a abrir ni cambia de final: su
+// resultado ya está en audit_log. El que cerró el control plane sin haber
+// recibido ninguna foto (seq 0: rechazado o sin respuesta) sí puede revivir,
+// porque el agent pudo haberlo empezado igual.
 func (q *Queries) ApplyDeployEvent(ctx context.Context, arg ApplyDeployEventParams) (Deploy, error) {
 	row := q.db.QueryRow(ctx, applyDeployEvent,
 		arg.Status,

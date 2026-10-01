@@ -200,6 +200,14 @@ func TestDeployFromThePanel(t *testing.T) {
 	if ack := agent.event(t, runningEvent(created.ID, 3, start)); ack.Type != proto.TypeDeployEventAck {
 		t.Fatalf("la foto vieja no se confirmó: %q", ack.Type)
 	}
+	// Una más nueva sobre un deploy que el agent ya cerró, también: se
+	// confirma, pero no lo reabre ni le cambia el final.
+	reopened := runningEvent(created.ID, 9, start)
+	reopened.Status, reopened.Code, reopened.FinishedAt = proto.DeployRolledBack, proto.DeployInterrupted, start.Add(2*time.Minute)
+	reopened.Message = "el agent se reinició en medio del deploy"
+	if ack := agent.event(t, reopened); ack.Type != proto.TypeDeployEventAck {
+		t.Fatalf("la foto sobre un deploy cerrado no se confirmó: %q", ack.Type)
+	}
 	done := decodeJSON[deployBody](t, f.do(t, http.MethodGet, "/v1/deploys/"+created.ID.String(), "", ip, cookie, nil))
 	if done.Status != "succeeded" {
 		t.Fatalf("terminado = %+v", done)
@@ -213,15 +221,17 @@ func TestDeployFromThePanel(t *testing.T) {
 	}
 
 	// Todo quedó en la auditoría: el pedido de la persona y el final del agent.
-	var requested, finished int
+	// Un solo final: la foto sobre el deploy cerrado no sumó otro.
+	var requested, finished, finals int
 	if err := f.pool.QueryRow(t.Context(),
 		`SELECT count(*) FILTER (WHERE action = 'deploy.request' AND result = 'accepted' AND actor = 'juan' AND actor_type = 'user'),
-		        count(*) FILTER (WHERE action = 'deploy.finish' AND result = 'succeeded' AND actor = 'vps-deploy' AND actor_type = 'agent')
-		 FROM audit_log WHERE target_id = $1`, project).Scan(&requested, &finished); err != nil {
+		        count(*) FILTER (WHERE action = 'deploy.finish' AND result = 'succeeded' AND actor = 'vps-deploy' AND actor_type = 'agent'),
+		        count(*) FILTER (WHERE action = 'deploy.finish')
+		 FROM audit_log WHERE target_id = $1`, project).Scan(&requested, &finished, &finals); err != nil {
 		t.Fatal(err)
 	}
-	if requested != 1 || finished != 1 {
-		t.Errorf("auditoría: %d pedidos y %d finales", requested, finished)
+	if requested != 1 || finished != 1 || finals != 1 {
+		t.Errorf("auditoría: %d pedidos, %d finales buenos y %d finales en total", requested, finished, finals)
 	}
 
 	// Terminado, se puede pedir otro.
