@@ -19,6 +19,7 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
+	"github.com/JuanBaez77/status-sv/agent/internal/unithelper"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 
@@ -26,9 +27,10 @@ import (
 // un workdir ahí no se puede desplegar (ADR-015).
 var hiddenPrefixes = []string{"/home/", "/root/", "/run/user/"}
 
-// runDeployPaths imprime, por cada proyecto de Docker declarado y válido, su
-// nombre y su workdir, separados por un espacio. Lo usa el instalador para
-// escribir ReadWritePaths en el drop-in del deploy.
+// runDeployPaths imprime, por cada proyecto declarado y válido, su nombre, su
+// workdir y su runtime, separados por un espacio. Lo usa el instalador para
+// escribir ReadWritePaths en el drop-in del deploy y para saber si hace falta
+// Docker o el ayudante de systemd.
 func runDeployPaths(_ context.Context, args []string) error {
 	flags := flag.NewFlagSet("deploy-paths", flag.ContinueOnError)
 	dir := flags.String("projects-dir", "", "directorio de proyectos (o STATUSSV_PROJECTS_DIR)")
@@ -50,14 +52,11 @@ func printDeployPaths(out, warn io.Writer, state proto.ProjectsState) error {
 		return fmt.Errorf("no se pudo leer el directorio de proyectos: %s", state.Source.Detail)
 	}
 	for _, p := range state.Projects {
-		if p.Runtime != proto.RuntimeDocker {
-			continue
-		}
 		if hidden(p.Workdir) {
 			_, _ = fmt.Fprintf(warn, "aviso: %s está en %s, que la unidad esconde (ProtectHome); no se va a poder desplegar\n", p.Name, p.Workdir)
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "%s %s\n", p.Name, p.Workdir)
+		_, _ = fmt.Fprintf(out, "%s %s %s\n", p.Name, p.Workdir, p.Runtime)
 	}
 	for _, invalid := range state.Invalid {
 		_, _ = fmt.Fprintf(warn, "aviso: %s es inválido y queda afuera: %s\n", invalid.File, invalid.Error)
@@ -75,11 +74,14 @@ func hidden(workdir string) bool {
 }
 
 // runDeployCheck revisa, sin tocar lo que corre, que un proyecto se pueda
-// desplegar: la declaración, git, la llave, los permisos del workdir, el
-// archivo de Compose y el acceso a Docker. Trae la rama declarada (eso solo
-// escribe refs/remotes/statussv), así se prueba también la deploy key.
+// desplegar: la declaración, git, la llave y los permisos del workdir; con
+// Docker, el archivo de Compose y el acceso a Docker; con systemd, que el
+// ayudante responda y que el usuario y las unidades del proyecto existan. Trae
+// la rama declarada (eso solo escribe refs/remotes/statussv), así se prueba
+// también la deploy key.
 //
-// Se corre como el usuario del agent, con sus grupos:
+// Se corre como el usuario del agent, con sus grupos (el de Docker, si el
+// servidor lo tiene):
 //
 //	sudo runuser -u statussv -g statussv -G docker -- statussv-agent deploy-check tienda
 func runDeployCheck(ctx context.Context, args []string) error {
@@ -132,11 +134,7 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 		return
 	}
 	p := spec.Project
-	c.ok("declaración: %s, rama %s, %s", p.Repo, p.Branch, p.Workdir)
-	if p.Runtime != proto.RuntimeDocker {
-		c.fail("runtime %s: el deploy de systemd llega en el Sprint 5", p.Runtime)
-		return
-	}
+	c.ok("declaración: %s, rama %s, %s (%s)", p.Repo, p.Branch, p.Workdir, p.Runtime)
 	if hidden(p.Workdir) {
 		c.fail("el workdir %s está en un directorio que la unidad esconde (ProtectHome)", p.Workdir)
 		return
@@ -145,11 +143,6 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		c.fail("git no está instalado")
-		return
-	}
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		c.fail("docker no está instalado")
 		return
 	}
 	stateDir := filepath.Dir(cfg.StateFile)
@@ -217,6 +210,21 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 		c.ok("trae %s desde %s: la punta está en %s", p.Branch, url, tip[:8])
 	}
 
+	if p.Runtime == proto.RuntimeSystemd {
+		c.systemd(ctx, cfg, spec)
+		return
+	}
+	c.docker(ctx, cfg, spec, stateDir)
+}
+
+// docker revisa lo propio de un proyecto de Docker: Compose y el socket.
+func (c *checker) docker(ctx context.Context, cfg config.Config, spec projectspec.Spec, stateDir string) {
+	p := spec.Project
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		c.fail("docker no está instalado")
+		return
+	}
 	project, err := compose.New(compose.Config{Docker: dockerPath, Socket: cfg.DockerSocket, StateDir: stateDir}, p)
 	if err != nil {
 		c.fail("%v", err)
@@ -245,6 +253,51 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 	}
 	if len(spec.Pre) > 0 {
 		c.warn("los pasos pre no se deshacen si el deploy vuelve atrás (por ejemplo, una migración)")
+	}
+}
+
+// systemd revisa lo propio de un proyecto de systemd (ADR-019): que el
+// ayudante responda y diga que el usuario, el archivo de entorno y las
+// unidades existen, y qué pasos va a correr.
+func (c *checker) systemd(ctx context.Context, cfg config.Config, spec projectspec.Spec) {
+	p := spec.Project
+	err := unithelper.NewClient(cfg.UnitHelperSocket).Check(ctx, p.Name)
+	var helperErr *unithelper.Error
+	switch {
+	case errors.Is(err, unithelper.ErrUnavailable):
+		c.fail("el ayudante de deploy no está en %s: se instala con install-agent.sh --enable-deploy", cfg.UnitHelperSocket)
+		return
+	case errors.As(err, &helperErr):
+		c.fail("el ayudante dice que no está listo: %s", helperErr.Message)
+	case err != nil:
+		c.fail("el ayudante no contestó: %v", err)
+		return
+	default:
+		c.ok("el ayudante responde: existen las unidades %s", strings.Join(p.Units, ", "))
+		if spec.RunAs != "" {
+			c.ok("los pasos corren como %s", spec.RunAs)
+		}
+	}
+
+	phases := []struct {
+		name  string
+		steps []projectspec.Step
+	}{{"build", spec.Build}, {"pre", spec.Pre}, {"post", spec.Post}}
+	for _, phase := range phases {
+		for _, s := range phase.steps {
+			c.ok("paso %s: %s", phase.name, strings.Join(s.Command, " "))
+			// Puede no existir todavía y que lo cree un paso anterior (el
+			// entorno virtual, por ejemplo): es un aviso.
+			if _, err := os.Stat(s.Exec); err != nil {
+				c.warn("el programa %s no existe o el agent no lo ve; si no lo crea un paso anterior, el deploy va a fallar ahí", s.Exec)
+			}
+		}
+	}
+	if len(spec.Pre) > 0 {
+		c.warn("los pasos pre no se deshacen si el deploy vuelve atrás (por ejemplo, una migración)")
+	}
+	if len(spec.Build) > 0 {
+		c.warn("volver atrás corre los pasos build de nuevo sobre el commit anterior: conviene fijar las versiones de las dependencias")
 	}
 }
 

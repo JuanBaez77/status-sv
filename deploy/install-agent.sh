@@ -15,9 +15,11 @@
 #
 # El deploy (ADR-015) viene apagado. --enable-deploy lo prende en este servidor:
 # escribe el drop-in 20-deploy.conf con los workdir de los proyectos declarados
-# y revisa cada proyecto con deploy-check. Correr el script de nuevo, con el
-# deploy prendido, actualiza los workdir (por ejemplo, después de declarar un
-# proyecto nuevo). --disable-deploy lo apaga.
+# y revisa cada proyecto con deploy-check. Si hay algún proyecto de systemd,
+# instala además el ayudante root que corre sus pasos y reinicia sus unidades
+# (ADR-019); si no hay ninguno, lo saca. Correr el script de nuevo, con el
+# deploy prendido, actualiza todo eso (por ejemplo, después de declarar un
+# proyecto nuevo). --disable-deploy lo apaga y saca el ayudante.
 #
 set -euo pipefail
 
@@ -41,8 +43,24 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_DIR
 readonly UNIT_SRC="${SCRIPT_DIR}/systemd/${SERVICE}.service"
 
+# El ayudante del deploy de systemd (ADR-019): un socket y el servicio que
+# atiende cada conexión, como root.
+readonly HELPER_SOCKET="statussv-unit-helper.socket"
+readonly HELPER_SERVICE="statussv-unit-helper@.service"
+readonly HELPER_SOCKET_SRC="${SCRIPT_DIR}/systemd/${HELPER_SOCKET}"
+readonly HELPER_SERVICE_SRC="${SCRIPT_DIR}/systemd/${HELPER_SERVICE}"
+readonly HELPER_SOCKET_DEST="/etc/systemd/system/${HELPER_SOCKET}"
+readonly HELPER_SERVICE_DEST="/etc/systemd/system/${HELPER_SERVICE}"
+
 error() { printf 'error: %s\n' "$*" >&2; exit 1; }
 paso() { printf '\n==> %s\n' "$*"; }
+
+# quitar_ayudante saca el ayudante del servidor: sin proyectos de systemd que
+# desplegar, no tiene por qué haber un socket que lleve a root.
+quitar_ayudante() {
+  systemctl disable --now "${HELPER_SOCKET}" >/dev/null 2>&1 || true
+  rm -f "${HELPER_SOCKET_DEST}" "${HELPER_SERVICE_DEST}"
+}
 
 uso() {
   cat >&2 <<'USO'
@@ -152,21 +170,43 @@ fi
 # hace que un workdir borrado no impida arrancar), un umask que deja legible
 # lo que escribe git, y más memoria y tareas para docker compose y git, que
 # corren como hijos del agent.
+#
+# Los pasos de un proyecto de systemd no corren como hijos del agent: los
+# corre el ayudante root (ADR-019), que se instala solo si hay algún proyecto
+# de systemd declarado.
 DEPLOY_ON=false
+AYUDANTE=false
+PATHS=""
 paso "deploy"
 if [ "${DEPLOY}" = disable ]; then
   rm -f "${DROPIN_DEPLOY}"
+  quitar_ayudante
   echo "apagado"
 elif [ "${DEPLOY}" = enable ] || [ -f "${DROPIN_DEPLOY}" ]; then
-  getent group docker >/dev/null || error "para desplegar hace falta Docker (no existe el grupo docker)"
   command -v git >/dev/null || error "para desplegar hace falta git"
-  docker compose version >/dev/null 2>&1 || error "para desplegar hace falta el plugin de Docker Compose"
 
   install -d -o root -g "${SERVICE_USER}" -m 0750 "${KEYS_DIR}"
   # deploy-paths lee los proyectos declarados; lo corre root, que es quien
-  # puede leer el directorio aunque falte el grupo.
+  # puede leer el directorio aunque falte el grupo. Cada renglón es el nombre,
+  # el workdir y el runtime de un proyecto.
   if ! PATHS="$(STATUSSV_PROJECTS_DIR="${PROJECTS_DIR}" "${BINARY_DEST}" deploy-paths)"; then
     error "no se pudieron leer los proyectos declarados en ${PROJECTS_DIR}"
+  fi
+
+  # Docker hace falta solo si hay proyectos de Docker; el ayudante, solo si
+  # hay proyectos de systemd.
+  if grep -q ' docker$' <<<"${PATHS}"; then
+    getent group docker >/dev/null || error "hay proyectos de Docker declarados y este servidor no tiene Docker (no existe el grupo docker)"
+    docker compose version >/dev/null 2>&1 || error "hay proyectos de Docker declarados y falta el plugin de Docker Compose"
+  fi
+  if grep -q ' systemd$' <<<"${PATHS}"; then
+    [ -f "${HELPER_SOCKET_SRC}" ] && [ -f "${HELPER_SERVICE_SRC}" ] \
+      || error "no se encontraron las unidades del ayudante en ${SCRIPT_DIR}/systemd"
+    install -o root -g root -m 0644 "${HELPER_SOCKET_SRC}" "${HELPER_SOCKET_DEST}"
+    install -o root -g root -m 0644 "${HELPER_SERVICE_SRC}" "${HELPER_SERVICE_DEST}"
+    AYUDANTE=true
+  else
+    quitar_ayudante
   fi
 
   install -d -o root -g root -m 0755 "${DROPIN_DIR}"
@@ -179,7 +219,7 @@ elif [ "${DEPLOY}" = enable ] || [ -f "${DROPIN_DEPLOY}" ]; then
     echo "UMask=0002"
     echo "MemoryMax=512M"
     echo "TasksMax=256"
-    while read -r _ workdir; do
+    while read -r _ workdir _; do
       [ -n "${workdir}" ] && echo "ReadWritePaths=-${workdir}"
     done <<<"${PATHS}"
   } >"${DROPIN_DEPLOY}"
@@ -190,11 +230,24 @@ elif [ "${DEPLOY}" = enable ] || [ -f "${DROPIN_DEPLOY}" ]; then
   else
     sed 's/^/  /' <<<"${PATHS}"
   fi
+  if [ "${AYUDANTE}" = true ]; then
+    echo "ayudante de systemd: instalado (${HELPER_SOCKET})"
+  else
+    echo "ayudante de systemd: no hace falta (no hay proyectos de systemd)"
+  fi
 else
   echo "apagado (para prenderlo: --enable-deploy)"
 fi
 
 systemctl daemon-reload
+
+# El socket del ayudante tiene que estar antes que el agent: el chequeo de
+# cada proyecto, más abajo, ya le habla.
+if [ "${AYUDANTE}" = true ]; then
+  systemctl enable "${HELPER_SOCKET}" >/dev/null 2>&1
+  # restart y no start: si el archivo de la unidad cambió, que lo tome.
+  systemctl restart "${HELPER_SOCKET}" || error "no arrancó ${HELPER_SOCKET}"
+fi
 
 # --- Enrolamiento ---
 
@@ -252,15 +305,21 @@ fi
 # Con el deploy prendido, cada proyecto se revisa como lo va a ver el agent:
 # con su usuario. No frena la instalación: dice qué falta arreglar.
 if [ "${DEPLOY_ON}" = true ] && [ -n "${PATHS}" ]; then
+  # Con los grupos que tiene el servicio: el de Docker, si el servidor lo
+  # tiene, y el del diario, por donde se lee la salida de los pasos de un
+  # proyecto de systemd. El -g hace falta: sin él, runuser usa el primer -G
+  # como grupo primario y statussv pierde su propio grupo (y la lectura de
+  # projects.d).
+  GRUPOS=(-G systemd-journal)
+  if getent group docker >/dev/null; then
+    GRUPOS+=(-G docker)
+  fi
   while read -r proyecto _; do
     [ -n "${proyecto}" ] || continue
     paso "revisando el deploy de ${proyecto}"
-    # Con el grupo docker, como lo tiene el servicio por su drop-in. El -g hace
-    # falta: sin él, runuser usa el primer -G como grupo primario y statussv
-    # pierde su propio grupo (y la lectura de projects.d).
     # STATUSSV_DEPLOY_ALLOW_FILE_REPOS pasa solo si viene del entorno: es para
     # el laboratorio, que usa un repo file://.
-    runuser -u "${SERVICE_USER}" -g "${SERVICE_USER}" -G docker -- env STATUSSV_STATE_FILE="${STATE_FILE}" \
+    runuser -u "${SERVICE_USER}" -g "${SERVICE_USER}" "${GRUPOS[@]}" -- env STATUSSV_STATE_FILE="${STATE_FILE}" \
       STATUSSV_PROJECTS_DIR="${PROJECTS_DIR}" STATUSSV_DEPLOY_ENABLED=true \
       ${STATUSSV_DEPLOY_ALLOW_FILE_REPOS:+STATUSSV_DEPLOY_ALLOW_FILE_REPOS="${STATUSSV_DEPLOY_ALLOW_FILE_REPOS}"} \
       "${BINARY_DEST}" deploy-check "${proyecto}" \

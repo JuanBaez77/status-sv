@@ -8,7 +8,7 @@
 //	agent sample                     imprime una muestra de métricas, sin conectarse
 //	agent runtime                    imprime la foto de contenedores, servicios y procesos
 //	agent deploy-check PROYECTO      revisa que un proyecto se pueda desplegar
-//	agent deploy-paths               lista los workdirs que el deploy tiene que poder escribir
+//	agent deploy-paths               lista los proyectos que se pueden desplegar, para el instalador
 //	agent unit-helper                atiende un pedido del agent como root (lo arranca systemd)
 //	agent version                    imprime la versión
 package main
@@ -86,8 +86,8 @@ Uso:
                                     procesos como JSON, sin conectarse
   agent deploy-check PROYECTO       revisa, sin tocar lo que corre, que el proyecto se
                                     pueda desplegar (correrlo como el usuario del agent)
-  agent deploy-paths                lista los proyectos de Docker y su workdir, para el
-                                    drop-in del deploy
+  agent deploy-paths                lista los proyectos que se pueden desplegar, con su
+                                    workdir y su runtime; lo usa el instalador
   agent unit-helper                 atiende un pedido del agent como root; no se corre a
                                     mano: lo arranca systemd desde su socket (ADR-019)
   agent version                     imprime la versión

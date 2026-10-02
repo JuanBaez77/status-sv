@@ -20,6 +20,7 @@ NAME=statussv-sonda
 UNIT=/etc/systemd/system/${NAME}.service
 DROPIN_DIR=/etc/systemd/system/${NAME}.service.d
 WD=/srv/lab-systemd
+ORIGEN=/srv/lab-systemd-origen.git
 SOCKET=/run/status-sv/unit-helper.sock
 REGLA=/etc/polkit-1/rules.d/49-statussv-laboratorio.rules
 MARCA_USUARIO=/tmp/.lab-systemd-creo-statussv
@@ -29,21 +30,23 @@ verde() { printf '\033[32m%s\033[0m\n' "$*"; }
 paso()  { printf '\n== %s ==\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || { rojo "hay que correrlo como root"; exit 2; }
-for p in systemctl systemd-run journalctl python3 runuser; do
+for p in systemctl systemd-run journalctl python3 runuser git; do
   command -v "$p" >/dev/null || { rojo "falta ${p}"; exit 2; }
 done
 [ -x "${AGENT_BIN:-}" ] || { rojo "AGENT_BIN tiene que apuntar al binario del agent para Linux"; exit 2; }
 
 limpiar() {
   paso "limpieza"
-  systemctl stop ${NAME} lab-gunicorn lab-otra statussv-unit-helper.socket 2>/dev/null
+  systemctl disable --now statussv-agent statussv-unit-helper.socket >/dev/null 2>&1
+  systemctl stop ${NAME} lab-gunicorn lab-otra 2>/dev/null
   systemctl stop 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
   systemctl reset-failed ${NAME} 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
   rm -rf "${UNIT}" "${DROPIN_DIR}" "${REGLA}" \
     /etc/systemd/system/lab-gunicorn.service /etc/systemd/system/lab-otra.service \
-    /etc/systemd/system/statussv-unit-helper.socket /etc/systemd/system/statussv-unit-helper@.service
+    /etc/systemd/system/statussv-unit-helper.socket /etc/systemd/system/statussv-unit-helper@.service \
+    /etc/systemd/system/statussv-agent.service /etc/systemd/system/statussv-agent.service.d
   systemctl daemon-reload
-  rm -rf "${WD}" /etc/lab-systemd /etc/status-sv /var/lib/status-sv /run/status-sv /etc/paso-lab \
+  rm -rf "${WD}" "${ORIGEN}" /etc/lab-systemd /etc/status-sv /var/lib/status-sv /run/status-sv /etc/paso-lab \
     /usr/local/bin/sonda-systemd.sh /usr/local/bin/cliente-ayudante.py /usr/local/bin/statussv-agent
   userdel labapp 2>/dev/null
   userdel labotro 2>/dev/null
@@ -71,11 +74,11 @@ useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nolo
 # Otro usuario que está en el grupo del agent: llega al socket, y no es el agent.
 useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --groups statussv labotro
 
-# El workdir, con los permisos del runbook: de root, con escritura del grupo
-# statussv para git. El usuario del proyecto escribe solo en lo suyo.
-install -d -o root -g statussv -m 2775 "${WD}"
-install -d -o labapp -g labapp -m 0755 "${WD}/salida"
-cat >"${WD}/paso.sh" <<'EOF'
+# El proyecto es un repositorio de git, clonado por root como en un servidor.
+TMP="$(mktemp -d)"
+G=(git -c user.name=laboratorio -c user.email=lab@status-sv.invalid -c init.defaultBranch=main)
+"${G[@]}" init -q "${TMP}"
+cat >"${TMP}/paso.sh" <<'EOF'
 #!/bin/sh
 # Lo que haría un `pip install`: código del repositorio corriendo en el servidor.
 echo "usuario=$(id -un)"
@@ -88,19 +91,42 @@ if cat /etc/status-sv/keys/lab >/dev/null 2>&1; then echo "llave=legible"; else 
 if touch salida/construido.txt 2>/dev/null; then echo "escritura=ok"; else echo "escritura=no"; fi
 if touch /etc/paso-lab 2>/dev/null; then echo "etc=escribible"; else echo "etc=no"; fi
 EOF
-printf '#!/bin/sh\necho "este paso falla"\nexit 3\n' >"${WD}/falla.sh"
-chmod 0755 "${WD}/paso.sh" "${WD}/falla.sh"
+printf '#!/bin/sh\necho "este paso falla"\nexit 3\n' >"${TMP}/falla.sh"
+chmod 0755 "${TMP}/paso.sh" "${TMP}/falla.sh"
+"${G[@]}" -C "${TMP}" add -A && "${G[@]}" -C "${TMP}" commit -qm v1
+rm -rf "${ORIGEN}" "${WD}"
+git clone -q --bare "${TMP}" "${ORIGEN}"
+rm -rf "${TMP}"
+git clone -q "file://${ORIGEN}" "${WD}"
+# El origen queda del usuario del agent, que es quien lo va a traer: git se
+# niega a servir, por file://, un repositorio que es de otro dueño. En un
+# servidor el origen está en la red y esto no existe.
+chown -R statussv "${ORIGEN}"
+
+# Los permisos del runbook: el workdir sigue siendo de root, y el agent
+# escribe por el grupo statussv en .git y en los directorios versionados. El
+# usuario del proyecto escribe solo en lo suyo.
+chgrp -R statussv "${WD}/.git"
+chmod -R g+rwX "${WD}/.git"
+find "${WD}/.git" -type d -exec chmod g+s {} +
+chgrp statussv "${WD}" && chmod g+rwxs "${WD}"
+install -d -o labapp -g labapp -m 0755 "${WD}/salida"
 
 # El archivo de entorno del proyecto, con sus secretos: solo de root.
 install -d -m 0755 /etc/lab-systemd
 install -m 0600 /dev/null /etc/lab-systemd/env
 echo 'LAB_SECRETO=valor-que-el-agent-no-ve' >/etc/lab-systemd/env
 
-# Lo del agent que un paso no tiene que poder leer.
+# Lo del agent que un paso no tiene que poder leer: su credencial (la de un
+# agent ya enrolado contra un control plane que no existe) y una deploy key.
 install -d -m 0755 /etc/status-sv /etc/status-sv/keys
 install -o statussv -g statussv -m 0400 /dev/null /etc/status-sv/keys/lab
+install -m 0644 /dev/null /etc/status-sv/known_hosts
 install -d -o statussv -g statussv -m 0700 /var/lib/status-sv
 install -o statussv -g statussv -m 0600 /dev/null /var/lib/status-sv/agent.json
+cat >/var/lib/status-sv/agent.json <<'EOF'
+{"server_url":"http://127.0.0.1:9","server_id":"01924f9c-0000-7000-8000-0000000000aa","server_name":"lab","credential":"svagt_credencial-del-laboratorio","enrolled_at":"2026-10-02T12:00:00Z"}
+EOF
 
 # El servicio del proyecto y uno que no es suyo.
 for u in lab-gunicorn lab-otra; do
@@ -117,7 +143,7 @@ install -d -o root -g statussv -m 0750 /etc/status-sv/projects.d
 cat >/etc/status-sv/projects.d/lab.yaml <<EOF
 name: lab
 environment: staging
-repo: github.com/status-sv/laboratorio
+repo: file://${ORIGEN}
 branch: main
 runtime: systemd
 workdir: ${WD}
@@ -235,6 +261,48 @@ if [ "${rc}" -eq 0 ]; then verde "la sonda: todo lo que el motor necesita anda";
 echo
 journalctl -u 'statussv-unit-helper@*' --since "${desde}" -o cat --no-pager 2>/dev/null \
   | grep -E 'componente=unit-helper' | sed 's/^/ayudante: /' | tail -25
+
+# --- El instalador ---
+#
+# install-agent.sh --enable-deploy con un proyecto de systemd declarado: tiene
+# que instalar el ayudante, sin pedir Docker, dejar el agent andando con el
+# deploy prendido, y deploy-check, corrido como statussv, tiene que decir que
+# el proyecto se puede desplegar. --disable-deploy saca el ayudante.
+paso "el instalador con un proyecto de systemd"
+# Los proyectos que estaban para probar rechazos se sacan: uno es de Docker,
+# y con él el instalador pediría Docker.
+rm -f /etc/status-sv/projects.d/roto.yaml /etc/status-sv/projects.d/contenedores.yaml
+# El ayudante que se instaló a mano más arriba se saca: lo tiene que dejar el
+# instalador.
+systemctl disable --now statussv-unit-helper.socket >/dev/null 2>&1
+rm -f /etc/systemd/system/statussv-unit-helper.socket /etc/systemd/system/statussv-unit-helper@.service
+systemctl daemon-reload
+
+instalador=0
+dropin=/etc/systemd/system/statussv-agent.service.d/20-deploy.conf
+if salida="$(STATUSSV_DEPLOY_ALLOW_FILE_REPOS=true bash "${DIR}/../install-agent.sh" --enable-deploy "${AGENT_BIN}" 2>&1)"; then
+  printf '%s\n' "${salida}" | sed -n '/==> deploy/,$p'
+  grep -qx "ReadWritePaths=-${WD}" "${dropin}" || { rojo "FALLA el drop-in no tiene el workdir"; instalador=1; }
+  systemctl is-active --quiet statussv-unit-helper.socket || { rojo "FALLA el socket del ayudante no quedó activo"; instalador=1; }
+  systemctl is-enabled --quiet statussv-unit-helper.socket || { rojo "FALLA el socket del ayudante no quedó habilitado"; instalador=1; }
+  grep -q 'el ayudante responde' <<<"${salida}" || { rojo "FALLA deploy-check no habló con el ayudante"; instalador=1; }
+  grep -q 'lab se puede desplegar' <<<"${salida}" || { rojo "FALLA deploy-check no aprobó el proyecto"; instalador=1; }
+  systemctl is-active --quiet statussv-agent || { rojo "FALLA el agent no quedó andando"; instalador=1; }
+
+  bash "${DIR}/../install-agent.sh" --disable-deploy "${AGENT_BIN}" >/dev/null 2>&1
+  [ ! -e "${dropin}" ] || { rojo "FALLA --disable-deploy no sacó el drop-in"; instalador=1; }
+  [ ! -e /etc/systemd/system/statussv-unit-helper.socket ] || { rojo "FALLA --disable-deploy no sacó el ayudante"; instalador=1; }
+  systemctl is-active --quiet statussv-unit-helper.socket && { rojo "FALLA el socket del ayudante siguió activo"; instalador=1; }
+else
+  printf '%s\n' "${salida}"
+  rojo "FALLA el instalador falló"
+  instalador=1
+fi
+if [ "${instalador}" -eq 0 ]; then
+  verde "el instalador: instala el ayudante, aprueba el proyecto y lo saca al apagar el deploy"
+else
+  resultado=1
+fi
 
 # --- La alternativa descartada: una regla de polkit por unidad ---
 #

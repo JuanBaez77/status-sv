@@ -122,10 +122,17 @@ Afuera de la unidad comprueba que un usuario que no es del grupo no llega al soc
 grupo que no es el agent recibe `forbidden`, y que el ayudante no usa un `project.yaml` que el grupo
 puede escribir.
 
+Después corre **el instalador** (`install-agent.sh --enable-deploy`) con ese proyecto declarado.
+Tiene que instalar el ayudante sin pedir Docker, dejar el agent andando con el deploy prendido y
+el `workdir` en su drop-in, y `deploy-check`, corrido como `statussv`, tiene que decir que el
+proyecto se puede desplegar. `--disable-deploy` tiene que sacar el drop-in y el ayudante. El
+proyecto es un repositorio de git clonado por root; su origen (`file://`) queda del usuario del
+agent, porque git no sirve por `file://` un repositorio de otro dueño.
+
 Al final **mide, sin comprobar**, la alternativa descartada: una regla de polkit que nombra la
 unidad y el verbo. Con polkit 124 funciona (permite esa unidad y rechaza otra y las transitorias);
 Ubuntu 22.04 trae polkit 0.105, que no entiende esas reglas.
 
-Resultado del 2026-10-02 (systemd 255, polkit 124): las 34 comprobaciones de la sonda y las 3 de
-afuera dan lo esperado. Los pasos corren en su propio cgroup, así que no cuentan contra la memoria
+Resultado del 2026-10-02 (systemd 255, polkit 124): las 34 comprobaciones de la sonda, las 3 de
+afuera y las del instalador dan lo esperado. Los pasos corren en su propio cgroup, así que no cuentan contra la memoria
 del agent.

@@ -54,6 +54,9 @@ type Config struct {
 	// AllowFileRepos acepta repos file://. Es solo para la prueba de punta a
 	// punta: en un servidor, el código viene de la red.
 	AllowFileRepos bool
+	// UnitHelperSocket es el socket del ayudante root del deploy de systemd
+	// (ADR-019). Se cambia solo para probar.
+	UnitHelperSocket string
 
 	LogLevel slog.Level
 	LogJSON  bool
@@ -69,8 +72,9 @@ func Load() (Config, error) {
 		DockerSocket: envOr("STATUSSV_DOCKER_SOCKET", "/run/docker.sock"),
 		ProjectsDir:  envOr("STATUSSV_PROJECTS_DIR", "/etc/status-sv/projects.d"),
 
-		DeployKeysDir: envOr("STATUSSV_DEPLOY_KEYS_DIR", "/etc/status-sv/keys"),
-		KnownHosts:    envOr("STATUSSV_KNOWN_HOSTS", "/etc/status-sv/known_hosts"),
+		DeployKeysDir:    envOr("STATUSSV_DEPLOY_KEYS_DIR", "/etc/status-sv/keys"),
+		KnownHosts:       envOr("STATUSSV_KNOWN_HOSTS", "/etc/status-sv/known_hosts"),
+		UnitHelperSocket: envOr("STATUSSV_UNIT_HELPER_SOCKET", "/run/status-sv/unit-helper.sock"),
 	}
 
 	level, err := envLevel("STATUSSV_LOG_LEVEL", slog.LevelInfo)
