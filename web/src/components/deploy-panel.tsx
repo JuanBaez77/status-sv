@@ -10,6 +10,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
+import { Link } from 'wouter'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useDeploy, useDeployHistory, useStartDeploy } from '@/hooks/use-deploys'
 import type { DeployDetail, DeployKind, DeployStep, DeploySummary, ProjectDetail } from '@/lib/api'
+import { auditLink } from '@/lib/audit'
 import {
   active,
   codeText,
@@ -115,6 +117,17 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
             ))}
           </ul>
         )}
+
+        <p className="text-xs text-muted-foreground">
+          Quién pidió cada deploy y cómo terminó queda en la{' '}
+          <Link
+            href={auditLink('project', project.id)}
+            className="text-foreground underline underline-offset-2"
+          >
+            auditoría de este proyecto
+          </Link>
+          .
+        </p>
       </CardContent>
     </Card>
   )

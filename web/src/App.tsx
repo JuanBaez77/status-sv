@@ -3,6 +3,7 @@ import { Route, Switch } from 'wouter'
 import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSession } from '@/hooks/use-session'
+import { AuditPage } from '@/pages/audit'
 import { LoginPage } from '@/pages/login'
 import { ProjectPage } from '@/pages/project'
 import { ProjectsPage } from '@/pages/projects'
@@ -56,6 +57,8 @@ export default function App() {
         <Route path="/projects" component={ProjectsPage} />
 
         <Route path="/projects/:id">{(params) => <ProjectPage id={params.id} />}</Route>
+
+        <Route path="/audit" component={AuditPage} />
 
         <Route>
           <Card>
