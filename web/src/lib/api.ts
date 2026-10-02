@@ -416,7 +416,8 @@ export const projects = {
  */
 export type DeployStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
 
-export type DeployKind = 'deploy' | 'rollback'
+/** DeployKind: `bootstrap` es el primer deploy de un proyecto (ADR-021). */
+export type DeployKind = 'deploy' | 'rollback' | 'bootstrap'
 
 export type StepName =
   | 'preflight'
@@ -472,7 +473,10 @@ export type DeployDetail = DeploySummary & {
 export type DeployRequest = {
   confirm: string
   commit?: string
-  /** totp_code es un código nuevo de la app; hace falta en producción (ADR-017). */
+  /**
+   * totp_code es un código nuevo de la app; hace falta en producción (ADR-017)
+   * y siempre en un primer deploy (ADR-021).
+   */
   totp_code?: string
 }
 
@@ -484,6 +488,8 @@ export const deploys = {
     api.post<DeployDetail>(`/v1/projects/${encodeURIComponent(projectID)}/deploys`, req),
   rollback: (projectID: string, req: DeployRequest) =>
     api.post<DeployDetail>(`/v1/projects/${encodeURIComponent(projectID)}/rollback`, req),
+  bootstrap: (projectID: string, req: DeployRequest) =>
+    api.post<DeployDetail>(`/v1/projects/${encodeURIComponent(projectID)}/bootstrap`, req),
 }
 
 /** AuditEntry es un renglón de la auditoría: quién hizo qué, sobre qué y cómo salió (ADR-020). */

@@ -86,6 +86,7 @@ export function auditQuery(filters: AuditFilters, before: string | null): string
 export const actionLabels: Record<string, string> = {
   'deploy.request': 'Pidió un deploy',
   'rollback.request': 'Pidió volver atrás',
+  'bootstrap.request': 'Pidió un primer deploy',
   'deploy.finish': 'Terminó un deploy',
   'logs.request': 'Pidió logs',
   'auth.login': 'Ingresó la contraseña',

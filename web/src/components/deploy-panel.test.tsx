@@ -281,4 +281,111 @@ describe('DeploysCard', () => {
       expect(within(form).getByText(/no se deshacen/)).toBeInTheDocument()
     })
   })
+  describe('con un proyecto que todavía no corre en el servidor', () => {
+    const nuevo = (overrides: Partial<ProjectDetail> = {}) =>
+      project({ status: 'down', units: { total: 0, healthy: 0 }, ...overrides })
+
+    it('ofrece el primer deploy, sin commit y con el código de la app aunque sea staging', async () => {
+      const calls = stubFetch((path, init) => {
+        if (path === '/v1/projects/p1/bootstrap' && init?.method === 'POST') {
+          return json(detail({ id: 'd9', kind: 'bootstrap', status: 'pending' }), 201)
+        }
+        if (path === '/v1/projects/p1/deploys') return json({ deploys: [] })
+        return json(detail({ id: 'd9', kind: 'bootstrap', status: 'pending' }))
+      })
+      renderWithQuery(<DeploysCard project={nuevo()} />)
+
+      expect(await screen.findByText(/todavía no corre en el servidor/)).toBeInTheDocument()
+      // Desplegar sigue estando: el proyecto pudo haberse clonado a mano.
+      expect(screen.getByRole('button', { name: /Desplegar/ })).toBeEnabled()
+      fireEvent.click(screen.getByRole('button', { name: /Primer deploy/ }))
+
+      const form = screen.getByRole('form', { name: 'Primer deploy' })
+      expect(within(form).getByText(/baja lo que levantó/)).toBeInTheDocument()
+      expect(within(form).getByText('/srv/tienda')).toBeInTheDocument()
+      expect(within(form).queryByLabelText(/Commit/)).not.toBeInTheDocument()
+
+      const submit = within(form).getByRole('button', { name: 'Primer deploy' })
+      fireEvent.change(within(form).getByLabelText(/Para confirmar/), {
+        target: { value: 'tienda' },
+      })
+      // Con el nombre solo no alcanza: el primer deploy pide el código siempre.
+      expect(submit).toBeDisabled()
+      expect(within(form).getByText(/lo pide siempre/)).toBeInTheDocument()
+      fireEvent.change(within(form).getByLabelText(/Código de la app/), {
+        target: { value: '654321' },
+      })
+      expect(submit).toBeEnabled()
+      fireEvent.click(submit)
+
+      await waitFor(() => {
+        const post = calls.find((c) => c.init?.method === 'POST')
+        expect(post?.path).toBe('/v1/projects/p1/bootstrap')
+        expect(JSON.parse(post?.init?.body as string)).toEqual({
+          confirm: 'tienda',
+          totp_code: '654321',
+        })
+      })
+    })
+
+    it('no lo ofrece si algo del proyecto corre o si ya hubo un deploy bueno', async () => {
+      stubFetch(() => json({ deploys: [] }))
+      const { unmount } = renderWithQuery(<DeploysCard project={project()} />)
+      await screen.findByText('Todavía no se desplegó desde el panel.')
+      expect(screen.queryByRole('button', { name: /Primer deploy/ })).not.toBeInTheDocument()
+      unmount()
+
+      stubFetch(() => json({ deploys: [summary()] }))
+      renderWithQuery(<DeploysCard project={nuevo()} />)
+      await screen.findByText('Desplegado')
+      expect(screen.queryByRole('button', { name: /Primer deploy/ })).not.toBeInTheDocument()
+    })
+
+    it('muestra sus pasos con otro nombre, y que se bajó si no quedó bien', async () => {
+      stubFetch((path) => {
+        if (path === '/v1/projects/p1/deploys') {
+          return json({
+            deploys: [
+              summary({
+                id: 'd8',
+                kind: 'bootstrap',
+                status: 'rolled_back',
+                code: 'unhealthy',
+                previous_commit: undefined,
+              }),
+            ],
+          })
+        }
+        return json(
+          detail({
+            id: 'd8',
+            kind: 'bootstrap',
+            status: 'rolled_back',
+            code: 'unhealthy',
+            previous_commit: undefined,
+            steps: [
+              { name: 'fetch', status: 'ok' },
+              { name: 'checkout', status: 'ok' },
+              { name: 'up', status: 'ok' },
+              { name: 'healthcheck', status: 'failed' },
+              { name: 'rollback', status: 'ok', detail: 'bajó lo que había levantado' },
+            ],
+          }),
+        )
+      })
+      renderWithQuery(<DeploysCard project={nuevo()} />)
+
+      const history = await screen.findByRole('list', { name: 'Historia de deploys' })
+      expect(within(history).getByText('Se bajó')).toBeInTheDocument()
+      expect(within(history).getByText('primer deploy')).toBeInTheDocument()
+      // No quedó nada corriendo: se puede intentar de nuevo.
+      expect(screen.getByRole('button', { name: /Primer deploy/ })).toBeEnabled()
+
+      fireEvent.click(within(history).getByRole('button', { name: 'Pasos' }))
+      expect(await screen.findByText('Clonar la rama')).toBeInTheDocument()
+      expect(screen.getByText('Dejar el código')).toBeInTheDocument()
+      expect(screen.getByText('Bajar lo levantado')).toBeInTheDocument()
+      expect(screen.queryByText('Volver atrás', { selector: 'span' })).not.toBeInTheDocument()
+    })
+  })
 })

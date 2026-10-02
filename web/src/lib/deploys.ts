@@ -1,6 +1,13 @@
 /** Textos y reglas del deploy en el panel (ADR-015, ADR-017). */
 
-import type { DeployStatus, DeployStep, DeploySummary, StepName } from '@/lib/api'
+import type {
+  DeployKind,
+  DeployStatus,
+  DeployStep,
+  DeploySummary,
+  ProjectDetail,
+  StepName,
+} from '@/lib/api'
 
 /** active dice si un deploy todavía no terminó. */
 export function active(status: DeployStatus): boolean {
@@ -15,9 +22,42 @@ const statusLabels: Record<DeployStatus, string> = {
   rolled_back: 'Volvió atrás',
 }
 
-/** statusLabel es el nombre de un estado para mostrar. */
-export function statusLabel(status: DeployStatus): string {
+/**
+ * statusLabel es el nombre de un estado para mostrar. Un primer deploy
+ * (ADR-021) que no quedó bien no vuelve a nada: baja lo que había levantado.
+ */
+export function statusLabel(status: DeployStatus, kind: DeployKind = 'deploy'): string {
+  if (kind === 'bootstrap' && status === 'rolled_back') return 'Se bajó'
   return statusLabels[status] ?? status
+}
+
+const kindLabels: Record<DeployKind, string> = {
+  deploy: 'deploy',
+  rollback: 'rollback',
+  bootstrap: 'primer deploy',
+}
+
+/** kindLabel es el tipo de un deploy, en palabras. */
+export function kindLabel(kind: DeployKind): string {
+  return kindLabels[kind] ?? kind
+}
+
+/**
+ * neverRan dice si el proyecto todavía no corre en el servidor: nada suyo
+ * anda y ningún deploy de la historia terminó bien. Es cuando tiene sentido
+ * ofrecer el primer deploy. El que decide es el agent: si el proyecto ya
+ * corre, lo rechaza sin tocar nada.
+ */
+export function neverRan(
+  project: Pick<ProjectDetail, 'runtime' | 'units' | 'containers' | 'services'>,
+  history: Pick<DeploySummary, 'status'>[],
+): boolean {
+  if (history.some((d) => d.status === 'succeeded')) return false
+  if (project.units.healthy > 0) return false
+  if (project.runtime === 'docker') return project.containers.length === 0
+  return project.services.every(
+    (s) => s.active_state === 'inactive' || s.active_state === 'failed',
+  )
 }
 
 /**
@@ -54,6 +94,14 @@ const stepLabels: Record<StepName, string> = {
   rollback: 'Volver atrás',
 }
 
+/** En un primer deploy (ADR-021) algunos pasos hacen otra cosa. */
+const firstStepLabels: Partial<Record<StepName, string>> = {
+  fetch: 'Clonar la rama',
+  checkout: 'Dejar el código',
+  restart: 'Arrancar',
+  rollback: 'Bajar lo levantado',
+}
+
 /**
  * stepLabel es el nombre de un paso, con su servicio si es un paso declarado
  * de un proyecto Docker. Con systemd (ADR-019), `build` no compila nada: son
@@ -62,9 +110,11 @@ const stepLabels: Record<StepName, string> = {
 export function stepLabel(
   step: Pick<DeployStep, 'name' | 'service'>,
   runtime: 'docker' | 'systemd' = 'docker',
+  kind: DeployKind = 'deploy',
 ): string {
   if (runtime === 'systemd' && step.name === 'build') return 'Preparar'
-  const label = stepLabels[step.name] ?? step.name
+  const first = kind === 'bootstrap' ? firstStepLabels[step.name] : undefined
+  const label = first ?? stepLabels[step.name] ?? step.name
   return step.service ? `${label} (${step.service})` : label
 }
 
@@ -90,6 +140,7 @@ const codeTexts: Record<string, string> = {
   interrupted: 'El agent se reinició en medio del deploy.',
   no_previous: 'No hay un estado anterior a donde volver.',
   missing_image: 'La imagen anterior ya no está en el servidor.',
+  already_deployed: 'El proyecto ya corre en el servidor: lo que va es un deploy.',
   rollback_failed: 'Falló y tampoco pudo volver atrás: hay que mirarlo.',
 }
 

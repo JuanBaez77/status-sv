@@ -4,6 +4,8 @@ import {
   active,
   codeText,
   duration,
+  kindLabel,
+  neverRan,
   requestError,
   shortCommit,
   statusLabel,
@@ -39,6 +41,49 @@ describe('deploys', () => {
     expect(stepLabel({ name: 'pre' }, 'systemd')).toBe('Paso previo')
     expect(stepLabel({ name: 'restart' }, 'systemd')).toBe('Reiniciar')
     expect(codeText('restart_failed')).toMatch(/reiniciar/)
+  })
+
+  it('un primer deploy nombra distinto lo que hace distinto', () => {
+    expect(stepLabel({ name: 'fetch' }, 'docker', 'bootstrap')).toBe('Clonar la rama')
+    expect(stepLabel({ name: 'restart' }, 'systemd', 'bootstrap')).toBe('Arrancar')
+    expect(stepLabel({ name: 'rollback' }, 'docker', 'bootstrap')).toBe('Bajar lo levantado')
+    // Lo demás es lo de un deploy.
+    expect(stepLabel({ name: 'build' }, 'systemd', 'bootstrap')).toBe('Preparar')
+    expect(stepLabel({ name: 'pre', service: 'web' }, 'docker', 'bootstrap')).toBe(
+      'Paso previo (web)',
+    )
+    expect(statusLabel('rolled_back', 'bootstrap')).toBe('Se bajó')
+    expect(statusLabel('succeeded', 'bootstrap')).toBe('Desplegado')
+    expect(kindLabel('bootstrap')).toBe('primer deploy')
+    expect(kindLabel('rollback')).toBe('rollback')
+    expect(codeText('already_deployed')).toMatch(/lo que va es un deploy/)
+  })
+
+  it('sabe cuándo un proyecto todavía no corre en el servidor', () => {
+    const nothing = { units: { total: 0, healthy: 0 }, containers: [], services: [] }
+    expect(neverRan({ runtime: 'docker', ...nothing }, [])).toBe(true)
+    // Un intento que no quedó bien no cuenta: se puede probar de nuevo.
+    expect(neverRan({ runtime: 'docker', ...nothing }, [{ status: 'rolled_back' }])).toBe(true)
+    expect(neverRan({ runtime: 'docker', ...nothing }, [{ status: 'succeeded' }])).toBe(false)
+    expect(
+      neverRan({ runtime: 'docker', ...nothing, units: { total: 1, healthy: 1 } }, []),
+    ).toBe(false)
+
+    const service = (active_state: 'active' | 'inactive' | 'failed') => ({
+      unit: 'gunicorn.service',
+      load_state: 'loaded',
+      active_state,
+      sub_state: '',
+      result: '',
+      main_pid: 0,
+      active_since: null,
+      usage: null,
+      seen_at: '2026-10-02T12:00:00Z',
+    })
+    const systemd = { runtime: 'systemd' as const, units: { total: 1, healthy: 0 }, containers: [] }
+    expect(neverRan({ ...systemd, services: [service('inactive')] }, [])).toBe(true)
+    expect(neverRan({ ...systemd, services: [service('failed')] }, [])).toBe(true)
+    expect(neverRan({ ...systemd, services: [service('active')] }, [])).toBe(false)
   })
 
   it('explica los códigos y deja pasar los que no conoce', () => {
