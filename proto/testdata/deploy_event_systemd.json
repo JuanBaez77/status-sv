@@ -1,0 +1,92 @@
+{
+  "v": 1,
+  "type": "deploy_event",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "deploy_id": "01924f9c-0000-7000-8000-000000000001",
+    "seq": 14,
+    "project": "ypf-aca",
+    "kind": "deploy",
+    "status": "rolled_back",
+    "commit": "89abcdef0123456789abcdef0123456789abcdef",
+    "previous_commit": "0123456789abcdef0123456789abcdef01234567",
+    "started_at": "2026-09-20T12:00:00Z",
+    "finished_at": "2026-09-20T12:03:10Z",
+    "code": "unhealthy",
+    "message": "no quedó bien en 120 s: gunicorn-ypf-aca.service se reinició 3 veces",
+    "steps": [
+      {
+        "name": "preflight",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:00Z",
+        "finished_at": "2026-09-20T12:00:00Z"
+      },
+      {
+        "name": "fetch",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:00Z",
+        "finished_at": "2026-09-20T12:00:02Z",
+        "detail": "main en 89abcdef"
+      },
+      {
+        "name": "snapshot",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:02Z",
+        "finished_at": "2026-09-20T12:00:02Z",
+        "detail": "01234567"
+      },
+      {
+        "name": "checkout",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:02Z",
+        "finished_at": "2026-09-20T12:00:03Z"
+      },
+      {
+        "name": "build",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:03Z",
+        "finished_at": "2026-09-20T12:00:40Z",
+        "detail": ".venv/bin/pip install -r requirements.txt",
+        "output": [
+          "Successfully installed gunicorn-23.0.0"
+        ]
+      },
+      {
+        "name": "build",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:40Z",
+        "finished_at": "2026-09-20T12:00:45Z",
+        "detail": ".venv/bin/python manage.py collectstatic --noinput"
+      },
+      {
+        "name": "pre",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:45Z",
+        "finished_at": "2026-09-20T12:00:50Z",
+        "detail": ".venv/bin/python manage.py migrate --noinput"
+      },
+      {
+        "name": "restart",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:50Z",
+        "finished_at": "2026-09-20T12:00:52Z",
+        "detail": "gunicorn-ypf-aca.service"
+      },
+      {
+        "name": "healthcheck",
+        "status": "failed",
+        "started_at": "2026-09-20T12:00:52Z",
+        "finished_at": "2026-09-20T12:02:52Z",
+        "detail": "no quedó bien en 120 s"
+      },
+      {
+        "name": "rollback",
+        "status": "ok",
+        "started_at": "2026-09-20T12:02:52Z",
+        "finished_at": "2026-09-20T12:03:10Z",
+        "detail": "volvió a 01234567"
+      }
+    ]
+  }
+}

@@ -171,6 +171,17 @@ enmascarados y recién después recortada a 200 bytes). Con todos los topes al m
 la foto ocupa unos 115 KB; si trae muchos caracteres que JSON escapa, el agent deja afuera los
 renglones más viejos para no pasar de 256 KiB.
 
+Los pasos son una lista cerrada, y cambian según cómo corre el proyecto:
+
+| Proyecto | Pasos, en orden |
+| --- | --- |
+| Docker (ADR-015) | `preflight`, `fetch`, `snapshot`, `checkout`, `build`, `pre` (uno por paso declarado, con su `service`), `up`, `healthcheck`, `post`, y `rollback` si hubo que volver atrás |
+| systemd (ADR-019) | Los mismos, con un `build` por cada paso declarado en `deploy.build` y `restart` en lugar de `up`. Sus pasos declarados no llevan `service`: lo que corrió va en `detail` |
+
+Un `restart` que falla termina el deploy con el código `restart_failed`. Los dos son del
+Sprint 5: un control plane anterior rechaza la foto que los trae, así que se actualiza primero el
+control plane y después los agents, como siempre.
+
 ## Reglas de versionado
 
 - Agregar un campo opcional **no** cambia `v`. Quitar un campo o cambiar su significado, **sí**.
