@@ -1,0 +1,18 @@
+# Ajuste para un servidor con el Docker instalado por snap (hoy, srv936263).
+#
+# Se suma al compose de producción, en todos los comandos:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.snap.yml --env-file .env ...
+#
+# Con no-new-privileges el contenedor no arranca: "exec /usr/local/bin/server:
+# operation not permitted". El daemon de snap corre con su propio perfil de
+# AppArmor y, con esa opción puesta, el kernel no deja pasar al perfil del
+# contenedor al ejecutarlo.
+#
+# Se quita solo esa opción. Lo demás queda como en el compose de producción:
+# usuario sin privilegios, ninguna capacidad, raíz de solo lectura y el perfil
+# de AppArmor de Docker. Ver ADR-018 y docs/runbook-despliegue.md.
+
+services:
+  server:
+    security_opt: !reset []

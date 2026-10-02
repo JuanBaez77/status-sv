@@ -1,7 +1,7 @@
 # ADR-018: El control plane vive en un servidor propio compartido, detrás de su nginx
 
-- **Estado:** aceptada. La mudanza se hace al desplegar el Sprint 4 (runbook, sección 6); hasta ese
-  día el control plane sigue en `cristales-baez-prod`.
+- **Estado:** aceptada. La mudanza se hizo el 2026-10-02 (runbook, sección 6): el control plane
+  corre en `srv936263`.
 - **Fecha:** 2026-10-01
 - **Reemplaza a:** [ADR-007](ADR-007-control-plane-en-servidor-de-cliente.md)
 
@@ -71,6 +71,21 @@ el deploy se puede prender proyecto por proyecto, como dice el runbook.
   antes de cada recarga, como hasta ahora.
 - Los recursos se comparten. Hoy sobran: el control plane usa unos 6 MB y su base unos 40 MB.
 
+**Lo que salió al mudarlo (2026-10-02)**
+
+- **El Docker de ese servidor es el de snap, y el control plane corre sin `no-new-privileges`.**
+  Con esa opción el contenedor no arranca: el daemon de snap tiene su propio perfil de AppArmor y
+  el kernel no deja pasar al del contenedor. Juan aceptó quitarla solo ahí, con
+  `deploy/docker-compose.snap.yml`. Quedan el usuario sin privilegios, ninguna capacidad, la raíz
+  de solo lectura y el perfil de AppArmor de Docker: se pierde una capa de defensa, no el
+  aislamiento. Las otras salidas eran peores (correr sin perfil de AppArmor) o más grandes
+  (cambiar el Docker de todos los productos de ese servidor).
+- **El control plane vive en `/root/status-sv`**, no en `/opt`: el daemon de snap no monta archivos
+  desde ahí, y la clave de TOTP se monta como archivo.
+- **Hay más vecinos de los que mostró el primer relevamiento:** el nginx de ese servidor atiende
+  unos veinte nombres, varios fuera de Docker. No cambia la decisión, pero sí el peso de la primera
+  consecuencia negativa.
+
 ## Cuándo revisarla
 
 Pasar al VPS dedicado de [ADR-014](ADR-014-control-plane-en-vps-propio.md), que sigue siendo el
@@ -79,6 +94,9 @@ destino, **antes** de cualquiera de estas cosas:
 - Que existan las alertas de la Fase 4.
 - Que haya tokens del MCP con permiso de escritura (Fase 3).
 - Que haga falta desplegar con status-sv algún proyecto de `srv936263`.
+
+En el VPS dedicado, con el Docker común, `no-new-privileges` vuelve solo: es el compose de
+producción sin el archivo de ajuste.
 
 ## Alternativas consideradas
 

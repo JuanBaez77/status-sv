@@ -87,7 +87,7 @@ Go en agent y servidor, PostgreSQL como base, y React con Vite para el panel. La
 | Estado del front | TanStack Query + WebSocket | Datos en vivo sin polling. |
 | Contratos | JSON versionado en `proto/` ([ADR-003](adr/ADR-003-contratos-json-versionado.md)) | Un solo origen para los mensajes agent ↔ servidor, legible al depurar. |
 | Smoke tests | Playwright | En un worker aparte, porque el navegador es pesado. |
-| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; corre detrás del nginx de un servidor propio compartido con otros productos ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)), adonde se muda desde el servidor de un cliente al desplegar el Sprint 4. El VPS dedicado queda como destino ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)). |
+| Despliegue propio | Docker Compose, detrás de Caddy o de un nginx existente | Caddy da HTTPS automático en un servidor dedicado; corre detrás del nginx de un servidor propio compartido con otros productos ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)), adonde se mudó desde el servidor de un cliente el 2026-10-02. El VPS dedicado queda como destino ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)). |
 
 **Sobre PostgreSQL**
 
@@ -622,47 +622,63 @@ desde el panel y `audit_log`).
 
 Contrato
 
-- [ ] `command` con las operaciones `deploy` (proyecto y, opcional, un SHA de 40 caracteres) y
+- [x] `command` con las operaciones `deploy` (proyecto y, opcional, un SHA de 40 caracteres) y
       `rollback` (proyecto), y el código de rechazo `disabled`.
-- [ ] Mensajes `deploy_event` y `deploy_event_ack`: foto completa del deploy con número de
+- [x] Mensajes `deploy_event` y `deploy_event_ack`: foto completa del deploy con número de
       secuencia, topes de pasos y de renglones, y archivos golden.
 
 Agent
 
-- [ ] Laboratorio: la unidad con el drop-in de deploy ejecutando `git` (con `ssh`) y
+- [x] Laboratorio: la unidad con el drop-in de deploy ejecutando `git` (con `ssh`) y
       `docker compose` como `statussv`, con `ReadWritePaths`, `MemoryMax` y el filtro de syscalls.
       Se mide antes de programar.
-- [ ] `project.yaml` con el formato de `deploy.pre` y `deploy.post` (ADR-016).
-- [ ] `gitops`: `fetch` de la rama declarada, verificación de que el commit pedido es ancestro de
+- [x] `project.yaml` con el formato de `deploy.pre` y `deploy.post` (ADR-016).
+- [x] `gitops`: `fetch` de la rama declarada, verificación de que el commit pedido es ancestro de
       la punta, árbol limpio y checkout, con `git` endurecido y la deploy key del proyecto.
-- [ ] `compose`: `build`, `up`, `run` de los pasos y la foto y el reetiquetado de imágenes por la
+- [x] `compose`: `build`, `up`, `run` de los pasos y la foto y el reetiquetado de imágenes por la
       API de Docker.
-- [ ] Motor de deploy: pasos en orden, ventana de verificación, rollback automático, diario en
+- [x] Motor de deploy: pasos en orden, ventana de verificación, rollback automático, diario en
       disco, un deploy a la vez y la salida enmascarada y acotada.
-- [ ] El agent atiende `deploy` y `rollback`, respeta el interruptor, manda `deploy_event` y, si se
+- [x] El agent atiende `deploy` y `rollback`, respeta el interruptor, manda `deploy_event` y, si se
       reinició a mitad de un deploy, vuelve atrás y lo informa.
 
 Servidor
 
-- [ ] Migración de `deploys` (con el índice que impide dos activos por proyecto) y `audit_log` de
+- [x] Migración de `deploys` (con el índice que impide dos activos por proyecto) y `audit_log` de
       solo inserción.
-- [ ] `POST /v1/projects/{id}/deploys`, `POST /v1/projects/{id}/rollback`, historial y detalle,
+- [x] `POST /v1/projects/{id}/deploys`, `POST /v1/projects/{id}/rollback`, historial y detalle,
       con el código TOTP en producción, el avance empujado por el WebSocket del panel y todo en
       `audit_log`.
 
 Panel
 
-- [ ] Desplegar y volver atrás desde la vista de un proyecto, con confirmación; avance en vivo por
+- [x] Desplegar y volver atrás desde la vista de un proyecto, con confirmación; avance en vivo por
       paso, con su salida; historial de deploys.
 
 Calidad y despliegue
 
-- [ ] Prueba de punta a punta del deploy en CI, con Docker de verdad y un proyecto Compose de
+- [x] Prueba de punta a punta del deploy en CI, con Docker de verdad y un proyecto Compose de
       muestra: deploy bueno, deploy roto que vuelve atrás solo, dos pedidos a la vez y el agent
       reiniciado a mitad de un deploy. Mide la meta de inicio de un deploy (menos de 3 s).
-- [ ] Instalador (`--enable-deploy` y el drop-in) y runbook: llaves, `known_hosts`, permisos del
+- [x] Instalador (`--enable-deploy` y el drop-in) y runbook: llaves, `known_hosts`, permisos del
       `workdir` y cómo prender el deploy.
-- [ ] Desplegar el sprint y probar un deploy real en un proyecto de poco riesgo.
+- [ ] Desplegar el sprint y probar un deploy real en un proyecto de poco riesgo. Hecho el
+      2026-10-02: el control plane mudado a `srv936263` y actualizado (commit `cfb08fa`, migración
+      00009). Falta actualizar los dos agents, limpiar el servidor viejo y el deploy real.
+
+**Entregado al 2026-10-02.** Trece PR (#60 a #72), con el CI verde y el deploy apagado en todos
+lados. Después del último aparecieron dos defectos, ya corregidos:
+
+- **Un deploy bueno podía deshacerse solo al reiniciar el agent** (#74). El acuse de una foto
+  reescribía el diario sin candado y podía pisar la foto final con una copia vieja; al arrancar, el
+  agent lo tomaba por un deploy cortado y lo volvía atrás. Lo encontró la prueba de punta a punta,
+  en el CI de un PR de documentación: era una carrera y no había salido en las corridas anteriores.
+- **El control plane aceptaba reabrir un deploy cerrado** (#75) con una foto de número más alto, y
+  sumaba un segundo cierre en `audit_log`. Ahora lo que el agent cerró no cambia.
+
+La mudanza del control plane ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md))
+se hizo el 2026-10-02 en el segundo intento, con dos minutos de corte; el primero hubo que
+revertirlo, con diez. Lo que dejó está en el runbook (sección 8).
 
 Terminado cuando un proyecto Docker real se despliega desde el panel; un deploy roto a propósito
 vuelve atrás solo y el sitio sigue respondiendo; el historial y `audit_log` registran los dos; el
