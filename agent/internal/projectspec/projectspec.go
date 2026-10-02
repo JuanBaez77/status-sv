@@ -8,8 +8,10 @@
 // Las reglas de cada campo están en proto.Project.Validate: el parser arma el
 // proyecto y lo valida con eso, así la regla se escribe una sola vez. Lo que
 // agrega acá es lo que solo tiene sentido sobre el archivo: el tamaño, los
-// campos desconocidos, que el nombre coincida con el del archivo y los pasos
-// declarados del deploy (ADR-016), que no viajan al control plane.
+// campos desconocidos, que el nombre coincida con el del archivo y lo que solo
+// usa quien despliega y no viaja al control plane: los pasos declarados del
+// deploy (ADR-016) y, en un proyecto systemd, con qué usuario y con qué archivo
+// de entorno corren (ADR-019).
 package projectspec
 
 import (
@@ -39,9 +41,17 @@ const (
 	DefaultTimeoutSeconds = 10
 )
 
-// RollbackPreviousImage es el único rollback declarable hoy: con Docker,
-// volver a la imagen anterior. El de systemd llega en el Sprint 5.
-const RollbackPreviousImage = "previous_image"
+// Los rollbacks declarables, uno por runtime: con Docker, volver a la imagen
+// anterior (ADR-015); con systemd, al commit anterior, corriendo deploy.build
+// de nuevo (ADR-019). Declararlo es opcional: cada runtime tiene uno solo.
+const (
+	RollbackPreviousImage  = "previous_image"
+	RollbackPreviousCommit = "previous_commit"
+)
+
+// AgentUser es el usuario del agent. Los pasos de un proyecto no pueden correr
+// con él: tendrían a mano su credencial y las deploy keys de todos.
+const AgentUser = "statussv"
 
 // ErrNotProjectFile es un archivo del directorio que no se lee como proyecto:
 // no termina en .yaml ni en .yml. Se ignora en silencio, como el README o un
@@ -60,6 +70,8 @@ type file struct {
 	ComposeProject string       `yaml:"compose_project"`
 	Workdir        string       `yaml:"workdir"`
 	Units          []string     `yaml:"units"`
+	RunAs          string       `yaml:"run_as"`
+	EnvFile        string       `yaml:"env_file"`
 	Healthcheck    *healthcheck `yaml:"healthcheck"`
 	Deploy         *deploySteps `yaml:"deploy"`
 	Rollback       string       `yaml:"rollback"`
@@ -71,10 +83,12 @@ type healthcheck struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-// deploySteps son los pasos previos y posteriores del deploy (ADR-016).
+// deploySteps son los pasos declarados del deploy (ADR-016). Build es solo de
+// los proyectos systemd (ADR-019).
 type deploySteps struct {
-	Pre  []step `yaml:"pre"`
-	Post []step `yaml:"post"`
+	Build []step `yaml:"build"`
+	Pre   []step `yaml:"pre"`
+	Post  []step `yaml:"post"`
 }
 
 // step es un paso declarado tal como se escribe.
@@ -92,28 +106,44 @@ const (
 	DefaultStepTimeout  = 300 * time.Second
 	maxStepTimeoutSecs  = 1800
 	maxStepServiceChars = 63
+	maxEnvFileLen       = 256
 )
 
-// Spec es un proyecto declarado con lo que solo usa el agent: los pasos del
-// deploy. Project es lo que viaja al control plane; los pasos no, porque un
-// comando podría traer algo que no tiene por qué salir del servidor.
+// Spec es un proyecto declarado con lo que solo usa quien despliega. Project
+// es lo que viaja al control plane; lo demás no, porque un comando o una ruta
+// podrían traer algo que no tiene por qué salir del servidor.
 type Spec struct {
 	Project proto.Project
-	Pre     []Step
-	Post    []Step
+	// Build son los pasos que preparan el código de un proyecto systemd
+	// (dependencias, estáticos). Se repiten en un rollback.
+	Build []Step
+	Pre   []Step
+	Post  []Step
+	// RunAs es el usuario con el que corren los pasos de un proyecto systemd.
+	RunAs string
+	// EnvFile es el archivo de entorno de esos pasos, si se declaró. Lo lee
+	// systemd; el agent no lo abre.
+	EnvFile string
 }
 
-// Step es un paso declarado: un comando que corre con docker compose run en
-// un servicio del proyecto, con la imagen recién compilada.
+// Step es un paso declarado. En un proyecto Docker corre con docker compose
+// run en Service, con la imagen recién compilada. En uno systemd no lleva
+// servicio: corre en el servidor, con el usuario del proyecto.
 type Step struct {
 	Service string
 	Command []string
 	Timeout time.Duration
+	// Exec es Command[0] resuelto a una ruta absoluta. Solo en proyectos
+	// systemd: ahí el programa no se busca en el PATH.
+	Exec string
 }
 
 // serviceName es el formato de un servicio de Compose: empieza con letra o
 // número, así nunca se lee como una opción.
 var serviceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+// userName es el formato de un usuario del sistema, el que acepta useradd.
+var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // NameFromFile devuelve el nombre de proyecto que corresponde a un archivo, o
 // ErrNotProjectFile si no es un archivo de proyecto.
@@ -168,8 +198,8 @@ func ParseSpec(filename string, data []byte) (Spec, error) {
 	case f.Name != expected:
 		return Spec{}, fmt.Errorf("name: tiene que ser igual al nombre del archivo (%s)", expected)
 	}
-	if f.Rollback != "" && (f.Rollback != RollbackPreviousImage || f.Runtime != string(proto.RuntimeDocker)) {
-		return Spec{}, fmt.Errorf("rollback: el único valor aceptado es %s, y solo con runtime docker", RollbackPreviousImage)
+	if err := checkRollback(f.Rollback, f.Runtime); err != nil {
+		return Spec{}, err
 	}
 
 	project := proto.Project{
@@ -206,24 +236,82 @@ func ParseSpec(filename string, data []byte) (Spec, error) {
 	}
 
 	spec := Spec{Project: project}
-	if f.Deploy != nil {
-		if (len(f.Deploy.Pre) > 0 || len(f.Deploy.Post) > 0) && project.Runtime != proto.RuntimeDocker {
-			return Spec{}, errors.New("deploy.pre y deploy.post: por ahora son solo para runtime docker (los de systemd llegan en el Sprint 5)")
-		}
-		var err error
-		if spec.Pre, err = parseSteps("deploy.pre", f.Deploy.Pre); err != nil {
+	systemd := project.Runtime == proto.RuntimeSystemd
+	if systemd {
+		// Sin pasos no hace falta un usuario: desplegar es traer el código y
+		// reiniciar. Así un proyecto que ya estaba declarado sigue valiendo.
+		steps := f.Deploy != nil && len(f.Deploy.Build)+len(f.Deploy.Pre)+len(f.Deploy.Post) > 0
+		if err := checkRun(f.RunAs, f.EnvFile, steps); err != nil {
 			return Spec{}, err
 		}
-		if spec.Post, err = parseSteps("deploy.post", f.Deploy.Post); err != nil {
+		spec.RunAs, spec.EnvFile = f.RunAs, f.EnvFile
+	} else if f.RunAs != "" || f.EnvFile != "" {
+		return Spec{}, errors.New("run_as y env_file: son solo para proyectos de systemd")
+	}
+	if f.Deploy != nil {
+		if len(f.Deploy.Build) > 0 && !systemd {
+			return Spec{}, errors.New("deploy.build: es solo para proyectos de systemd; con Docker compila docker compose build")
+		}
+		var err error
+		if spec.Build, err = parseSteps("deploy.build", f.Deploy.Build, project); err != nil {
+			return Spec{}, err
+		}
+		if spec.Pre, err = parseSteps("deploy.pre", f.Deploy.Pre, project); err != nil {
+			return Spec{}, err
+		}
+		if spec.Post, err = parseSteps("deploy.post", f.Deploy.Post, project); err != nil {
 			return Spec{}, err
 		}
 	}
 	return spec, nil
 }
 
-// parseSteps valida los pasos declarados de una lista (ADR-016). Como el resto
-// de los errores, nombran el campo y la regla, nunca el valor.
-func parseSteps(field string, raw []step) ([]Step, error) {
+// checkRollback revisa el rollback declarado contra el runtime: cada uno tiene
+// el suyo, y no declararlo es lo mismo que declarar ese.
+func checkRollback(rollback, runtime string) error {
+	switch {
+	case rollback == "":
+		return nil
+	case runtime == string(proto.RuntimeDocker) && rollback != RollbackPreviousImage:
+		return fmt.Errorf("rollback: con runtime docker el único valor aceptado es %s", RollbackPreviousImage)
+	case runtime == string(proto.RuntimeSystemd) && rollback != RollbackPreviousCommit:
+		return fmt.Errorf("rollback: con runtime systemd el único valor aceptado es %s", RollbackPreviousCommit)
+	}
+	return nil
+}
+
+// checkRun valida con qué usuario y con qué archivo de entorno corren los
+// pasos de un proyecto systemd (ADR-019). El usuario hace falta si hay pasos.
+func checkRun(runAs, envFile string, steps bool) error {
+	switch {
+	case runAs == "" && steps:
+		return errors.New("run_as: falta; es el usuario con el que corren los pasos del proyecto")
+	case runAs == "" && envFile != "":
+		return errors.New("env_file: necesita run_as; es el entorno de los pasos del proyecto")
+	case runAs == "":
+		return nil
+	case !userName.MatchString(runAs):
+		return errors.New("run_as: tiene que ser un nombre de usuario del sistema (minúsculas, números, _ y -)")
+	case runAs == "root" || runAs == AgentUser:
+		return fmt.Errorf("run_as: no puede ser root ni %s; el proyecto necesita un usuario propio", AgentUser)
+	}
+	if envFile == "" {
+		return nil
+	}
+	if len(envFile) > maxEnvFileLen || !printable(envFile) || !path.IsAbs(envFile) || path.Clean(envFile) != envFile || envFile == "/" {
+		return errors.New("env_file: tiene que ser la ruta absoluta y limpia de un archivo")
+	}
+	return nil
+}
+
+// parseSteps valida los pasos declarados de una lista (ADR-016 y ADR-019).
+// Como el resto de los errores, nombran el campo y la regla, nunca el valor.
+//
+// Con Docker, un paso corre en un servicio de Compose. Con systemd no hay
+// servicio, y el primer argumento es la ruta del programa: absoluta, o
+// relativa al workdir y sin salir de él. No se busca en el PATH.
+func parseSteps(field string, raw []step, project proto.Project) ([]Step, error) {
+	systemd := project.Runtime == proto.RuntimeSystemd
 	if len(raw) > MaxSteps {
 		return nil, fmt.Errorf("%s: trae %d pasos y el máximo es %d", field, len(raw), MaxSteps)
 	}
@@ -231,9 +319,11 @@ func parseSteps(field string, raw []step) ([]Step, error) {
 	for i, s := range raw {
 		where := fmt.Sprintf("%s[%d]", field, i)
 		switch {
-		case s.Service == "":
+		case systemd && s.Service != "":
+			return nil, fmt.Errorf("%s.service: es solo para proyectos de Docker; con systemd el paso corre en el servidor", where)
+		case !systemd && s.Service == "":
 			return nil, fmt.Errorf("%s.service: falta", where)
-		case len(s.Service) > maxStepServiceChars || !serviceName.MatchString(s.Service):
+		case !systemd && (len(s.Service) > maxStepServiceChars || !serviceName.MatchString(s.Service)):
 			return nil, fmt.Errorf("%s.service: tiene que ser un nombre de servicio de Compose (letras, números, _ . -)", where)
 		case len(s.Command) == 0:
 			return nil, fmt.Errorf("%s.command: falta; es una lista de argumentos, como [\"python\", \"manage.py\", \"migrate\"]", where)
@@ -253,9 +343,32 @@ func parseSteps(field string, raw []step) ([]Step, error) {
 		if s.TimeoutSeconds > 0 {
 			timeout = time.Duration(s.TimeoutSeconds) * time.Second
 		}
-		steps = append(steps, Step{Service: s.Service, Command: s.Command, Timeout: timeout})
+		parsed := Step{Service: s.Service, Command: s.Command, Timeout: timeout}
+		if systemd {
+			if parsed.Exec = execPath(project.Workdir, s.Command[0]); parsed.Exec == "" {
+				return nil, fmt.Errorf("%s.command[0]: tiene que ser la ruta del programa, absoluta o relativa al workdir y sin salir de él", where)
+			}
+		}
+		steps = append(steps, parsed)
 	}
 	return steps, nil
+}
+
+// execPath resuelve el programa de un paso de systemd a una ruta absoluta: tal
+// cual si ya lo es, o adentro del workdir si es relativa. Devuelve vacío si no
+// es una ruta limpia o si se sale del workdir.
+func execPath(workdir, program string) string {
+	if path.IsAbs(program) {
+		if path.Clean(program) != program || program == "/" {
+			return ""
+		}
+		return program
+	}
+	joined := path.Join(workdir, program)
+	if !strings.HasPrefix(joined, workdir+"/") {
+		return ""
+	}
+	return joined
 }
 
 // printable acepta texto UTF-8 válido sin caracteres de control: un argumento

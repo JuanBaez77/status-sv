@@ -447,7 +447,13 @@ El formato completo está en DISENO.md. Lo que conviene saber:
   va la lista de servicios en `units`.
 - `deploy.pre` y `deploy.post` son los pasos declarados del deploy ([ADR-016](adr/ADR-016-pasos-declarados-del-deploy.md)):
   un servicio de Compose y un comando como lista (`command: ["python", "manage.py", "migrate"]`).
-  Solo con Docker. Ver "Prender el deploy" más abajo.
+  Ver "Prender el deploy" más abajo.
+- Con systemd los pasos no llevan `service` y hay uno más, `deploy.build`, para lo que prepara el
+  código ([ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md)). El primer argumento es la ruta
+  del programa, absoluta o relativa al `workdir` (`.venv/bin/pip`): no se busca en el `PATH`. Si
+  hay pasos, hace falta `run_as`, el usuario con el que corren, que no puede ser `root` ni
+  `statussv`; `env_file` es opcional. El archivo ya se acepta así, pero **el deploy de proyectos
+  systemd todavía no está**: llega en este mismo sprint.
 - Si declara `healthcheck`, el agent hace un `GET` a esa URL cada 60 s desde el propio servidor, sin
   proxy, verificando el certificado y **sin seguir redirecciones**: si la URL responde 301, hay que
   declarar `expect_status: 301` o apuntar a la URL final. Si no se fijan, `expect_status` es 200 y

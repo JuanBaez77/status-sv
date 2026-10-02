@@ -142,6 +142,84 @@ func TestParseSystemdWithDefaults(t *testing.T) {
 	}
 }
 
+// Un proyecto systemd con todo lo que usa el deploy (ADR-019): el usuario, el
+// archivo de entorno y los pasos, que no llevan servicio y cuyo programa se
+// resuelve a una ruta absoluta.
+func TestParseSystemdSpec(t *testing.T) {
+	yaml := systemdYAML + `run_as: facturas
+env_file: /etc/facturas/env
+deploy:
+  build:
+    - command: [".venv/bin/pip", "install", "-r", "requirements.txt"]
+      timeout_seconds: 600
+    - command: ["./scripts/estaticos.sh"]
+  pre:
+    - command: [".venv/bin/python", "manage.py", "migrate", "--noinput"]
+  post:
+    - command: ["/usr/bin/curl", "-fsS", "http://127.0.0.1:8000/warmup"]
+rollback: previous_commit
+`
+	spec, err := ParseSpec("facturas.yaml", []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseSpec: %v", err)
+	}
+	if spec.RunAs != "facturas" || spec.EnvFile != "/etc/facturas/env" {
+		t.Errorf("usuario = %q, entorno = %q", spec.RunAs, spec.EnvFile)
+	}
+	if len(spec.Build) != 2 || len(spec.Pre) != 1 || len(spec.Post) != 1 {
+		t.Fatalf("pasos = %d build, %d pre, %d post", len(spec.Build), len(spec.Pre), len(spec.Post))
+	}
+
+	pip := spec.Build[0]
+	if pip.Exec != "/srv/facturas/.venv/bin/pip" || pip.Service != "" || pip.Timeout != 600*time.Second {
+		t.Errorf("build[0] = %+v", pip)
+	}
+	// Lo que se escribió se conserva, para mostrarlo.
+	if strings.Join(pip.Command, " ") != ".venv/bin/pip install -r requirements.txt" {
+		t.Errorf("build[0].Command = %q", pip.Command)
+	}
+	if got := spec.Build[1]; got.Exec != "/srv/facturas/scripts/estaticos.sh" || got.Timeout != DefaultStepTimeout {
+		t.Errorf("build[1] = %+v", got)
+	}
+	if got := spec.Pre[0].Exec; got != "/srv/facturas/.venv/bin/python" {
+		t.Errorf("pre[0].Exec = %q", got)
+	}
+	// Una ruta absoluta queda tal cual.
+	if got := spec.Post[0].Exec; got != "/usr/bin/curl" {
+		t.Errorf("post[0].Exec = %q", got)
+	}
+
+	// Nada de esto viaja al control plane: el proyecto es el mismo con o sin.
+	plain, err := Parse("facturas.yaml", []byte(systemdYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if spec.Project.Workdir != plain.Workdir || len(spec.Project.Units) != len(plain.Units) {
+		t.Errorf("el proyecto cambió con los pasos: %+v", spec.Project)
+	}
+}
+
+// Un proyecto systemd que ya estaba declarado, sin usuario ni pasos, sigue
+// valiendo: desplegarlo es traer el código y reiniciar.
+func TestParseSystemdWithoutStepsNeedsNoUser(t *testing.T) {
+	for name, extra := range map[string]string{
+		"nada":             "",
+		"deploy vacío":     "deploy:\n  build: []\n  pre: []\n  post: []\n",
+		"rollback":         "rollback: previous_commit\n",
+		"usuario sin paso": "run_as: facturas\nenv_file: /etc/facturas/env\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			spec, err := ParseSpec("facturas.yaml", []byte(systemdYAML+extra))
+			if err != nil {
+				t.Fatalf("ParseSpec: %v", err)
+			}
+			if len(spec.Build)+len(spec.Pre)+len(spec.Post) != 0 {
+				t.Errorf("pasos = %+v", spec)
+			}
+		})
+	}
+}
+
 // Cada caso rompe el archivo de una forma y verifica que se rechace con un
 // error que nombra lo que está mal.
 func TestParseRejects(t *testing.T) {
@@ -173,7 +251,21 @@ func TestParseRejects(t *testing.T) {
 		{name: "timeout fuera de rango", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [ls]\n      timeout_seconds: 3600"), wantErr: "timeout_seconds"},
 		{name: "campo desconocido en un paso", filename: "cristales-baez.yaml", yaml: withPre("    - service: backend\n      command: [ls]\n      shell: true"), wantErr: "el campo shell no existe"},
 		{name: "demasiados pasos", filename: "cristales-baez.yaml", yaml: withPre(strings.Repeat("    - service: backend\n      command: [ls]\n", MaxSteps+1)), wantErr: "pasos y el máximo"},
-		{name: "pasos con systemd", filename: "facturas.yaml", yaml: systemdYAML + "deploy:\n  post:\n    - service: web\n      command: [ls]\n", wantErr: "solo para runtime docker"},
+		{name: "paso de systemd con servicio", filename: "facturas.yaml", yaml: systemdYAML + "run_as: facturas\ndeploy:\n  post:\n    - service: web\n      command: [./ls]\n", wantErr: "deploy.post[0].service: es solo para proyectos de Docker"},
+		{name: "pasos de systemd sin usuario", filename: "facturas.yaml", yaml: systemdYAML + "deploy:\n  pre:\n    - command: [.venv/bin/python, manage.py, migrate]\n", wantErr: "run_as: falta"},
+		{name: "entorno sin usuario", filename: "facturas.yaml", yaml: systemdYAML + "env_file: /etc/facturas/env\n", wantErr: "env_file: necesita run_as"},
+		{name: "pasos con root", filename: "facturas.yaml", yaml: systemdYAML + "run_as: root\n", wantErr: "no puede ser root"},
+		{name: "pasos con el usuario del agent", filename: "facturas.yaml", yaml: systemdYAML + "run_as: statussv\n", wantErr: "no puede ser root ni statussv"},
+		{name: "usuario que parece opción", filename: "facturas.yaml", yaml: systemdYAML + "run_as: \"-u root\"\n", wantErr: "run_as: tiene que ser un nombre de usuario"},
+		{name: "usuario numérico", filename: "facturas.yaml", yaml: systemdYAML + "run_as: \"0\"\n", wantErr: "run_as: tiene que ser un nombre de usuario"},
+		{name: "entorno relativo", filename: "facturas.yaml", yaml: systemdYAML + "run_as: facturas\nenv_file: .env\n", wantErr: "env_file: tiene que ser la ruta absoluta"},
+		{name: "entorno con ..", filename: "facturas.yaml", yaml: systemdYAML + "run_as: facturas\nenv_file: /etc/facturas/../shadow\n", wantErr: "env_file"},
+		{name: "programa que se sale del workdir", filename: "facturas.yaml", yaml: systemdYAML + "run_as: facturas\ndeploy:\n  build:\n    - command: [../otro/bin/pip, install]\n", wantErr: "deploy.build[0].command[0]: tiene que ser la ruta del programa"},
+		{name: "programa que es el workdir", filename: "facturas.yaml", yaml: systemdYAML + "run_as: facturas\ndeploy:\n  build:\n    - command: [.]\n", wantErr: "deploy.build[0].command[0]"},
+		{name: "programa absoluto con ..", filename: "facturas.yaml", yaml: systemdYAML + "run_as: facturas\ndeploy:\n  build:\n    - command: [/srv/facturas/../../bin/sh]\n", wantErr: "deploy.build[0].command[0]"},
+		{name: "build con docker", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "  pre: []", "  build:\n    - command: [./make.sh]\n  pre: []", 1), wantErr: "deploy.build: es solo para proyectos de systemd"},
+		{name: "usuario con docker", filename: "cristales-baez.yaml", yaml: dockerYAML + "run_as: app\n", wantErr: "run_as y env_file: son solo para proyectos de systemd"},
+		{name: "rollback de systemd con docker", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "previous_image", "previous_commit", 1), wantErr: "rollback: con runtime docker"},
 		{name: "rollback inventado", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "previous_image", "git_revert", 1), wantErr: "rollback"},
 		{name: "rollback con systemd", filename: "facturas.yaml", yaml: systemdYAML + "rollback: previous_image\n", wantErr: "rollback"},
 		{name: "tipo equivocado", filename: "cristales-baez.yaml", yaml: strings.Replace(dockerYAML, "expect_status: 200", "expect_status: doscientos", 1), wantErr: "YAML inválido"},
@@ -204,6 +296,9 @@ func TestParseRejects(t *testing.T) {
 func TestParseErrorsNeverIncludeValues(t *testing.T) {
 	const secret = "s3cr3t0"
 	files := map[string]string{
+		"usuario":      systemdYAML + "run_as: " + secret + "!\n",
+		"entorno file": systemdYAML + "run_as: facturas\nenv_file: " + secret + "/env\n",
+		"programa":     systemdYAML + "run_as: facturas\ndeploy:\n  build:\n    - command: [../" + secret + "/pip]\n",
 		"tipo":         strings.Replace(dockerYAML, "expect_status: 200", "expect_status: "+secret, 1),
 		"url":          strings.Replace(dockerYAML, "https://cristales", "https://juan:"+secret+"@cristales", 1),
 		"repo":         strings.Replace(dockerYAML, "github.com/extendsystem/cristales-baez", secret+" ; rm", 1),
