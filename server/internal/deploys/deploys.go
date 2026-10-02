@@ -36,6 +36,9 @@ var (
 	// ErrUnknownDeploy es una foto de un deploy que no existe, o que no es
 	// del servidor que la manda.
 	ErrUnknownDeploy = errors.New("no hay un deploy con ese ID para este servidor")
+	// ErrClosed es una foto más nueva de un deploy que el agent ya había
+	// cerrado. No se aplica: un final no se reabre ni se cambia por otro.
+	ErrClosed = errors.New("el deploy ya estaba cerrado")
 )
 
 // Service guarda y actualiza deploys.
@@ -96,6 +99,8 @@ func (s *Service) Reject(ctx context.Context, id uuid.UUID, code, message string
 
 // Apply guarda una foto del agent. applied es false si la foto es más vieja
 // o igual a la guardada (hay que confirmarla igual: ya se tiene algo mejor).
+// Con ErrClosed tampoco se aplicó, y también hay que confirmarla: el agent no
+// tiene nada mejor para mandar y no sirve que la reintente.
 func (s *Service) Apply(ctx context.Context, serverID uuid.UUID, ev proto.DeployEvent) (store.Deploy, bool, error) {
 	steps, err := json.Marshal(ev.Steps)
 	if err != nil {
@@ -122,11 +127,15 @@ func (s *Service) Apply(ctx context.Context, serverID uuid.UUID, ev proto.Deploy
 	case err == nil:
 		return d, true, nil
 	case errors.Is(err, pgx.ErrNoRows):
-		if _, err := s.q.DeploySeq(ctx, store.DeploySeqParams{ID: ev.DeployID, ServerID: serverID}); err != nil {
+		seq, err := s.q.DeploySeq(ctx, store.DeploySeqParams{ID: ev.DeployID, ServerID: serverID})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return store.Deploy{}, false, ErrUnknownDeploy
 			}
 			return store.Deploy{}, false, fmt.Errorf("buscar el deploy: %w", err)
+		}
+		if int(seq) < ev.Seq {
+			return store.Deploy{}, false, ErrClosed
 		}
 		return store.Deploy{}, false, nil
 	case errors.As(err, &pgErr) && pgErr.Code == uniqueViolation:

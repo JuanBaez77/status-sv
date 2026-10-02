@@ -335,7 +335,8 @@ func (s *Server) handleGetDeploy(w http.ResponseWriter, r *http.Request) {
 // handleDeployEvent guarda la foto de un deploy que manda el agent y le
 // contesta, como con las otras fotos:
 //
-//   - deploy_event_ack: guardada, o más vieja que la guardada.
+//   - deploy_event_ack: guardada, más vieja que la guardada, o de un deploy
+//     que el agent ya había cerrado (no se aplica: un final no se reabre).
 //   - invalid_message: no se va a aceptar nunca (un deploy que no existe o
 //     que no es de este servidor); la descarta.
 //   - rate_limited o internal: la vuelve a mandar más tarde.
@@ -356,6 +357,11 @@ func (s *Server) handleDeployEvent(ctx context.Context, conn *websocket.Conn, se
 	defer cancel()
 	d, applied, err := s.deploys.Apply(ingestCtx, server.ID, ev)
 	switch {
+	case errors.Is(err, deploys.ErrClosed):
+		// No se aplica, pero se confirma: el agent no tiene nada mejor para
+		// mandar. Es raro y conviene verlo: un deploy cerrado no manda fotos.
+		s.log.WarnContext(ctx, "foto de un deploy que ya estaba cerrado; no se aplica", "servidor", server.Name,
+			"deploy", ev.DeployID, "seq", ev.Seq, "estado", ev.Status)
 	case errors.Is(err, deploys.ErrUnknownDeploy), errors.Is(err, deploys.ErrActive):
 		s.log.WarnContext(ctx, "foto de deploy descartada", "servidor", server.Name, "deploy", ev.DeployID, "error", err)
 		s.replyError(ctx, conn, envelope.ID, proto.CodeInvalidMessage, err.Error())

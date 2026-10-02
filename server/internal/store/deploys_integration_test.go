@@ -110,17 +110,53 @@ func TestApplyDeployEventOnlyMovesForward(t *testing.T) {
 	if _, err := apply(9, "succeeded", &now, uuid.Must(uuid.NewV7())); !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("foto de otro servidor = %v", err)
 	}
+	// Un final sin fecha de fin lo rechaza la base.
+	var pgErr *pgconn.PgError
+	if _, err := apply(4, "failed", nil, f.serverID); !errors.As(err, &pgErr) {
+		t.Errorf("deploy terminado sin fin = %v, se esperaba que la base lo rechazara", err)
+	}
 	finished := now.Add(time.Minute)
 	d, err := apply(4, "succeeded", &finished, f.serverID)
 	if err != nil || d.Status != "succeeded" || d.FinishedAt == nil {
 		t.Fatalf("final = %+v, %v", d, err)
 	}
+	// Lo que el agent cerró no se reabre ni cambia de final, aunque la foto
+	// traiga un número más alto.
+	later := finished.Add(time.Minute)
+	for _, c := range []struct {
+		status   string
+		finished *time.Time
+	}{{"running", nil}, {"rolled_back", &later}} {
+		if _, err := apply(9, c.status, c.finished, f.serverID); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("foto %s sobre un deploy cerrado = %v, se esperaba que no se aplicara", c.status, err)
+		}
+	}
 	if seq, err := f.q.DeploySeq(ctx, store.DeploySeqParams{ID: id, ServerID: f.serverID}); err != nil || seq != 4 {
 		t.Errorf("DeploySeq = %d, %v", seq, err)
 	}
-	// Un final sin fecha de fin lo rechaza la base.
-	if _, err := apply(5, "failed", nil, f.serverID); err == nil {
-		t.Error("se aceptó un deploy terminado sin fin")
+	if got, err := f.q.GetDeploy(ctx, id); err != nil || got.Status != "succeeded" {
+		t.Errorf("el deploy quedó %q, %v", got.Status, err)
+	}
+}
+
+// Un deploy que el control plane cerró sin recibir ninguna foto (el agent no
+// contestó a tiempo) revive si el agent lo había empezado igual.
+func TestApplyDeployEventRevivesAnExpiredDeploy(t *testing.T) {
+	f := newDeployFixture(t)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	id, err := f.create(t, now.Add(-5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired, err := f.q.ExpirePendingDeploys(ctx, store.ExpirePendingDeploysParams{Now: now, Before: now.Add(-2 * time.Minute)}); err != nil || len(expired) != 1 {
+		t.Fatalf("expirados = %+v, %v", expired, err)
+	}
+	d, err := f.q.ApplyDeployEvent(ctx, store.ApplyDeployEventParams{
+		ID: id, ServerID: f.serverID, Status: "running", StartedAt: &now, Seq: 1, Steps: []byte(`[]`), UpdatedAt: now,
+	})
+	if err != nil || d.Status != "running" || d.Seq != 1 {
+		t.Fatalf("la primera foto de un deploy expirado = %+v, %v", d, err)
 	}
 }
 

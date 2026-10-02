@@ -26,6 +26,11 @@ RETURNING *;
 
 -- ApplyDeployEvent guarda la foto que mandó el agent, solo si es más nueva
 -- que la guardada y viene del servidor al que se le pidió el deploy.
+--
+-- Un deploy que el agent ya cerró no se vuelve a abrir ni cambia de final: su
+-- resultado ya está en audit_log. El que cerró el control plane sin haber
+-- recibido ninguna foto (seq 0: rechazado o sin respuesta) sí puede revivir,
+-- porque el agent pudo haberlo empezado igual.
 -- name: ApplyDeployEvent :one
 UPDATE deploys
 SET status          = sqlc.arg('status'),
@@ -41,6 +46,7 @@ SET status          = sqlc.arg('status'),
 WHERE id = sqlc.arg('id')
   AND server_id = sqlc.arg('server_id')
   AND seq < sqlc.arg('seq')
+  AND (seq = 0 OR status IN ('pending', 'running'))
 RETURNING *;
 
 -- DeploySeq devuelve la última foto aplicada de un deploy de un servidor. Sin

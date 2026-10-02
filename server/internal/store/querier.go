@@ -66,6 +66,11 @@ type Querier interface {
 	AggregateSamplesByMinute(ctx context.Context, arg AggregateSamplesByMinuteParams) (int64, error)
 	// ApplyDeployEvent guarda la foto que mandó el agent, solo si es más nueva
 	// que la guardada y viene del servidor al que se le pidió el deploy.
+	//
+	// Un deploy que el agent ya cerró no se vuelve a abrir ni cambia de final: su
+	// resultado ya está en audit_log. El que cerró el control plane sin haber
+	// recibido ninguna foto (seq 0: rechazado o sin respuesta) sí puede revivir,
+	// porque el agent pudo haberlo empezado igual.
 	ApplyDeployEvent(ctx context.Context, arg ApplyDeployEventParams) (Deploy, error)
 	// ConsumeEnrollmentToken marca el token como usado y lo ata al servidor que creó.
 	// La condición used_at IS NULL hace que el segundo intento no devuelva ninguna
