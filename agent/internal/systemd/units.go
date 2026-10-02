@@ -41,13 +41,29 @@ func NewUnitReader() *UnitReader {
 	}}
 }
 
-// UnitState lee el estado de una unidad de servicio.
+// UnitState lee el estado de una unidad de servicio. Si la conexión que
+// tenía se cortó, abre otra y lo intenta una vez más.
 func (r *UnitReader) UnitState(ctx context.Context, unit string) (UnitState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	reused := r.conn != nil
+	state, err := r.attempt(ctx, unit)
+	if err != nil && reused && ctx.Err() == nil {
+		state, err = r.attempt(ctx, unit)
+	}
+	return state, err
+}
+
+// attempt lee con la conexión abierta, o abre una. Si la lectura falla, la
+// conexión se cierra: una conexión cortada no se recupera sola.
+func (r *UnitReader) attempt(ctx context.Context, unit string) (UnitState, error) {
 	if r.conn == nil {
-		conn, err := r.dial(ctx)
+		// La conexión vive más que el pedido que la abre. La biblioteca la
+		// cierra cuando se cancela el contexto con el que se abrió, y ese
+		// contexto es el de un deploy: sin esto, el deploy siguiente se
+		// encontraba con la conexión cerrada.
+		conn, err := r.dial(context.WithoutCancel(ctx))
 		if err != nil {
 			return UnitState{}, fmt.Errorf("conectar al bus: %w", err)
 		}
@@ -55,8 +71,6 @@ func (r *UnitReader) UnitState(ctx context.Context, unit string) (UnitState, err
 	}
 	state, err := r.read(ctx, unit)
 	if err != nil {
-		// Una conexión cortada no se recupera sola: se abre de nuevo en el
-		// próximo pedido.
 		r.conn.Close()
 		r.conn = nil
 		return UnitState{}, err

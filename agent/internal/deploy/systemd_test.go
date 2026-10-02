@@ -269,6 +269,10 @@ func TestSystemdDeploySucceeds(t *testing.T) {
 	if detail := ev.Steps[2].Detail; detail != short(commitOld) {
 		t.Errorf("snapshot = %q: un proyecto de systemd no anota imágenes", detail)
 	}
+	// El paso de reinicio dice qué reinició.
+	if detail := ev.Steps[7].Detail; detail != unitWeb+", "+unitWorker {
+		t.Errorf("reinicio = %q", detail)
+	}
 	if detail := ev.Steps[8].Detail; !strings.Contains(detail, "2 unidades andando") || !strings.Contains(detail, "healthcheck HTTP 200") {
 		t.Errorf("verificación = %q", detail)
 	}
@@ -474,6 +478,9 @@ func TestSystemdManualRollback(t *testing.T) {
 	}
 	if h.git.head != commitOld || ev.Commit != commitOld {
 		t.Errorf("quedó en %s, la foto dice %s", h.git.head, ev.Commit)
+	}
+	if detail := ev.Steps[5].Detail; detail != unitWeb+", "+unitWorker {
+		t.Errorf("reinicio = %q", detail)
 	}
 }
 

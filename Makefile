@@ -105,6 +105,10 @@ test-e2e: ## Prueba de punta a punta con Docker: control plane, base y agent
 test-e2e-deploy: ## Deploy de punta a punta con el Docker de la máquina (necesita DATABASE_URL)
 	./deploy/e2e/deploy.sh
 
+.PHONY: test-e2e-deploy-systemd
+test-e2e-deploy-systemd: ## Deploy de systemd de punta a punta; como root, en una máquina descartable (necesita DATABASE_URL, SERVER_BIN y AGENT_BIN)
+	./deploy/e2e/deploy-systemd.sh
+
 .PHONY: test-carga
 test-carga: ## Prueba de carga: 10 agents simulados y las metas de rendimiento
 	./deploy/carga/run.sh
