@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-09-30
+Última actualización: 2026-10-02
 
 ## Visión y alcance
 
@@ -224,6 +224,8 @@ Claude Code hace el trabajo de git y PR con `git` y `gh` locales. El MCP se ocup
 
 Además de actualizar proyectos existentes, status-sv levanta un proyecto completo en un servidor a partir de su repositorio. Es una operación distinta del `deploy` común porque crea cosas nuevas (directorio, servicio, proxy, certificado), así que siempre pide aprobación humana, también en staging.
 
+Se construye en dos partes ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)). El Sprint 5 trae el primer deploy: clonar, compilar, levantar y verificar un proyecto que una persona ya declaró y preparó por SSH. Lo que sigue describe el destino; los pasos que necesitan root, los secretos y `register_project` son del Sprint 6, con tres decisiones todavía abiertas (ver Riesgos y decisiones abiertas).
+
 | Herramienta | Qué hace |
 | --- | --- |
 | `register_project` | Declara el proyecto nuevo: repo, servidor, runtime, entorno, dominio, healthcheck y variables requeridas. |
@@ -354,8 +356,26 @@ rollback: previous_image
 
 Un proyecto de systemd lleva `runtime: systemd` y, en vez de `compose_file` y `compose_project`,
 la lista de sus servicios en `units` (por ejemplo `[gunicorn-cristales.service]`). El campo `server`
-ya no existe: el servidor es el que tiene el archivo. Los pasos `pre` y `post` son solo para Docker
-hasta el Sprint 5.
+ya no existe: el servidor es el que tiene el archivo.
+
+Para desplegarlo (Sprint 5, [ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md)) declara además
+el usuario con el que corren sus pasos y, si hace falta, su archivo de entorno. Los pasos no llevan
+`service`: son un comando como lista, cuyo primer argumento es una ruta absoluta o relativa al
+`workdir`. `deploy.build` es lo que prepara el código, y se repite en un rollback.
+
+```yaml
+runtime: systemd
+units: [gunicorn-ypf-aca.service]
+run_as: ypfaca                    # ni root ni el usuario del agent
+env_file: /etc/ypf-aca/env        # opcional; el agent no lo lee
+deploy:
+  build:
+    - command: [".venv/bin/pip", "install", "-r", "requirements.txt"]
+      timeout_seconds: 600
+  pre:
+    - command: [".venv/bin/python", "manage.py", "migrate", "--noinput"]
+rollback: previous_commit
+```
 
 Para desplegar, el agent trae el código de `repo` con la deploy key del proyecto, si tiene una, en
 `/etc/status-sv/keys/<nombre>` ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
@@ -364,15 +384,15 @@ El ejemplo usa datos ilustrativos; los valores reales los definís vos por proye
 
 ## Fases y roadmap
 
-El MVP útil llega al final de la Fase 3, con unas 15 semanas de trabajo. Las estimaciones son aproximadas y suponen sprints de 2 semanas con un solo desarrollador a medio tiempo, aprendiendo Go sobre la marcha; conviene revisarlas al cierre del Sprint 1.
+El MVP útil llega al final de la Fase 3, con unas 17 semanas de trabajo. Las estimaciones son aproximadas y suponen sprints de 2 semanas con un solo desarrollador a medio tiempo, aprendiendo Go sobre la marcha; conviene revisarlas al cierre del Sprint 1.
 
 | Fase | Objetivo | Sprints | Criterio de salida |
 | --- | --- | --- | --- |
 | Sprint 0 | Fundaciones: repo, CI, PostgreSQL, un agent mínimo que se conecta y envía un latido. | 1 semana | Un agent real aparece como online en la base. |
 | Fase 1 | Observabilidad: métricas y estado de Docker y systemd de varios servidores en el panel. | Sprints 1 a 3 | Dos VPS visibles en vivo, con las metas de rendimiento cumplidas. |
-| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 y 5 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos. |
-| Fase 3 | MCP remoto con tokens, scopes y aprobaciones, conectado a Claude Code. | Sprints 6 y 7 | El flujo completo (PR, merge, deploy aprobado, verificación) corre desde Claude Code. |
-| Fase 4 | Smoke tests, alertas, chequeos de seguridad, mTLS y OAuth para claude.ai. | Sprints 8 en adelante | claude.ai usa el MCP con OAuth y hay alertas activas. |
+| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 a 6 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos (se cumple en el Sprint 5; el Sprint 6 completa el deploy desde cero). |
+| Fase 3 | MCP remoto con tokens, scopes y aprobaciones, conectado a Claude Code. | Sprints 7 y 8 | El flujo completo (PR, merge, deploy aprobado, verificación) corre desde Claude Code. |
+| Fase 4 | Smoke tests, alertas, chequeos de seguridad, mTLS y OAuth para claude.ai. | Sprints 9 en adelante | claude.ai usa el MCP con OAuth y hay alertas activas. |
 
 **Qué entra en cada fase**
 
@@ -381,15 +401,15 @@ El MVP útil llega al final de la Fase 3, con unas 15 semanas de trabajo. Las es
 - **Fase 3:** herramientas MCP de lectura y escritura, tokens con scopes, aprobaciones en el panel, límites de frecuencia, auditoría con actor LLM.
 - **Fase 4:** worker Playwright, alertas (correo o Telegram), chequeos de seguridad del servidor, actualización del agent desde el panel, OAuth 2.1.
 
-El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, en el Sprint 5, sobre el deploy Docker y el de systemd, y se expone por MCP en el Sprint 7. Si el Sprint 4 muestra que el alcance no entra, se mueve al Sprint 6.
+El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, sobre el deploy Docker y el de systemd, y se expone por MCP en el Sprint 8. El Sprint 4 mostró que el alcance no entraba en un sprint, así que se partió ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)): el Sprint 5 trae el primer deploy (clonar y levantar un proyecto ya declarado y preparado por una persona), y el Sprint 6 lo que necesita root (la unidad, el proxy y el certificado desde plantillas), los secretos y `register_project`.
 
 **Ideas para más adelante**
 
 Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
 
-## Sprints 0 a 4
+## Sprints 0 a 5
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, y el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, y el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -718,15 +738,92 @@ Lecciones del despliegue (las de la mudanza están en el runbook, sección 8):
 - **Un agent viejo convive con un control plane nuevo.** Los dos agents siguieron reportando en la
   versión anterior hasta que se actualizaron, sin tocarlos durante la mudanza.
 
+**Sprint 5 (2 semanas): deploy de proyectos systemd, auditoría y primer deploy**
+
+Objetivo: desplegar desde el panel un proyecto que corre como servicio de systemd (gunicorn), con
+verificación y rollback automático; leer la auditoría desde el panel, y levantar por primera vez un
+proyecto ya declarado. Las seis decisiones que lo abrían las tomó Juan el 2026-10-02, aceptando las
+recomendaciones del plan: [ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md) (el deploy de
+systemd), [ADR-020](adr/ADR-020-que-se-audita-y-como-se-lee.md) (la auditoría) y
+[ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md) (el primer deploy y lo que
+pasa al Sprint 6).
+
+- **El código de un proyecto no corre como hijo del agent.** Sus pasos corren en unidades
+  transitorias de systemd, con el usuario del proyecto, y el reinicio del servicio lo hace un
+  ayudante root de tres operaciones fijas. El plan decía una regla de polkit; Ubuntu 22.04, que es
+  lo que corre `sv-gcg`, no la soporta. **Ese cambio espera el visto bueno de Juan** (ADR-019,
+  punto 3) y bloquea desde el PR 7.
+- **El proyecto gunicorn real** es uno de demostración en `sv-gcg`, salvo que aparezca un servidor
+  de cliente con gunicorn: los sitios fuera de Docker conocidos están en `srv936263`, donde el
+  deploy no se prende ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)).
+
+Medir antes de programar
+
+- [ ] Laboratorio: la unidad real del agent hablando con el ayudante por su socket; un paso que
+      corre con otro usuario, con su archivo de entorno y su tiempo máximo; el reinicio de una
+      unidad declarada y el rechazo de una que no lo está; el paso que se para si se corta la
+      conexión; y la regla de polkit, que queda medida y descartada.
+
+Auditoría
+
+- [ ] Acciones de acceso en `audit_log`: logins, segundo factor, enrolamiento de agents y los
+      subcomandos de CLI, sin guardar lo que se escribió en un login fallido.
+- [ ] `GET /v1/audit` con cursor y filtros.
+- [ ] Página de auditoría en el panel, con enlaces desde un proyecto y desde un deploy.
+
+Contrato
+
+- [ ] El paso `restart`, `build` repetible y el código `restart_failed`.
+
+Agent
+
+- [ ] `project.yaml` de systemd: `run_as`, `env_file`, `deploy.build` y pasos sin `service`
+      (ADR-019).
+- [ ] Ayudante root (`statussv-agent unit-helper`): `run_step`, `stop_step` y `restart_units` sobre
+      proyectos declarados, por un socket unix, y el cliente del agent.
+- [ ] El instalador instala el ayudante con `--enable-deploy`, y `deploy-check` revisa un proyecto
+      systemd.
+- [ ] Motor: una interfaz de runtime con Docker detrás, sin cambiar el comportamiento.
+- [ ] Motor: el runtime systemd, con su verificación, su rollback y la recuperación si el agent se
+      reinicia en el medio.
+
+Servidor y panel
+
+- [ ] Aceptar el deploy y el rollback de proyectos systemd, con los pasos nuevos y sus avisos.
+
+Primer deploy (línea de corte)
+
+- [ ] La operación `bootstrap` en el contrato y en el motor, para Docker y systemd (ADR-021).
+- [ ] `POST /v1/projects/{id}/bootstrap` con TOTP siempre, la migración 00010 y el botón en el panel.
+
+Calidad y despliegue
+
+- [ ] Prueba de punta a punta del deploy systemd en CI, con systemd de verdad y un servicio de
+      muestra: deploy bueno, deploy roto que vuelve atrás solo, un paso que falla y el agent
+      reiniciado a mitad de un deploy.
+- [ ] Runbook: preparar y prender el deploy de un proyecto systemd, y la lista de lo que hace una
+      persona antes de un primer deploy.
+- [ ] Desplegar el sprint y probar un deploy real de un proyecto gunicorn, bueno y roto a propósito.
+      Incluye el pendiente del Sprint 4: el deploy roto de un proyecto Docker en un servidor real.
+
+Terminado cuando un proyecto gunicorn real se despliega desde el panel; un deploy roto a propósito
+vuelve atrás solo y el sitio sigue respondiendo; la página de auditoría muestra los dos, y los
+logins; el agent sigue por debajo de 30 MB de RAM y 1% de CPU en reposo; y el CI está verde, con el
+e2e del deploy systemd.
+
+Si el sprint se estira, la línea de corte es el primer deploy, que pasa entero al Sprint 6 con el
+resto del deploy desde cero.
+
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |
 | --- | --- | --- |
 | 3 | Proyectos y cierre de la Fase 1 | Lectura de `project.yaml`, vista de proyectos, agregado por hora, TOTP y segundo servidor en vivo. |
 | 4 | Deploy Docker | `deploy` con `git fetch`, build, healthcheck y rollback automático; `audit_log` mínimo. |
-| 5 | Deploy systemd y auditoría | Deploy de gunicorn, vista de auditoría en el panel y el deploy desde cero. |
-| 6 | MCP de lectura y tokens | Herramientas de lectura, tokens con scopes, conexión con Claude Code. |
-| 7 | MCP de escritura y aprobaciones | `deploy`, `rollback` y `restart` con aprobación humana en el panel. |
+| 5 | Deploy systemd y auditoría | Deploy de gunicorn, vista de auditoría en el panel y el primer deploy de un proyecto declarado. |
+| 6 | Deploy desde cero | La unidad, el proxy y el certificado desde plantillas, los secretos y `register_project`. |
+| 7 | MCP de lectura y tokens | Herramientas de lectura, tokens con scopes, conexión con Claude Code. |
+| 8 | MCP de escritura y aprobaciones | `deploy`, `rollback` y `restart` con aprobación humana en el panel. |
 
 ## Riesgos y decisiones abiertas
 
@@ -739,6 +836,7 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 | El control plane es un punto único de falla | Medio | Los proyectos siguen corriendo si cae; se agregan backups de PostgreSQL y un restore probado. |
 | Un deploy automático rompe producción | Alto | Healthcheck, rollback automático, aprobación humana, bloqueo de deploys simultáneos y un interruptor por servidor que viene apagado. |
 | Proyectos gunicorn fuera de systemd | Medio | Pasarlos a systemd durante la Fase 2; hasta entonces quedan en solo lectura. |
+| Un proceso root propio en cada servidor con deploy (el ayudante de ADR-019) | Alto | Tres operaciones que solo reciben identificadores, lo que corre sale del archivo que escribió root, sin red ni capacidades, y solo existe donde una persona prendió el deploy. |
 | Prompt injection sobre el LLM | Alto | Herramientas acotadas, aprobaciones y auditoría (ver Seguridad). |
 | El volumen de métricas crece más de lo previsto | Bajo | Particionado y retención escalonada; TimescaleDB si hiciera falta. |
 
@@ -752,5 +850,8 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 **Decisiones abiertas**
 
 - [ ] ¿Alertas por correo, Telegram o ambos? Se decide en la Fase 4, al construirlas.
-- [ ] ¿Las aprobaciones de producción se hacen solo desde el panel o también por un enlace firmado en el celular? Se decide en el Sprint 7.
-- [ ] ¿Se mantiene la aprobación humana también en staging, o solo en producción? Se decide en el Sprint 7.
+- [ ] ¿Las aprobaciones de producción se hacen solo desde el panel o también por un enlace firmado en el celular? Se decide en el Sprint 8.
+- [ ] ¿Se mantiene la aprobación humana también en staging, o solo en producción? Se decide en el Sprint 8.
+- [ ] ¿Dónde se cargan los valores de los secretos de un proyecto nuevo? "Deploy desde cero" dice en el panel; la regla de que no salen del servidor dice que no. Se decide en el Sprint 6 ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)).
+- [ ] ¿Puede el control plane declarar un proyecto (`register_project`)? [ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md) dice que no. Se decide en el Sprint 6.
+- [ ] ¿Las plantillas de systemd y del proxy viven en el control plane o en cada servidor? Se decide en el Sprint 6.
