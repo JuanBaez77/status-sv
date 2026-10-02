@@ -73,9 +73,9 @@ las llaves, y no cuenta contra su memoria.
   ([ADR-011](ADR-011-acceso-a-docker-y-journald.md)), por el nombre de la unidad, que es único por
   deploy y por paso (`statussv-step-<deploy>-<fase>-<n>.service`). Pasa por el mismo filtro que
   enmascara secretos.
-- La unidad lleva `NoNewPrivileges`, `/tmp` propio y el sistema en solo lectura fuera del
-  `workdir` y del directorio personal de `run_as`. El archivo de entorno lo lee systemd; el agent
-  no lo abre.
+- La unidad lleva `NoNewPrivileges`, `/tmp` propio y `/usr`, `/boot` y `/etc` en solo lectura. En
+  el resto escribe lo que le permitan los permisos de su usuario: el entorno virtual, los
+  estáticos, la caché de `pip`. El archivo de entorno lo lee systemd; el agent no lo abre.
 
 **3. Lo que necesita root lo hace un ayudante mínimo, con tres operaciones fijas.**
 
