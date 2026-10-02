@@ -148,6 +148,41 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d
 curl -s http://127.0.0.1:8090/readyz    # {"status":"ready"}, con el puerto elegido
 ```
 
+### Si el Docker del servidor es el de snap
+
+`snap list docker` lo dice, y `docker info --format '{{.DockerRootDir}}'` da
+`/var/snap/docker/common/var-lib-docker`. Es el caso de `srv936263`, donde vive el control plane
+([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). Cambian dos cosas, y las
+dos se prueban **antes** de levantar nada.
+
+**El directorio no puede ser `/opt/status-sv`.** El daemon de snap solo ve algunos directorios del
+servidor, y el control plane monta un archivo (la clave de TOTP). Sirven `/root` y
+`/var/snap/docker/common`; no sirven `/opt`, `/var/www` ni `/srv`. En `srv936263` el control plane
+está en **`/root/status-sv`**, y todo lo que este runbook dice de `/opt/status-sv` va ahí. La
+prueba, con cualquier imagen que ya esté en el servidor:
+
+```bash
+d=/root/statussv-prueba; mkdir -p "$d" && echo contenido > "$d/archivo" \
+  && chown 10001:10001 "$d/archivo" && chmod 0400 "$d/archivo"
+docker run --rm --user 10001:10001 --entrypoint cat -v "$d/archivo:/x:ro" <IMAGEN> /x   # contenido
+rm -rf "$d"
+```
+
+**El contenedor no arranca con `no-new-privileges`**: falla con `exec /usr/local/bin/server:
+operation not permitted`. El daemon corre con su propio perfil de AppArmor y, con esa opción, el
+kernel no deja pasar al perfil del contenedor. El archivo `deploy/docker-compose.snap.yml` quita
+solo esa opción (quedan el usuario sin privilegios, ninguna capacidad y la raíz de solo lectura),
+y va **en todos los comandos de compose de ese servidor**:
+
+```bash
+cd /root/status-sv/deploy
+docker compose -f docker-compose.prod.yml -f docker-compose.snap.yml --env-file .env up -d
+docker inspect status-sv-server-1 \
+  --format '{{.HostConfig.SecurityOpt}} {{.HostConfig.CapDrop}} {{.HostConfig.ReadonlyRootfs}}'   # [] [ALL] true
+```
+
+Sin el segundo `-f`, el control plane no arranca: falla a la vista, no queda a medias.
+
 ### Detrás de nginx: el sitio y el certificado
 
 La configuración sale de plantillas y la genera `deploy/nginx/render.sh`, que valida el dominio y
@@ -561,6 +596,9 @@ docker compose -f docker-compose.prod.yml --env-file .env run --rm server migrat
 docker compose -f docker-compose.prod.yml --env-file .env up -d server
 ```
 
+En `srv936263` el directorio es `/root/status-sv/deploy` y cada comando lleva además
+`-f docker-compose.snap.yml` (sección 1, *Si el Docker del servidor es el de snap*).
+
 Los agents se desconectan durante el reinicio y reconectan solos con backoff: no hace falta
 tocarlos.
 
@@ -616,12 +654,13 @@ El agent queda rechazado desde su próxima reconexión. Para volver a sumarlo, u
 
 ## 6. Mudar el control plane a otro VPS
 
-Sirve para cualquier mudanza. La decidida es la de
-[ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md): de `cristales-baez-prod` a
-`srv936263`, un servidor propio que **ya tiene nginx**. La del VPS dedicado con Caddy
-([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)) queda escrita para más adelante. Los pasos
-son los mismos, y donde cambian según el destino está dicho. Se muda la base entera: los agents
-conservan su credencial y, como el dominio no cambia, **reconectan solos**; no se tocan.
+Sirve para cualquier mudanza. La de
+[ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md) se hizo el 2026-10-02: de
+`cristales-baez-prod` a `srv936263`, un servidor propio que **ya tiene nginx**, con dos minutos de
+corte. La del VPS dedicado con Caddy ([ADR-014](adr/ADR-014-control-plane-en-vps-propio.md)) queda
+escrita para más adelante. Los pasos son los mismos, y donde cambian según el destino está dicho.
+Se muda la base entera: los agents conservan su credencial y, como el dominio no cambia,
+**reconectan solos**; no se tocan.
 
 El corte (del paso 3 al 5) tiene que durar **menos de 10 minutos**: es lo que cada agent guarda de
 métricas en memoria sin conexión. Un agent reintenta como mucho cada minuto, así que en el peor caso
@@ -655,9 +694,50 @@ docker ps -q | xargs docker inspect \
   | grep -E 'privileged=true|docker.sock'
 ```
 
-Y se deja lista la **configuración provisoria** de nginx de la sección 1 (*Detrás de nginx*), que
-solo atiende el desafío del certificado: mientras el dominio apunte al servidor viejo no recibe
-nada, y los demás sitios no se tocan.
+Si su Docker es el de snap, valen además el directorio y el archivo de ajuste de la sección 1 (*Si
+el Docker del servidor es el de snap*).
+
+**El certificado y el sitio se dejan listos antes del corte**, así el dominio nunca apunta a un
+servidor sin HTTPS. Mientras el dominio apunte al servidor viejo, Let's Encrypt no puede validar
+por HTTP en el nuevo, así que el primer certificado se pide por DNS:
+
+```bash
+# En el servidor nuevo. Es interactivo: muestra un valor y espera.
+certbot certonly --manual --preferred-challenges dns -d <DOMINIO>
+```
+
+Con certbot esperando, se crea en Cloudflare un registro **TXT** llamado `_acme-challenge.<nombre>`
+(para `status.ejemplo.com`, `_acme-challenge.status`) con ese valor, **aparte** del registro A, que
+no se toca. Antes de apretar Enter se comprueba desde otra máquina que el registro ya se ve; cada
+intento fallido gasta uno de los cinco por hora que da Let's Encrypt:
+
+```bash
+nslookup -type=TXT _acme-challenge.<DOMINIO>. 1.1.1.1    # con el punto final
+```
+
+Con el certificado, se instala el sitio definitivo de la sección 1 (*Detrás de nginx*, sin la
+configuración provisoria). Todavía no recibe nada, y los demás sitios no se tocan.
+
+**Y se ensaya el arranque entero**, sin tocar el DNS, con un volcado tomado en caliente del
+servidor viejo (el `pg_dump` del paso 3, sin el `stop`): restaurar, `migrate up`, `up -d`, y las
+dos comprobaciones:
+
+```bash
+curl -s http://127.0.0.1:8090/readyz                                   # {"status":"ready"}
+curl -sk -o /dev/null -w '%{http_code}\n' \
+  --resolve <DOMINIO>:443:127.0.0.1 https://<DOMINIO>/readyz           # 200, por nginx
+```
+
+Un servidor distinto falla en cosas que no se ven hasta arrancar el contenedor. Después del ensayo
+se para el control plane nuevo y se vacía su base, para que el corte restaure sobre una base
+limpia y no pueda usar un volcado viejo:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env stop server
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres dropdb -U statussv statussv
+docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres createdb -U statussv -O statussv statussv
+rm -f /root/statussv-mudanza.dump
+```
 
 **2. Bajar el TTL.** En Cloudflare, el registro del dominio con TTL de 1 minuto (con la nube
 naranja ya es *Auto*, que es 5 minutos; alcanza). Si el registro va a seguir con la nube naranja
@@ -700,27 +780,26 @@ Con nginx en el destino, el último comando va sin `--profile caddy`, y se compr
 
 **5. Apuntar el dominio.** Depende de quién atienda el 443 en el destino.
 
-*Con nginx en el destino*, el registro A pasa a `<IP-NUEVA>` **sin apagar el proxy**, y enseguida
-se pide el certificado y se pasa a la configuración definitiva:
+*Con nginx en el destino*, el certificado y el sitio ya están (paso 1): el registro A pasa a
+`<IP-NUEVA>` **sin apagar el proxy**, y **solo si** el paso 4 terminó con `{"status":"ready"}` por
+adentro y 200 por nginx. Si no, no se toca el DNS: se levanta de nuevo el control plane viejo
+(`up -d server`) y se mira el error sin apuro.
 
 ```bash
-# En el servidor nuevo:
-certbot certonly --webroot -w /var/www/certbot -d <DOMINIO> \
-  --deploy-hook "systemctl reload nginx" --non-interactive
-cd /opt/status-sv
-deploy/nginx/render.sh final <DOMINIO> 127.0.0.1:8090 > /tmp/status-sv.conf
-install -m 0644 /tmp/status-sv.conf /etc/nginx/sites-available/status-sv
-nginx -t && systemctl reload nginx
-curl -s https://<DOMINIO>/readyz        # {"status":"ready"}
+curl -s https://<DOMINIO>/readyz        # {"status":"ready"}: contesta el nuevo, el viejo está parado
 ```
 
-Entre el cambio de IP y la recarga de nginx (lo que tarda certbot, menos de un minuto) el servidor
-nuevo todavía no tiene un bloque HTTPS para el dominio. Con el modo SSL de la zona en **Full
-(strict)**, Cloudflare contesta 526 y nada llega a otro sitio de ese servidor: hay que mirar el
-modo **antes** de empezar. Si no es estricto, o si el certificado no sale a través del proxy, se
-hace como con Caddy: nube gris, certificado, configuración definitiva y nube naranja de nuevo. Con
-la nube gris un agent no manda nada a otro sitio, porque el certificado que recibe no es el del
-dominio y corta antes.
+El certificado pedido por DNS **no se renueva solo**. Con el dominio ya apuntando al servidor
+nuevo, se reemite por el camino de siempre, que deja la renovación a cargo del timer de certbot.
+Primero en seco:
+
+```bash
+certbot certonly --webroot -w /var/www/certbot -d <DOMINIO> --cert-name <DOMINIO> --dry-run
+certbot certonly --webroot -w /var/www/certbot -d <DOMINIO> --cert-name <DOMINIO> \
+  --force-renewal --deploy-hook "systemctl reload nginx" --non-interactive
+```
+
+Y se borra el registro TXT de Cloudflare.
 
 *Con Caddy en el destino*, el registro A del dominio pasa a `<IP-NUEVA>` **con la nube gris**, para
 que Caddy pueda pedir el certificado:
@@ -821,3 +900,32 @@ Salieron al desplegar en `cristales-baez-prod` y cuestan tiempo si se redescubre
 - **Cloudflare responde 403 (`error code: 1000`) si el cliente manda su propio `CF-Connecting-IP`.**
   Es esperado y es una protección más: ese encabezado lo escribe solo Cloudflare. Para probar la
   falsificación de IP a través del proxy, alcanza con `X-Forwarded-For`.
+
+Salieron al mudar el control plane a `srv936263` (2026-10-02). El primer intento hubo que
+revertirlo, con diez minutos de corte; el segundo tardó dos:
+
+- **Ensayar el arranque entero en el destino antes de cortar.** El primer intento se cayó en el
+  último paso: el contenedor no arrancaba con el Docker de snap. Se había probado que montara
+  archivos, no que ejecutara el binario con las opciones del compose. Un ensayo con un volcado en
+  caliente lo habría mostrado sin cortar nada.
+- **El Docker de snap no es un Docker cualquiera.** No monta archivos desde `/opt`, guarda sus
+  volúmenes en `/var/snap/docker/common/var-lib-docker` y no ejecuta contenedores con
+  `no-new-privileges`. Está en la sección 1.
+- **No cambiar el DNS si el paso anterior no terminó bien.** Con el control plane nuevo caído y el
+  dominio ya apuntando a él, volver atrás son dos pasos en vez de uno, y el segundo se olvida:
+  levantar el viejo no alcanza si el dominio sigue mirando al nuevo.
+- **El certificado se pide antes, por DNS.** Así no hay ninguna ventana con el dominio apuntando a
+  un servidor sin HTTPS, y no importa el modo SSL de la zona. El registro TXT va **aparte** del
+  registro A; que el A siga apuntando al servidor viejo es lo correcto.
+- **`nslookup` sin punto final miente en Windows.** Le agrega el sufijo DNS de la máquina y
+  consulta otro nombre. `nslookup -type=TXT _acme-challenge.status.ejemplo.com. 1.1.1.1`, con el
+  punto.
+- **Con dos servidores y una PC, cada comando dice en qué ventana va**, y antes de pegarlo se mira
+  el prompt. Un comando del servidor viejo pegado en el nuevo falló en el `cd` y no hizo nada
+  porque estaba encadenado con `&&`; uno pegado con el prompt copiado adelante, tampoco. Encadenar
+  con `&&` y empezar por un `cd` a un directorio que solo existe en el servidor correcto es una
+  red barata.
+- **Antes de borrar algo que "ya no se usa", mirar si recibe pedidos.** En `srv936263` quedaba una
+  copia vieja de un proyecto con mil pedidos en tres días. Eran robots: otro sitio de nginx del
+  mismo servidor seguía mandando su tráfico a ese puerto. Se respaldó, se apagó, se verificó y
+  recién después se borró.

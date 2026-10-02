@@ -46,12 +46,16 @@ roadmap de [DISENO.md](DISENO.md).
   checksum. El diseño ya lo pide para la Fase 4 (actualizaciones firmadas del agent).
 - **Revocar agents desde el panel.** Hoy se revoca con una sentencia SQL a mano (ver el runbook).
 - **Backups de PostgreSQL** del control plane, con un restore probado. Está en los riesgos del diseño.
-- **Mover el control plane a un VPS dedicado.** Al desplegar el Sprint 4 sale del servidor de un
-  cliente y pasa a uno propio, pero compartido con otros productos
+- **Mover el control plane a un VPS dedicado.** El 2026-10-02 salió del servidor de un cliente y
+  pasó a uno propio, pero compartido con otros productos
   ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). El VPS dedicado sigue
   escrito en [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md) y en la sección 6 del runbook.
   ADR-018 pide llegar antes de las alertas, de los tokens del MCP con escritura o de querer
-  desplegar con status-sv algún proyecto de ese servidor.
+  desplegar con status-sv algún proyecto de ese servidor. Con el Docker común vuelve además
+  `no-new-privileges`, que en el servidor de hoy (Docker de snap) hubo que quitar.
+- **Un ensayo de la mudanza en CI.** El volcado, la restauración y el arranque sobre datos
+  restaurados solo se probaron a mano, el día de la mudanza. Un job que lo haga con la base de la
+  prueba de punta a punta lo cubriría.
 
 ## Lo que deja afuera el deploy del Sprint 4
 
