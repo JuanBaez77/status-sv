@@ -426,6 +426,7 @@ export type StepName =
   | 'build'
   | 'pre'
   | 'up'
+  | 'restart'
   | 'healthcheck'
   | 'post'
   | 'rollback'

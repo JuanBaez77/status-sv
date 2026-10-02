@@ -34,6 +34,9 @@ import {
 import { since } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+/** Runtime es cómo corre un proyecto: con Docker Compose o como servicio de systemd. */
+type Runtime = ProjectDetail['runtime']
+
 /** historyShown es cuántos deploys se muestran de la historia. */
 const historyShown = 10
 
@@ -60,10 +63,10 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
             <CardDescription>
               {docker
                 ? `Trae la rama ${project.branch}, compila y levanta con docker compose. Si no queda sano, vuelve solo a lo anterior.`
-                : 'El deploy de proyectos de systemd llega en el Sprint 5.'}
+                : `Trae la rama ${project.branch}, corre los pasos declarados en el servidor y reinicia ${unitsText(project.declared_units)}. Si no queda sano, vuelve solo a lo anterior.`}
             </CardDescription>
           </div>
-          {docker && form === null && (
+          {form === null && (
             <div className="flex gap-2">
               <Button size="sm" onClick={() => setForm('deploy')} disabled={current !== undefined}>
                 <Rocket className="size-3.5" aria-hidden />
@@ -94,7 +97,7 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
           />
         )}
 
-        {current && <DeployProgress id={current.id} />}
+        {current && <DeployProgress id={current.id} runtime={project.runtime} />}
 
         {history.error ? (
           <p className="text-xs text-destructive">
@@ -110,6 +113,7 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
               <HistoryRow
                 key={d.id}
                 deploy={d}
+                runtime={project.runtime}
                 open={opened === d.id && d.id !== current?.id}
                 onToggle={() => setOpened(opened === d.id ? null : d.id)}
                 isCurrent={d.id === current?.id}
@@ -131,6 +135,13 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
       </CardContent>
     </Card>
   )
+}
+
+/** unitsText nombra las unidades de un proyecto de systemd en una frase. */
+function unitsText(units: string[] | undefined): string {
+  if (!units || units.length === 0) return 'sus servicios'
+  if (units.length === 1) return units[0]
+  return `${units.slice(0, -1).join(', ')} y ${units[units.length - 1]}`
 }
 
 /**
@@ -183,6 +194,15 @@ function DeployForm({
           <>
             Desplegar <strong>{project.name}</strong> en {project.server_name}
             {production && <span className="text-status-warning"> (producción)</span>}.
+          </>
+        ) : project.runtime === 'systemd' ? (
+          <>
+            Volver <strong>{project.name}</strong> al commit bueno anterior. Vuelve el código, se
+            corren de nuevo los pasos que lo preparan y se reinicia el servicio;{' '}
+            <strong>
+              los cambios en la base (por ejemplo, las migraciones de un paso previo) no se deshacen
+            </strong>
+            .
           </>
         ) : (
           <>
@@ -281,11 +301,13 @@ const toneText: Record<ReturnType<typeof statusTone>, string> = {
 
 function HistoryRow({
   deploy: d,
+  runtime,
   open,
   onToggle,
   isCurrent,
 }: {
   deploy: DeploySummary
+  runtime: Runtime
   open: boolean
   onToggle: () => void
   isCurrent: boolean
@@ -330,15 +352,18 @@ function HistoryRow({
       )}
       {open && (
         <div id={panel}>
-          <DeployProgress id={d.id} />
+          <DeployProgress id={d.id} runtime={runtime} />
         </div>
       )}
     </li>
   )
 }
 
-/** DeployProgress muestra los pasos de un deploy, en vivo si está en curso. */
-export function DeployProgress({ id }: { id: string }) {
+/**
+ * DeployProgress muestra los pasos de un deploy, en vivo si está en curso.
+ * runtime dice cómo corre el proyecto: cambia cómo se nombran algunos pasos.
+ */
+export function DeployProgress({ id, runtime = 'docker' }: { id: string; runtime?: Runtime }) {
   const { data: d, error, isPending } = useDeploy(id)
   if (isPending) return <p className="text-xs text-muted-foreground">Cargando los pasos…</p>
   if (error) return <p className="text-xs text-destructive">{error.message}</p>
@@ -354,14 +379,14 @@ export function DeployProgress({ id }: { id: string }) {
       </p>
       <ol className="flex flex-col gap-1">
         {d.steps.map((step, i) => (
-          <StepRow key={`${step.name}-${step.service ?? ''}-${i}`} step={step} />
+          <StepRow key={`${step.name}-${step.service ?? ''}-${i}`} step={step} runtime={runtime} />
         ))}
       </ol>
     </div>
   )
 }
 
-function StepRow({ step }: { step: DeployStep }) {
+function StepRow({ step, runtime }: { step: DeployStep; runtime: Runtime }) {
   // La salida se muestra abierta en el paso en curso y en el que falló.
   const [open, setOpen] = useState(step.status === 'running' || step.status === 'failed')
   const hasOutput = (step.output?.length ?? 0) > 0
@@ -369,7 +394,7 @@ function StepRow({ step }: { step: DeployStep }) {
     <li className="flex flex-col gap-1 text-xs">
       <div className="flex items-center gap-2">
         <StepIcon status={step.status} />
-        <span className="font-medium">{stepLabel(step)}</span>
+        <span className="font-medium">{stepLabel(step, runtime)}</span>
         {step.detail && (
           <span className="min-w-0 truncate text-muted-foreground">{step.detail}</span>
         )}

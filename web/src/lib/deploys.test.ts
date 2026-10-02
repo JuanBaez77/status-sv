@@ -34,6 +34,13 @@ describe('deploys', () => {
     expect(stepLabel({ name: 'pre', service: 'backend' })).toBe('Paso previo (backend)')
   })
 
+  it('con systemd, build prepara el código y el servicio se reinicia', () => {
+    expect(stepLabel({ name: 'build' }, 'systemd')).toBe('Preparar')
+    expect(stepLabel({ name: 'pre' }, 'systemd')).toBe('Paso previo')
+    expect(stepLabel({ name: 'restart' }, 'systemd')).toBe('Reiniciar')
+    expect(codeText('restart_failed')).toMatch(/reiniciar/)
+  })
+
   it('explica los códigos y deja pasar los que no conoce', () => {
     expect(codeText('disabled')).toMatch(/apagado/)
     expect(codeText('rollback_failed')).toMatch(/hay que mirarlo/)
