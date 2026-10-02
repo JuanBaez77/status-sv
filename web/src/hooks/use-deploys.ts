@@ -51,14 +51,20 @@ export function useDeploy(id: string | null) {
   })
 }
 
-/** useStartDeploy pide un deploy o un rollback. */
+/** useStartDeploy pide un deploy, un rollback o un primer deploy. */
 export function useStartDeploy(projectID: string) {
   const queryClient = useQueryClient()
   return useMutation<DeployDetail, ApiError, { kind: DeployKind; request: DeployRequest }>({
-    mutationFn: ({ kind, request }) =>
-      kind === 'rollback'
-        ? deploys.rollback(projectID, request)
-        : deploys.start(projectID, request),
+    mutationFn: ({ kind, request }) => {
+      switch (kind) {
+        case 'rollback':
+          return deploys.rollback(projectID, request)
+        case 'bootstrap':
+          return deploys.bootstrap(projectID, request)
+        default:
+          return deploys.start(projectID, request)
+      }
+    },
     onSuccess: (deploy) => {
       queryClient.setQueryData(deployKey(deploy.id), deploy)
       void queryClient.invalidateQueries({ queryKey: deployHistoryKey(projectID) })

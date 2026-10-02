@@ -32,8 +32,11 @@ const (
 const (
 	ActionDeployRequest   = "deploy.request"
 	ActionRollbackRequest = "rollback.request"
-	ActionDeployFinish    = "deploy.finish"
-	ActionLogsRequest     = "logs.request"
+	// ActionBootstrapRequest es el pedido del primer deploy de un proyecto
+	// (ADR-021).
+	ActionBootstrapRequest = "bootstrap.request"
+	ActionDeployFinish     = "deploy.finish"
+	ActionLogsRequest      = "logs.request"
 
 	// Las de acceso (ADR-020).
 	ActionLogin             = "auth.login"

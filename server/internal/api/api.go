@@ -117,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/projects/{id}/deploys", s.requireSession(http.HandlerFunc(s.handleProjectDeploys)))
 	mux.Handle("POST /v1/projects/{id}/deploys", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleDeploy))))
 	mux.Handle("POST /v1/projects/{id}/rollback", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRollback))))
+	mux.Handle("POST /v1/projects/{id}/bootstrap", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleBootstrap))))
 	mux.Handle("GET /v1/deploys/{id}", s.requireSession(http.HandlerFunc(s.handleGetDeploy)))
 	mux.Handle("GET /v1/audit", s.requireSession(http.HandlerFunc(s.handleListAudit)))
 

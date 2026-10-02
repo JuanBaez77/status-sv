@@ -432,3 +432,115 @@ func TestDeployRequestErrors(t *testing.T) {
 		t.Errorf("agent desconectado = %d %s", status, body)
 	}
 }
+
+// El primer deploy de un proyecto (ADR-021) se pide aparte, y siempre con un
+// código nuevo de la app, también en staging: el bootstrap siempre exige
+// aprobación.
+func TestBootstrapFromThePanel(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.98"
+	f.createUser(t)
+	cookie, secret := f.loginWithTOTP(t, ip)
+	conn, _ := connectAgent(t, f, "vps-nuevo", "203.0.113.98")
+	agent := newDeployAgent(t, conn, acceptAll)
+	agent.declare(t, dockerProject("turnos", proto.EnvStaging))
+	project := f.projectID(t, cookie, ip, "turnos")
+	path := "/v1/projects/" + project + "/bootstrap"
+
+	// Sin el nombre del proyecto, no.
+	if status, _, body := f.postDeploy(t, path, `{"confirm":"otro"}`, ip, cookie); status != http.StatusBadRequest || !strings.Contains(body, "confirmation_required") {
+		t.Fatalf("sin confirmación = %d %s", status, body)
+	}
+	// Sin código, tampoco, aunque el proyecto sea de staging.
+	if status, _, body := f.postDeploy(t, path, `{"confirm":"turnos"}`, ip, cookie); status != http.StatusForbidden || !strings.Contains(body, "invalid_code") {
+		t.Fatalf("sin código = %d %s", status, body)
+	}
+	// Es siempre la punta de la rama: no lleva commit.
+	if status, _, _ := f.postDeploy(t, path, `{"confirm":"turnos","commit":"`+commitA+`"}`, ip, cookie); status != http.StatusBadRequest {
+		t.Fatalf("con commit = %d", status)
+	}
+
+	fresh := auth.TOTPCode(secret, auth.TOTPStep(time.Now())+1)
+	status, created, body := f.postDeploy(t, path, `{"confirm":"turnos","totp_code":"`+fresh+`"}`, ip, cookie)
+	if status != http.StatusCreated || created.Status != "pending" || created.Kind != "bootstrap" {
+		t.Fatalf("primer deploy = %d %s", status, body)
+	}
+	envelope := <-agent.commands
+	cmd, _ := proto.Decode[proto.Command](envelope)
+	if envelope.ID != created.ID || cmd.Operation != proto.OpBootstrap || cmd.Bootstrap == nil || cmd.Bootstrap.Project != "turnos" || cmd.Deploy != nil {
+		t.Fatalf("comando = %s %+v", envelope.ID, cmd)
+	}
+
+	// Comparte el bloqueo de simultáneos con los deploys.
+	if status, _, body := f.postDeploy(t, "/v1/projects/"+project+"/deploys", `{"confirm":"turnos"}`, ip, cookie); status != http.StatusConflict || !strings.Contains(body, "deploy_in_progress") {
+		t.Fatalf("deploy con el primer deploy en curso = %d %s", status, body)
+	}
+
+	// El agent levantó el proyecto, no quedó bien y lo bajó: sin commit anterior.
+	start := time.Now().UTC().Truncate(time.Millisecond)
+	final := proto.DeployEvent{
+		DeployID: created.ID, Seq: 9, Project: "turnos", Kind: proto.DeployKindBootstrap, Status: proto.DeployRolledBack,
+		Code: proto.DeployUnhealthy, Message: "no quedó bien en 120 s", StartedAt: start, FinishedAt: start.Add(3 * time.Minute), Commit: commitB,
+		Steps: []proto.DeployStep{
+			{Name: proto.StepPreflight, Status: proto.StepOK, Detail: "workdir sin clonar; compose 2.39.1"},
+			{Name: proto.StepFetch, Status: proto.StepOK},
+			{Name: proto.StepCheckout, Status: proto.StepOK},
+			{Name: proto.StepBuild, Status: proto.StepOK},
+			{Name: proto.StepUp, Status: proto.StepOK},
+			{Name: proto.StepHealthcheck, Status: proto.StepFailed},
+			{Name: proto.StepRollback, Status: proto.StepOK, Detail: "bajó lo que había levantado; el código quedó en el workdir"},
+		},
+	}
+	if ack := agent.event(t, final); ack.Type != proto.TypeDeployEventAck {
+		t.Fatalf("llegó %q", ack.Type)
+	}
+	done := decodeJSON[deployBody](t, f.do(t, http.MethodGet, "/v1/deploys/"+created.ID.String(), "", ip, cookie, nil))
+	if done.Kind != "bootstrap" || done.Status != "rolled_back" || done.Code != "unhealthy" || len(done.Steps) != 7 {
+		t.Fatalf("terminado = %+v", done)
+	}
+	history := decodeJSON[struct {
+		Deploys []deployBody `json:"deploys"`
+	}](t, f.do(t, http.MethodGet, "/v1/projects/"+project+"/deploys", "", ip, cookie, nil))
+	if len(history.Deploys) != 1 || history.Deploys[0].Kind != "bootstrap" {
+		t.Fatalf("historia = %+v", history)
+	}
+
+	// En la auditoría: el pedido sin código (rechazado), el aceptado y el final.
+	var rejected, accepted, finished int
+	if err := f.pool.QueryRow(t.Context(),
+		`SELECT count(*) FILTER (WHERE action = 'bootstrap.request' AND result = 'rejected' AND actor = 'juan'),
+		        count(*) FILTER (WHERE action = 'bootstrap.request' AND result = 'accepted' AND actor = 'juan'),
+		        count(*) FILTER (WHERE action = 'deploy.finish' AND result = 'rolled_back' AND actor = 'vps-nuevo' AND detail->>'tipo' = 'bootstrap')
+		 FROM audit_log WHERE target_id = $1`, project).Scan(&rejected, &accepted, &finished); err != nil {
+		t.Fatal(err)
+	}
+	if rejected != 1 || accepted != 1 || finished != 1 {
+		t.Errorf("auditoría: %d rechazados, %d aceptados y %d finales", rejected, accepted, finished)
+	}
+}
+
+// La tabla no guarda un primer deploy con commit pedido ni con commit
+// anterior (migración 00010).
+func TestBootstrapRowsHaveNoPreviousState(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.99"
+	f.createUser(t)
+	cookie, secret := f.loginWithTOTP(t, ip)
+	conn, _ := connectAgent(t, f, "vps-fila", "203.0.113.99")
+	agent := newDeployAgent(t, conn, acceptAll)
+	agent.declare(t, dockerProject("turnos", proto.EnvStaging))
+	path := "/v1/projects/" + f.projectID(t, cookie, ip, "turnos") + "/bootstrap"
+	fresh := auth.TOTPCode(secret, auth.TOTPStep(time.Now())+1)
+	status, created, body := f.postDeploy(t, path, `{"confirm":"turnos","totp_code":"`+fresh+`"}`, ip, cookie)
+	if status != http.StatusCreated {
+		t.Fatalf("primer deploy = %d %s", status, body)
+	}
+	<-agent.commands
+
+	for _, column := range []string{"requested_commit", "previous_commit"} {
+		_, err := f.pool.Exec(t.Context(), `UPDATE deploys SET `+column+` = $1 WHERE id = $2`, commitA, created.ID)
+		if err == nil || !strings.Contains(err.Error(), "deploys_bootstrap_has_no_previous") {
+			t.Errorf("%s en un primer deploy: %v", column, err)
+		}
+	}
+}

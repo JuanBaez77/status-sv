@@ -5,6 +5,7 @@ import {
   CircleDashed,
   Loader2,
   MinusCircle,
+  Play,
   Rocket,
   Undo2,
   XCircle,
@@ -23,6 +24,8 @@ import {
   active,
   codeText,
   duration,
+  kindLabel,
+  neverRan,
   requestError,
   shortCommit,
   statusLabel,
@@ -43,7 +46,8 @@ const historyShown = 10
 /**
  * DeploysCard es el deploy de un proyecto desde el panel (ADR-017): pedir un
  * deploy o un rollback con confirmación, ver el que está en curso paso por
- * paso y la historia.
+ * paso y la historia. Si el proyecto todavía no corre en el servidor, ofrece
+ * el primer deploy (ADR-021).
  */
 export function DeploysCard({ project }: { project: ProjectDetail }) {
   const history = useDeployHistory(project.id, project.server_id)
@@ -53,6 +57,8 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
   const list = history.data?.deploys ?? []
   const current = list.find((d) => active(d.status))
   const docker = project.runtime === 'docker'
+  // Recién con la historia a la vista se sabe si nunca se desplegó.
+  const first = history.data !== undefined && neverRan(project, list)
 
   return (
     <Card>
@@ -67,8 +73,23 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
             </CardDescription>
           </div>
           {form === null && (
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => setForm('deploy')} disabled={current !== undefined}>
+            <div className="flex flex-wrap gap-2">
+              {first && (
+                <Button
+                  size="sm"
+                  onClick={() => setForm('bootstrap')}
+                  disabled={current !== undefined}
+                >
+                  <Play className="size-3.5" aria-hidden />
+                  Primer deploy
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant={first ? 'outline' : 'default'}
+                onClick={() => setForm('deploy')}
+                disabled={current !== undefined}
+              >
                 <Rocket className="size-3.5" aria-hidden />
                 Desplegar
               </Button>
@@ -86,6 +107,12 @@ export function DeploysCard({ project }: { project: ProjectDetail }) {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {first && form === null && (
+          <p className="text-xs text-muted-foreground">
+            Este proyecto todavía no corre en el servidor. El primer deploy clona la rama en{' '}
+            <code className="font-mono">{project.workdir}</code>, lo prepara y lo levanta.
+          </p>
+        )}
         {form !== null && (
           <DeployForm
             project={project}
@@ -146,7 +173,8 @@ function unitsText(units: string[] | undefined): string {
 
 /**
  * DeployForm pide la confirmación: el nombre del proyecto escrito a mano y, en
- * producción, un código nuevo de la app (ADR-017).
+ * producción, un código nuevo de la app (ADR-017). Un primer deploy pide el
+ * código siempre (ADR-021).
  */
 function DeployForm({
   project,
@@ -163,9 +191,11 @@ function DeployForm({
   const [confirm, setConfirm] = useState('')
   const [code, setCode] = useState('')
   const production = project.environment === 'production'
+  const needsCode = production || kind === 'bootstrap'
+  const title = formTitles[kind]
 
   const commitOK = commit === '' || validCommit(commit)
-  const ready = confirm === project.name && commitOK && (!production || validCode(code))
+  const ready = confirm === project.name && commitOK && (!needsCode || validCode(code))
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -176,7 +206,7 @@ function DeployForm({
         request: {
           confirm,
           ...(kind === 'deploy' && commit !== '' ? { commit } : {}),
-          ...(production ? { totp_code: code } : {}),
+          ...(needsCode ? { totp_code: code } : {}),
         },
       },
       { onSuccess: (deploy) => onDone(deploy) },
@@ -187,10 +217,18 @@ function DeployForm({
     <form
       onSubmit={submit}
       className="flex flex-col gap-3 rounded-md border border-border p-3"
-      aria-label={kind === 'deploy' ? 'Desplegar' : 'Volver atrás'}
+      aria-label={title}
     >
       <p className="text-sm">
-        {kind === 'deploy' ? (
+        {kind === 'bootstrap' ? (
+          <>
+            Primer deploy de <strong>{project.name}</strong> en {project.server_name}
+            {production && <span className="text-status-warning"> (producción)</span>}: clona la
+            rama {project.branch} en <code className="font-mono">{project.workdir}</code>, lo
+            prepara y lo levanta. Si no queda sano, baja lo que levantó; el código queda en el
+            servidor.
+          </>
+        ) : kind === 'deploy' ? (
           <>
             Desplegar <strong>{project.name}</strong> en {project.server_name}
             {production && <span className="text-status-warning"> (producción)</span>}.
@@ -250,7 +288,7 @@ function DeployForm({
         />
       </div>
 
-      {production && (
+      {needsCode && (
         <div className="flex flex-col gap-1">
           <Label htmlFor={`${ids}-code`}>Código de la app de autenticación</Label>
           <Input
@@ -262,6 +300,7 @@ function DeployForm({
             className="w-32 font-mono tracking-widest"
           />
           <p className="text-xs text-muted-foreground">
+            {!production && 'Un primer deploy lo pide siempre. '}
             Uno nuevo: el que usaste para entrar no sirve dos veces.
           </p>
         </div>
@@ -276,7 +315,7 @@ function DeployForm({
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={!ready || start.isPending}>
           {start.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
-          {kind === 'deploy' ? 'Desplegar' : 'Volver atrás'}
+          {title}
         </Button>
         <Button
           type="button"
@@ -290,6 +329,13 @@ function DeployForm({
       </div>
     </form>
   )
+}
+
+/** formTitles es cómo se llama cada pedido, en el formulario y en su botón. */
+const formTitles: Record<DeployKind, string> = {
+  deploy: 'Desplegar',
+  rollback: 'Volver atrás',
+  bootstrap: 'Primer deploy',
 }
 
 const toneText: Record<ReturnType<typeof statusTone>, string> = {
@@ -317,11 +363,9 @@ function HistoryRow({
     <li className="flex flex-col gap-1 py-2 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className={cn('text-xs font-medium', toneText[statusTone(d)])}>
-          {statusLabel(d.status)}
+          {statusLabel(d.status, d.kind)}
         </span>
-        <span className="text-xs text-muted-foreground">
-          {d.kind === 'rollback' ? 'rollback' : 'deploy'}
-        </span>
+        <span className="text-xs text-muted-foreground">{kindLabel(d.kind)}</span>
         <code className="font-mono text-xs">{shortCommit(d.commit ?? d.requested_commit)}</code>
         <span className="text-xs text-muted-foreground">
           por {d.requested_by} · {since(d.requested_at)}
@@ -379,14 +423,27 @@ export function DeployProgress({ id, runtime = 'docker' }: { id: string; runtime
       </p>
       <ol className="flex flex-col gap-1">
         {d.steps.map((step, i) => (
-          <StepRow key={`${step.name}-${step.service ?? ''}-${i}`} step={step} runtime={runtime} />
+          <StepRow
+            key={`${step.name}-${step.service ?? ''}-${i}`}
+            step={step}
+            runtime={runtime}
+            kind={d.kind}
+          />
         ))}
       </ol>
     </div>
   )
 }
 
-function StepRow({ step, runtime }: { step: DeployStep; runtime: Runtime }) {
+function StepRow({
+  step,
+  runtime,
+  kind,
+}: {
+  step: DeployStep
+  runtime: Runtime
+  kind: DeployKind
+}) {
   // La salida se muestra abierta en el paso en curso y en el que falló.
   const [open, setOpen] = useState(step.status === 'running' || step.status === 'failed')
   const hasOutput = (step.output?.length ?? 0) > 0
@@ -394,7 +451,7 @@ function StepRow({ step, runtime }: { step: DeployStep; runtime: Runtime }) {
     <li className="flex flex-col gap-1 text-xs">
       <div className="flex items-center gap-2">
         <StepIcon status={step.status} />
-        <span className="font-medium">{stepLabel(step, runtime)}</span>
+        <span className="font-medium">{stepLabel(step, runtime, kind)}</span>
         {step.detail && (
           <span className="min-w-0 truncate text-muted-foreground">{step.detail}</span>
         )}

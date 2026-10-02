@@ -21,7 +21,8 @@ import (
 
 // Deploys desde el panel (ADR-015, ADR-017).
 //
-// Un deploy se pide con POST /v1/projects/{id}/deploys (o /rollback). El
+// Un deploy se pide con POST /v1/projects/{id}/deploys (o /rollback, o
+// /bootstrap para el primer deploy de un proyecto, ADR-021). El
 // control plane lo anota como pendiente, se lo manda al agent con el mismo
 // ID y contesta con lo que dijo el agent: aceptado o rechazado. El avance
 // llega después por deploy_event y se empuja a los paneles.
@@ -55,7 +56,8 @@ type panelDeployMessage struct {
 }
 
 // deployRequest es el pedido del panel. Confirm es el nombre del proyecto,
-// escrito a mano; TOTPCode, un código nuevo de la app (solo producción).
+// escrito a mano; TOTPCode, un código nuevo de la app: en producción, y
+// siempre en un primer deploy.
 type deployRequest struct {
 	Commit   string `json:"commit"`
 	Confirm  string `json:"confirm"`
@@ -113,7 +115,12 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	s.startDeploy(w, r, proto.DeployKindRollback)
 }
 
-// startDeploy atiende POST /v1/projects/{id}/deploys y /rollback.
+// handleBootstrap atiende el primer deploy de un proyecto (ADR-021).
+func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	s.startDeploy(w, r, proto.DeployKindBootstrap)
+}
+
+// startDeploy atiende POST /v1/projects/{id}/deploys, /rollback y /bootstrap.
 func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.DeployKind) {
 	ctx := r.Context()
 	noStore(w)
@@ -140,6 +147,10 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 		writeJSON(ctx, w, http.StatusBadRequest, errorResponse{Error: "invalid_request", Message: "un rollback vuelve al estado bueno anterior; no lleva commit"})
 		return
 	}
+	if kind == proto.DeployKindBootstrap && req.Commit != "" {
+		writeJSON(ctx, w, http.StatusBadRequest, errorResponse{Error: "invalid_request", Message: "un primer deploy es de la punta de la rama declarada; no lleva commit"})
+		return
+	}
 	if req.Commit != "" && !proto.ValidCommit(req.Commit) {
 		writeJSON(ctx, w, http.StatusBadRequest, errorResponse{Error: "invalid_request", Message: "el commit tiene que ser un SHA completo de 40 caracteres en minúscula"})
 		return
@@ -157,8 +168,11 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 	}
 
 	action := audit.ActionDeployRequest
-	if kind == proto.DeployKindRollback {
+	switch kind {
+	case proto.DeployKindRollback:
 		action = audit.ActionRollbackRequest
+	case proto.DeployKindBootstrap:
+		action = audit.ActionBootstrapRequest
 	}
 	record := func(result string, detail map[string]any) {
 		detail["servidor"], detail["proyecto"] = project.ServerName, project.Name
@@ -176,8 +190,12 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 		writeJSON(ctx, w, http.StatusBadRequest, errorResponse{Error: "confirmation_required", Message: "para confirmar hay que escribir el nombre del proyecto"})
 		return
 	}
-	// En producción, además, un código TOTP nuevo.
-	if project.Environment == string(proto.EnvProduction) {
+	// En producción, además, un código TOTP nuevo. Un primer deploy lo pide
+	// siempre, también en staging: el bootstrap siempre exige aprobación, y
+	// desde el panel la aprobación es la de quien lo pide con el segundo factor
+	// en la mano (ADR-021).
+	needsCode := project.Environment == string(proto.EnvProduction) || kind == proto.DeployKindBootstrap
+	if needsCode {
 		if !s.totpLimiter.allow(ip) {
 			tooManyTOTP(w, r)
 			return
@@ -185,7 +203,7 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 		if err := s.users.ConfirmAction(ctx, session, req.TOTPCode); err != nil {
 			if errors.Is(err, users.ErrInvalidCode) || errors.Is(err, users.ErrWrongStage) {
 				record("rejected", map[string]any{"motivo": "código TOTP inválido"})
-				writeJSON(ctx, w, http.StatusForbidden, errorResponse{Error: "invalid_code", Message: "en producción hace falta un código nuevo de la app de autenticación"})
+				writeJSON(ctx, w, http.StatusForbidden, errorResponse{Error: "invalid_code", Message: "hace falta un código nuevo de la app de autenticación"})
 				return
 			}
 			s.log.ErrorContext(ctx, "no se pudo verificar el código", "error", err)
@@ -222,8 +240,11 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 	s.publishDeploy(ctx, created.ServerID, created.ProjectID, created.ID, created.Status)
 
 	cmd := proto.Command{Operation: proto.OpDeploy, Deploy: &proto.DeployParams{Project: project.Name, Commit: req.Commit}}
-	if kind == proto.DeployKindRollback {
+	switch kind {
+	case proto.DeployKindRollback:
 		cmd = proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: project.Name}}
+	case proto.DeployKindBootstrap:
+		cmd = proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: project.Name}}
 	}
 	ack, err := s.sendCommandWithID(ctx, project.ServerID, id, cmd)
 	detail := map[string]any{"deploy": id.String()}
