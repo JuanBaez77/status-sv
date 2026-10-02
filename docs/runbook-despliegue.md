@@ -539,12 +539,17 @@ deploy:
       timeout_seconds: 300
 ```
 
-**6. Prender el deploy.** Con el mismo instalador, en el servidor:
+**6. Prender el deploy.** Con el mismo instalador, en el servidor, desde donde se copió (con su
+carpeta `systemd/` al lado; un servidor que solo tiene agent no tiene `/opt/status-sv`):
 
 ```bash
-cd /opt/status-sv/deploy
-sudo ./install-agent.sh --enable-deploy /usr/local/bin/statussv-agent
+cd /tmp
+sudo STATUSSV_SERVER_URL=https://<DOMINIO> ./install-agent.sh --enable-deploy ./statussv-agent
 ```
+
+El interruptor es **por servidor**: quedan con escritura los `workdir` de todos los proyectos
+declarados, también los que no se prepararon. Esos fallan en el chequeo previo sin tocar nada, y
+la revisión de abajo lo dice proyecto por proyecto.
 
 Escribe el drop-in `20-deploy.conf` (el interruptor, escritura en el `workdir` de cada proyecto
 declarado, `UMask=0002`, `MemoryMax=512M` y `TasksMax=256`), reinicia el agent y corre

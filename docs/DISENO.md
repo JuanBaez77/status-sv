@@ -662,23 +662,8 @@ Calidad y despliegue
       reiniciado a mitad de un deploy. Mide la meta de inicio de un deploy (menos de 3 s).
 - [x] Instalador (`--enable-deploy` y el drop-in) y runbook: llaves, `known_hosts`, permisos del
       `workdir` y cómo prender el deploy.
-- [ ] Desplegar el sprint y probar un deploy real en un proyecto de poco riesgo. Hecho el
-      2026-10-02: el control plane mudado a `srv936263` y actualizado (commit `cfb08fa`, migración
-      00009). Falta actualizar los dos agents, limpiar el servidor viejo y el deploy real.
-
-**Entregado al 2026-10-02.** Trece PR (#60 a #72), con el CI verde y el deploy apagado en todos
-lados. Después del último aparecieron dos defectos, ya corregidos:
-
-- **Un deploy bueno podía deshacerse solo al reiniciar el agent** (#74). El acuse de una foto
-  reescribía el diario sin candado y podía pisar la foto final con una copia vieja; al arrancar, el
-  agent lo tomaba por un deploy cortado y lo volvía atrás. Lo encontró la prueba de punta a punta,
-  en el CI de un PR de documentación: era una carrera y no había salido en las corridas anteriores.
-- **El control plane aceptaba reabrir un deploy cerrado** (#75) con una foto de número más alto, y
-  sumaba un segundo cierre en `audit_log`. Ahora lo que el agent cerró no cambia.
-
-La mudanza del control plane ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md))
-se hizo el 2026-10-02 en el segundo intento, con dos minutos de corte; el primero hubo que
-revertirlo, con diez. Lo que dejó está en el runbook (sección 8).
+- [x] Desplegar el sprint y probar un deploy real en un proyecto de poco riesgo. El deploy roto a
+      propósito en un servidor real quedó pendiente (ver el cierre).
 
 Terminado cuando un proyecto Docker real se despliega desde el panel; un deploy roto a propósito
 vuelve atrás solo y el sitio sigue respondiendo; el historial y `audit_log` registran los dos; el
@@ -687,6 +672,51 @@ deploy.
 
 Si el sprint se estira, la línea de corte son los pasos declarados: el formato queda fijado en
 ADR-016 y el parser sigue exigiéndolos vacíos.
+
+**Cerrado el 2026-10-02, con un pendiente** (commit `cfb08fa`). Se entregó en trece PR (#60 a #72),
+sin usar la línea de corte: los pasos declarados entraron. El control plane se mudó a `srv936263`
+([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)) con la migración 00009, y
+los dos agents quedaron en esa versión. El deploy está prendido solo en `sv-gcg`.
+
+El primer deploy real fue `gcg-alertas-nbcargo`, en producción, pedido desde el panel con el
+nombre del proyecto y un código TOTP: terminó bien en 2 min 59 s (traer la rama 2 s, compilar
+2 min 5 s, levantar 36 s, verificar 16 s con los 3 contenedores bien). Era el mismo commit que ya
+corría, así que se recrearon los dos servicios compilados y el PostgreSQL del proyecto no se tocó.
+Quedaron las tres imágenes anteriores etiquetadas `statussv-rollback/gcg-alertas-nbcargo/...`, el
+pedido y el cierre en `audit_log` (`deploy.request` de la persona, `deploy.finish` del agent) y el
+deploy en el historial. El agent, después de compilar, ocupaba 11 MB.
+
+**El pendiente: el deploy roto a propósito en un servidor real.** La vuelta atrás sola se prueba en
+cada PR del CI, con Docker de verdad, pero no se ensayó en producción: Juan decidió posponerla
+para no romper la rama de un proyecto de cliente. Hay que hacerla con un repo de prueba declarado
+en `sv-gcg`, **antes** de prender el deploy en un proyecto que importe. La mudanza de este mismo
+sprint mostró por qué: un servidor real falla en cosas que el CI no tiene. La CPU en reposo
+tampoco se midió en producción esta vez.
+
+Después del último PR aparecieron dos defectos, ya corregidos y desplegados:
+
+- **Un deploy bueno podía deshacerse solo al reiniciar el agent** (#74). El acuse de una foto
+  reescribía el diario sin candado y podía pisar la foto final con una copia vieja; al arrancar, el
+  agent lo tomaba por un deploy cortado y lo volvía atrás. Lo encontró la prueba de punta a punta,
+  en el CI de un PR de documentación: era una carrera y no había salido en las corridas anteriores.
+- **El control plane aceptaba reabrir un deploy cerrado** (#75) con una foto de número más alto, y
+  sumaba un segundo cierre en `audit_log`. Ahora lo que el agent cerró no cambia.
+
+Lecciones del despliegue (las de la mudanza están en el runbook, sección 8):
+
+- **Prender el deploy es por servidor, no por proyecto.** `--enable-deploy` le da al agent
+  escritura en el `workdir` de todos los proyectos declarados. Los que no tienen llave ni permisos
+  (`bot-ypf` y `gcg-alertas`) fallan en el chequeo previo sin tocar nada, y `deploy-check` lo dice
+  al prenderlo; pero figuran como desplegables en el panel.
+- **`deploy-check` antes del primer deploy ahorra el susto.** Probó la deploy key contra GitHub,
+  los permisos y el compose sin tocar lo que corría.
+- **Desplegar el mismo commit no es gratis.** La compilación no salió entera de la caché, y los
+  servicios compilados se recrearon: 36 segundos de reinicio. Vale saberlo antes de apretar el
+  botón "para probar".
+- **El instalador se corre desde donde se copió**, con su carpeta `systemd/` al lado: en un
+  servidor que solo tiene agent no existe `/opt/status-sv`.
+- **Un agent viejo convive con un control plane nuevo.** Los dos agents siguieron reportando en la
+  versión anterior hasta que se actualizaron, sin tocarlos durante la mudanza.
 
 **Sprints siguientes (resumen)**
 
