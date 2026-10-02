@@ -51,6 +51,8 @@ type Server struct {
 	totpLimiter   *ipLimiter
 	deploys       *deploys.Service
 	audit         *audit.Recorder
+	auditReader   *audit.Reader
+	blockedNotes  *sparseNotes
 	deployLimiter *ipLimiter
 }
 
@@ -75,6 +77,8 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		totpLimiter:   newIPLimiter(totpPerMinute, totpBurst, limiterTTL),
 		deploys:       deploys.NewService(pool),
 		audit:         audit.NewRecorder(store.New(pool)),
+		auditReader:   audit.NewReader(store.New(pool)),
+		blockedNotes:  newSparseNotes(blockedNoteEvery, maxBlockedNotes),
 		deployLimiter: newIPLimiter(deployRequestsPerMinute, deployRequestsBurst, limiterTTL),
 	}
 }
@@ -114,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/projects/{id}/deploys", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleDeploy))))
 	mux.Handle("POST /v1/projects/{id}/rollback", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRollback))))
 	mux.Handle("GET /v1/deploys/{id}", s.requireSession(http.HandlerFunc(s.handleGetDeploy)))
+	mux.Handle("GET /v1/audit", s.requireSession(http.HandlerFunc(s.handleListAudit)))
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si

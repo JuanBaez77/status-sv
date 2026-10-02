@@ -73,6 +73,18 @@ var (
 	ErrUserNotFound = errors.New("no existe ese usuario")
 )
 
+// LoginFailure es un login fallido con lo que la auditoría necesita saber y
+// quien pide no: si el nombre era de un usuario. Para quien lo recibe es un
+// ErrInvalidCredentials, con el mismo texto: lo que se contesta no cambia.
+type LoginFailure struct {
+	KnownUser bool
+}
+
+func (*LoginFailure) Error() string { return ErrInvalidCredentials.Error() }
+
+// Is hace que errors.Is(err, ErrInvalidCredentials) siga dando verdadero.
+func (*LoginFailure) Is(target error) bool { return target == ErrInvalidCredentials }
+
 // usernamePattern es el mismo que exige la migración 00003.
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
 
@@ -223,7 +235,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		if err := s.burn(ctx, password); err != nil {
 			return auth.Secret{}, Session{}, err
 		}
-		return auth.Secret{}, Session{}, ErrInvalidCredentials
+		return auth.Secret{}, Session{}, &LoginFailure{KnownUser: false}
 	case err != nil:
 		return auth.Secret{}, Session{}, fmt.Errorf("buscar el usuario: %w", err)
 	}
@@ -233,7 +245,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		return auth.Secret{}, Session{}, err
 	}
 	if !ok {
-		return auth.Secret{}, Session{}, ErrInvalidCredentials
+		return auth.Secret{}, Session{}, &LoginFailure{KnownUser: true}
 	}
 
 	// Con la contraseña correcta en la mano se aprovecha para actualizar un hash

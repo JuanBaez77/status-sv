@@ -183,6 +183,11 @@ esperar "el token quedó consumido" \
 esperar "hay una credencial activa" \
   bash -c "[ \"\$(${COMPOSE[*]} exec -T postgres psql -U statussv -d statussv -tAc 'SELECT count(*) FROM agent_credentials WHERE revoked_at IS NULL' | tr -d '[:space:]')\" = '1' ]"
 
+# Lo que se hizo hasta acá dejó rastro (ADR-020): el alta del usuario y el token,
+# hechos con los subcomandos del servidor, y el enrolamiento del agent.
+esperar "la auditoría anotó el usuario, el token y el enrolamiento" \
+  bash -c "[ \"\$(${COMPOSE[*]} exec -T postgres psql -U statussv -d statussv -tAc \"SELECT string_agg(action || ' ' || actor || ' ' || result, ', ' ORDER BY at, id) FROM audit_log WHERE action IN ('user.create', 'enrollment_token.create', 'agent.enroll')\" | tr -d '\r\n')\" = 'user.create cli ok, enrollment_token.create cli ok, agent.enroll ${SERVER_NAME} ok' ]"
+
 esperar "el latido actualizó last_seen" \
   bash -c "[ \"\$(${COMPOSE[*]} exec -T postgres psql -U statussv -d statussv -tAc \"SELECT count(*) FROM servers WHERE name = '${SERVER_NAME}' AND last_seen_at IS NOT NULL\" | tr -d '[:space:]')\" = '1' ]"
 

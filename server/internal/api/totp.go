@@ -9,6 +9,7 @@ import (
 
 	"rsc.io/qr"
 
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
@@ -49,13 +50,13 @@ func (s *Server) handleTOTPEnroll(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	noStore(w)
 	if !s.totpLimiter.allow(s.clientIP(r)) {
-		tooManyTOTP(w, r)
+		s.blockedTOTP(w, r, audit.ActionTOTPEnroll)
 		return
 	}
 
 	enrollment, err := s.users.BeginEnrollment(ctx, SessionFrom(ctx))
 	if err != nil {
-		s.totpError(w, r, err)
+		s.totpError(w, r, audit.ActionTOTPEnroll, false, err)
 		return
 	}
 	code, err := qr.Encode(enrollment.URI, qr.M)
@@ -79,7 +80,7 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
 	noStore(w)
 	if !s.totpLimiter.allow(ip) {
-		tooManyTOTP(w, r)
+		s.blockedTOTP(w, r, audit.ActionTOTPEnroll)
 		return
 	}
 	req, ok := decodeTOTPRequest(w, r)
@@ -90,9 +91,10 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	session := SessionFrom(ctx)
 	token, full, codes, err := s.users.ConfirmEnrollment(ctx, session, req.Code, ip, r.UserAgent())
 	if err != nil {
-		s.totpError(w, r, err)
+		s.totpError(w, r, audit.ActionTOTPEnroll, false, err)
 		return
 	}
+	s.recordAccess(ctx, audit.ActionTOTPEnroll, full.Username, audit.ResultOK, ip, nil)
 	s.log.InfoContext(ctx, "segundo factor activado; login", "usuario", full.Username, "ip", ip)
 	http.SetCookie(w, sessionCookie(token.Reveal(), full.ExpiresAt))
 	left := int64(len(codes))
@@ -111,7 +113,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
 	noStore(w)
 	if !s.totpLimiter.allow(ip) {
-		tooManyTOTP(w, r)
+		s.blockedTOTP(w, r, audit.ActionTOTPVerify)
 		return
 	}
 	req, ok := decodeTOTPRequest(w, r)
@@ -131,10 +133,17 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		token, full, err = s.users.VerifyTOTP(ctx, session, req.Code, ip, r.UserAgent())
 	}
 	if err != nil {
-		s.totpError(w, r, err)
+		s.totpError(w, r, audit.ActionTOTPVerify, req.RecoveryCode != "", err)
 		return
 	}
 
+	// Entrar con un código de recuperación es otra acción: gasta un código y
+	// conviene verlo aparte.
+	action := audit.ActionTOTPVerify
+	if req.RecoveryCode != "" {
+		action = audit.ActionRecoveryCode
+	}
+	s.recordAccess(ctx, action, full.Username, audit.ResultOK, ip, nil)
 	s.log.InfoContext(ctx, "login", "usuario", full.Username, "ip", ip, "con_codigo_de_recuperacion", req.RecoveryCode != "")
 	http.SetCookie(w, sessionCookie(token.Reveal(), full.ExpiresAt))
 	left, err := s.users.RecoveryCodesLeft(ctx, full.UserID)
@@ -163,11 +172,22 @@ func decodeTOTPRequest(w http.ResponseWriter, r *http.Request) (totpCodeRequest,
 	return req, true
 }
 
-// totpError contesta un error del segundo factor. Un código equivocado no dice
-// cuántos intentos quedan: no le sirve a nadie más que a quien está probando.
-func (s *Server) totpError(w http.ResponseWriter, r *http.Request, err error) {
+// totpError contesta un error del segundo factor y deja en la auditoría los
+// códigos equivocados. Un código equivocado no dice cuántos intentos quedan:
+// no le sirve a nadie más que a quien está probando.
+func (s *Server) totpError(w http.ResponseWriter, r *http.Request, action string, recovery bool, err error) {
 	ctx := r.Context()
 	session := SessionFrom(ctx)
+	if errors.Is(err, users.ErrInvalidCode) || errors.Is(err, users.ErrTooManyAttempts) {
+		detail := map[string]any{}
+		if recovery {
+			detail["con_codigo_de_recuperacion"] = true
+		}
+		if errors.Is(err, users.ErrTooManyAttempts) {
+			detail["sesion_cerrada"] = true
+		}
+		s.recordAccess(ctx, action, session.Username, audit.ResultFailed, s.clientIP(r), detail)
+	}
 	switch {
 	case errors.Is(err, users.ErrInvalidCode):
 		s.log.WarnContext(ctx, "código de segundo factor incorrecto", "usuario", session.Username, "ip", s.clientIP(r))
@@ -183,6 +203,17 @@ func (s *Server) totpError(w http.ResponseWriter, r *http.Request, err error) {
 		s.log.ErrorContext(ctx, "falló el segundo factor", "error", err)
 		writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
 	}
+}
+
+// blockedTOTP contesta un pedido del segundo factor frenado por el límite de
+// intentos y lo deja en la auditoría.
+func (s *Server) blockedTOTP(w http.ResponseWriter, r *http.Request, action string) {
+	username := SessionFrom(r.Context()).Username
+	s.recordBlocked(r.Context(), audit.Entry{
+		Actor: username, ActorType: audit.ActorUser, Action: action,
+		TargetType: "user", TargetID: username, IP: s.clientIP(r),
+	})
+	tooManyTOTP(w, r)
 }
 
 func tooManyTOTP(w http.ResponseWriter, r *http.Request) {

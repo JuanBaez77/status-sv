@@ -137,7 +137,19 @@ func TestLoginFailuresLookTheSame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := s.Login(t.Context(), attempt[0], attempt[1], "203.0.113.7", "Firefox")
 			if !errors.Is(err, ErrInvalidCredentials) {
-				t.Errorf("Login = %v, se esperaba ErrInvalidCredentials", err)
+				t.Fatalf("Login = %v, se esperaba ErrInvalidCredentials", err)
+			}
+			// El texto es el mismo en todos los casos: lo que distingue si el
+			// usuario existe es solo para la auditoría (ADR-020).
+			if err.Error() != ErrInvalidCredentials.Error() {
+				t.Errorf("el texto del error cambió: %q", err)
+			}
+			var failure *LoginFailure
+			if !errors.As(err, &failure) {
+				t.Fatalf("Login = %T, se esperaba un *LoginFailure", err)
+			}
+			if failure.KnownUser != (attempt[0] == "juan") {
+				t.Errorf("KnownUser = %v para %q", failure.KnownUser, attempt[0])
 			}
 		})
 	}
