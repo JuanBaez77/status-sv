@@ -769,7 +769,7 @@ Auditoría
 - [ ] Acciones de acceso en `audit_log`: logins, segundo factor, enrolamiento de agents y los
       subcomandos de CLI, sin guardar lo que se escribió en un login fallido.
 - [ ] `GET /v1/audit` con cursor y filtros.
-- [ ] Página de auditoría en el panel, con enlaces desde un proyecto y desde un deploy.
+- [ ] Página de auditoría en el panel, con un enlace desde la historia de deploys de un proyecto.
 
 Contrato
 

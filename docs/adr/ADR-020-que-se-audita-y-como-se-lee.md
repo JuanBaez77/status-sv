@@ -51,8 +51,9 @@ pedido rechazado en una tabla que no se borra.
 
 **5. En el panel es una página propia, "Auditoría".**
 
-Con los filtros, el detalle de cada renglón y enlaces desde la vista de un proyecto y desde un
-deploy, ya filtrados. Sin exportar.
+Con los filtros, el detalle de cada renglón y un enlace desde la historia de deploys de un
+proyecto, ya filtrado por ese proyecto. No hay un enlace por deploy: el objetivo de los renglones
+de un deploy es su proyecto. Sin exportar.
 
 **6. La tabla no cambia: sin particiones y sin retención.**
 
