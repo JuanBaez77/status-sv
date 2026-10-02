@@ -168,6 +168,10 @@ type Querier interface {
 	// Códigos de recuperación del segundo factor (ADR-013). Se guarda el SHA-256
 	// del código normalizado, y cada uno sirve una vez.
 	InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) (int64, error)
+	// ListAudit lee la auditoría del más nuevo al más viejo (ADR-020). Cada filtro
+	// es opcional. El cursor es el instante y el ID del último renglón que ya se
+	// vio: así un renglón que entra mientras tanto no corre los que siguen.
+	ListAudit(ctx context.Context, arg ListAuditParams) ([]AuditLog, error)
 	ListCredentialsForServer(ctx context.Context, serverID uuid.UUID) ([]AgentCredential, error)
 	ListHourDisks(ctx context.Context, arg ListHourDisksParams) ([]ListHourDisksRow, error)
 	ListHourNetworks(ctx context.Context, arg ListHourNetworksParams) ([]ListHourNetworksRow, error)

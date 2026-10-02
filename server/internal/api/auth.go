@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
@@ -57,6 +58,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if !s.loginLimiter.allow(ip) {
 		s.log.WarnContext(ctx, "login rechazado por límite de frecuencia", "ip", ip)
+		s.recordBlocked(ctx, audit.Entry{
+			Actor: audit.Unknown, ActorType: audit.ActorUser, Action: audit.ActionLogin,
+			TargetType: "user", TargetID: audit.Unknown, IP: ip,
+		})
 		writeJSON(ctx, w, http.StatusTooManyRequests, errorResponse{
 			Error: "rate_limited", Message: "demasiados intentos; esperá un minuto",
 		})
@@ -77,6 +82,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, users.ErrInvalidCredentials):
 		s.log.WarnContext(ctx, "login fallido", "usuario", loggableUsername(req.Username), "ip", ip)
+		// Lo que se escribió se guarda solo si es el nombre de un usuario: en
+		// ese campo a veces va, por error, la contraseña (ADR-020).
+		username := audit.Unknown
+		var failure *users.LoginFailure
+		if errors.As(err, &failure) && failure.KnownUser {
+			username = users.NormalizeUsername(req.Username)
+		}
+		s.recordAccess(ctx, audit.ActionLogin, username, audit.ResultFailed, ip, nil)
 		writeJSON(ctx, w, http.StatusUnauthorized, errorResponse{
 			Error: "invalid_credentials", Message: "usuario o contraseña incorrectos",
 		})
@@ -88,6 +101,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.InfoContext(ctx, "contraseña correcta, falta el segundo factor", "usuario", session.Username, "ip", ip, "etapa", session.Stage)
+	s.recordAccess(ctx, audit.ActionLogin, session.Username, audit.ResultOK, ip, map[string]any{"etapa": session.Stage})
 	http.SetCookie(w, sessionCookie(token.Reveal(), session.ExpiresAt))
 	writeJSON(ctx, w, http.StatusOK, sessionResponse{Username: session.Username, ExpiresAt: session.ExpiresAt, Stage: session.Stage})
 }
@@ -99,10 +113,17 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 
 	if cookie, err := r.Cookie(SessionCookie); err == nil {
-		if err := s.users.Logout(ctx, auth.ParseSecret(cookie.Value)); err != nil {
+		token := auth.ParseSecret(cookie.Value)
+		// De quién era la sesión se averigua antes de cerrarla, para la
+		// auditoría. Sin una sesión viva no hay nada que anotar.
+		session, authErr := s.users.Authenticate(ctx, token)
+		if err := s.users.Logout(ctx, token); err != nil {
 			s.log.ErrorContext(ctx, "falló el logout", "error", err)
 			writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
 			return
+		}
+		if authErr == nil {
+			s.recordAccess(ctx, audit.ActionLogout, session.Username, audit.ResultOK, s.clientIP(r), nil)
 		}
 	}
 

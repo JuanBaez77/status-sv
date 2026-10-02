@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
@@ -51,6 +52,8 @@ func runEnrollToken(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	recordCLI(ctx, audit.NewRecorder(store.New(pool)), audit.ActionEnrollTokenCreate, "server", token.ServerName,
+		map[string]any{"pedido_por": *createdBy, "vence": token.ExpiresAt.UTC().Format(time.RFC3339)})
 
 	fmt.Printf(`Token de enrolamiento para %q:
 

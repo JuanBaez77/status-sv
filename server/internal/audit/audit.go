@@ -34,7 +34,38 @@ const (
 	ActionRollbackRequest = "rollback.request"
 	ActionDeployFinish    = "deploy.finish"
 	ActionLogsRequest     = "logs.request"
+
+	// Las de acceso (ADR-020).
+	ActionLogin             = "auth.login"
+	ActionTOTPVerify        = "auth.totp_verify"
+	ActionTOTPEnroll        = "auth.totp_enroll"
+	ActionRecoveryCode      = "auth.recovery_code"
+	ActionLogout            = "auth.logout"
+	ActionAgentEnroll       = "agent.enroll"
+	ActionUserCreate        = "user.create"
+	ActionUserPassword      = "user.password"
+	ActionUserTOTPReset     = "user.totp_reset"
+	ActionEnrollTokenCreate = "enrollment_token.create"
 )
+
+// Resultados de las acciones de acceso. Las de deploy usan el estado del
+// deploy o el motivo del rechazo.
+const (
+	ResultOK     = "ok"
+	ResultFailed = "failed"
+	// ResultBlocked es un pedido frenado por el límite de intentos.
+	ResultBlocked = "blocked"
+	// ResultRejected es un enrolamiento con un token que no sirve.
+	ResultRejected = "rejected"
+)
+
+// Unknown es el actor o el objetivo cuando no se sabe quién es: un login con
+// un nombre que no existe, un enrolamiento con un token inválido. Lo que se
+// escribió no se guarda (ADR-020).
+const Unknown = "desconocido"
+
+// ActorCLI es el actor de los subcomandos que alguien corre en el servidor.
+const ActorCLI = "cli"
 
 // Límites de la tabla (migración 00009).
 const (
@@ -104,12 +135,12 @@ func (r *Recorder) Record(ctx context.Context, e Entry) error {
 	err = r.db.InsertAudit(ctx, store.InsertAuditParams{
 		ID:         id,
 		At:         r.now().UTC(),
-		Actor:      fit(e.Actor, maxActor, "desconocido"),
+		Actor:      fit(e.Actor, maxActor, Unknown),
 		ActorType:  string(e.ActorType),
 		Action:     fit(e.Action, maxAction, "desconocida"),
-		TargetType: fit(e.TargetType, maxTargetType, "desconocido"),
-		TargetID:   fit(e.TargetID, maxTargetID, "desconocido"),
-		Result:     fit(e.Result, maxResult, "desconocido"),
+		TargetType: fit(e.TargetType, maxTargetType, Unknown),
+		TargetID:   fit(e.TargetID, maxTargetID, Unknown),
+		Result:     fit(e.Result, maxResult, Unknown),
 		Ip:         fit(e.IP, maxIP, ""),
 		Detail:     detail,
 	})

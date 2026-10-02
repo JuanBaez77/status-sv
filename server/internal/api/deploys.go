@@ -448,10 +448,16 @@ func (s *Server) expireDeploys(ctx context.Context) {
 	}
 	for _, d := range expired {
 		s.publishDeploy(ctx, d.ServerID, d.ProjectID, d.ID, d.Status)
+		// El objetivo es el mismo que anota el pedido y el cierre del agent: el
+		// ID del proyecto, o su nombre si ya no está declarado.
+		target := d.ProjectName
+		if d.ProjectID != nil {
+			target = d.ProjectID.String()
+		}
 		s.record(ctx, audit.Entry{
 			Actor: "control-plane", ActorType: audit.ActorSystem, Action: audit.ActionDeployFinish,
-			TargetType: "project", TargetID: d.ProjectName, Result: d.Status,
-			Detail: map[string]any{"deploy": d.ID.String(), "codigo": d.Code},
+			TargetType: "project", TargetID: target, Result: d.Status,
+			Detail: map[string]any{"deploy": d.ID.String(), "proyecto": d.ProjectName, "codigo": d.Code},
 		})
 		s.log.WarnContext(ctx, "deploy cerrado sin respuesta del agent", "deploy", d.ID, "proyecto", d.ProjectName)
 	}

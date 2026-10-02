@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
@@ -29,11 +30,12 @@ func runUserAdd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return withUsers(ctx, func(service *users.Service) error {
+	return withUsers(ctx, func(service *users.Service, recorder *audit.Recorder) error {
 		user, err := service.CreateUser(ctx, username, password)
 		if err != nil {
 			return err
 		}
+		recordCLI(ctx, recorder, audit.ActionUserCreate, "user", user.Username, nil)
 		fmt.Fprintf(os.Stderr, "Usuario %q creado.\n", user.Username)
 		return nil
 	})
@@ -51,11 +53,12 @@ func runUserPassword(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return withUsers(ctx, func(service *users.Service) error {
+	return withUsers(ctx, func(service *users.Service, recorder *audit.Recorder) error {
 		closed, err := service.SetPassword(ctx, username, password)
 		if err != nil {
 			return err
 		}
+		recordCLI(ctx, recorder, audit.ActionUserPassword, "user", username, map[string]any{"sesiones_cerradas": closed})
 		fmt.Fprintf(os.Stderr, "Contraseña cambiada. Sesiones cerradas: %d.\n", closed)
 		return nil
 	})
@@ -78,7 +81,7 @@ func parseUsernameFlag(name string, args []string) (string, error) {
 	return normalized, nil
 }
 
-func withUsers(ctx context.Context, fn func(*users.Service) error) error {
+func withUsers(ctx context.Context, fn func(*users.Service, *audit.Recorder) error) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -88,7 +91,21 @@ func withUsers(ctx context.Context, fn func(*users.Service) error) error {
 		return err
 	}
 	defer pool.Close()
-	return fn(users.NewService(pool, cfg.TOTPKey, newLogger(cfg)))
+	return fn(users.NewService(pool, cfg.TOTPKey, newLogger(cfg)), audit.NewRecorder(store.New(pool)))
+}
+
+// recordCLI deja en la auditoría lo que hizo un subcomando (ADR-020). El actor
+// es "cli": quien lo corrió tiene acceso al servidor, y el proceso no sabe
+// quién es. Si no se puede escribir, se avisa y el subcomando igual termina
+// bien: lo que hizo ya está hecho.
+func recordCLI(ctx context.Context, recorder *audit.Recorder, action, targetType, target string, detail map[string]any) {
+	err := recorder.Record(ctx, audit.Entry{
+		Actor: audit.ActorCLI, ActorType: audit.ActorSystem, Action: action,
+		TargetType: targetType, TargetID: target, Result: audit.ResultOK, Detail: detail,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Aviso: no se pudo anotar en la auditoría: %v\n", err)
+	}
 }
 
 // readNewPassword pide la contraseña dos veces, sin eco. Si la entrada no es una
@@ -134,11 +151,12 @@ func runUserTOTPReset(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return withUsers(ctx, func(service *users.Service) error {
+	return withUsers(ctx, func(service *users.Service, recorder *audit.Recorder) error {
 		closed, err := service.ResetTOTP(ctx, username)
 		if err != nil {
 			return err
 		}
+		recordCLI(ctx, recorder, audit.ActionUserTOTPReset, "user", username, map[string]any{"sesiones_cerradas": closed})
 		fmt.Fprintf(os.Stderr, "Segundo factor de %q borrado. Sesiones cerradas: %d.\n"+
 			"El próximo login le va a pedir darlo de alta de nuevo.\n", username, closed)
 		return nil

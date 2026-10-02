@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/JuanBaez77/status-sv/proto"
+	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/enrollment"
 )
@@ -25,6 +26,10 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 
 	if !s.enrollLimiter.allow(ip) {
 		s.log.WarnContext(ctx, "enrolamiento rechazado por límite de frecuencia", "ip", ip)
+		s.recordBlocked(ctx, audit.Entry{
+			Actor: audit.Unknown, ActorType: audit.ActorAgent, Action: audit.ActionAgentEnroll,
+			TargetType: "server", TargetID: audit.Unknown, IP: ip,
+		})
 		s.writeProtoError(ctx, w, http.StatusTooManyRequests, uuid.Nil,
 			proto.CodeRateLimited, "demasiados intentos de enrolamiento; esperá un minuto")
 		return
@@ -62,6 +67,12 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.record(ctx, audit.Entry{
+		Actor: result.Server.Name, ActorType: audit.ActorAgent, Action: audit.ActionAgentEnroll,
+		TargetType: "server", TargetID: result.Server.ID.String(), Result: audit.ResultOK, IP: ip,
+		Detail: map[string]any{"servidor": result.Server.Name},
+	})
+
 	ack := proto.EnrollAck{
 		ServerID:   result.Server.ID,
 		ServerName: result.Server.Name,
@@ -94,6 +105,13 @@ func (s *Server) writeEnrollFailure(ctx context.Context, w http.ResponseWriter, 
 	switch {
 	case errors.Is(err, enrollment.ErrTokenNotFound), errors.Is(err, enrollment.ErrWrongSecretKind):
 		s.log.WarnContext(ctx, "enrolamiento rechazado", "ip", ip, "motivo", err.Error())
+		// Del pedido no se guarda nada: ni el token ni el nombre de máquina, que
+		// los escribió quien no pudo enrolarse.
+		s.record(ctx, audit.Entry{
+			Actor: audit.Unknown, ActorType: audit.ActorAgent, Action: audit.ActionAgentEnroll,
+			TargetType: "server", TargetID: audit.Unknown, Result: audit.ResultRejected, IP: ip,
+			Detail: map[string]any{"motivo": "token inválido, usado o vencido"},
+		})
 		s.writeProtoError(ctx, w, http.StatusUnauthorized, inReplyTo,
 			proto.CodeInvalidToken, "el token no existe, ya se usó o venció")
 
