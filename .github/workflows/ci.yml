@@ -210,10 +210,10 @@ jobs:
 
       # El reparto del deploy de systemd (ADR-019): el agent no ejecuta nada
       # del proyecto ni reinicia servicios; se lo pide a un ayudante root por
-      # un socket, con operaciones fijas. Acá el ayudante es uno de mentira,
-      # con la unidad y el endurecimiento que va a tener el de verdad.
+      # un socket, con operaciones fijas. Corre el ayudante de verdad, con
+      # sus unidades tal cual se instalan.
       - name: Laboratorio del deploy de systemd
-        run: sudo bash ./deploy/laboratorio/systemd.sh
+        run: sudo AGENT_BIN="${RUNNER_TEMP}/statussv-agent" bash ./deploy/laboratorio/systemd.sh
 
   metas:
     name: "Metas del panel: Lighthouse y latencia métrica → pantalla"

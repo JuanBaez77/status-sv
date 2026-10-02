@@ -1,19 +1,18 @@
 #!/bin/bash
 # Laboratorio del deploy de systemd (ADR-019): corre la unidad ENDURECIDA DE
 # VERDAD del agent bajo systemd, con sonda-systemd.sh en lugar del agent, y
-# prueba el reparto que va a usar el motor para un proyecto systemd: el agent
-# no reinicia ni ejecuta nada del proyecto; se lo pide a un ayudante root, por
-# un socket unix, con operaciones fijas.
+# prueba el reparto que usa el motor para un proyecto systemd: el agent no
+# reinicia ni ejecuta nada del proyecto; se lo pide al ayudante root, por un
+# socket unix, con operaciones fijas.
 #
-# El ayudante de verdad (statussv-agent unit-helper) todavía no existe: lo
-# reemplaza ayudante-falso.sh, con la misma unidad, el mismo socket y el mismo
-# endurecimiento. Lo que se mide es el mecanismo, no ese script.
+# El ayudante es el de verdad (statussv-agent unit-helper), con sus unidades
+# de deploy/systemd tal cual se instalan.
 #
-# Necesita systemd como PID 1 y python3. No necesita Docker. Se corre como root
-# en una máquina descartable: el runner del CI (job "laboratorio") o WSL. Crea y
-# borra lo suyo.
+# Necesita systemd como PID 1, python3 y el binario del agent para Linux. No
+# necesita Docker. Se corre como root en una máquina descartable: el runner
+# del CI (job "laboratorio") o WSL. Crea y borra lo suyo.
 #
-#   sudo ./deploy/laboratorio/systemd.sh
+#   sudo AGENT_BIN=/ruta/a/statussv-agent ./deploy/laboratorio/systemd.sh
 set -uo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,19 +32,21 @@ paso()  { printf '\n== %s ==\n' "$*"; }
 for p in systemctl systemd-run journalctl python3 runuser; do
   command -v "$p" >/dev/null || { rojo "falta ${p}"; exit 2; }
 done
+[ -x "${AGENT_BIN:-}" ] || { rojo "AGENT_BIN tiene que apuntar al binario del agent para Linux"; exit 2; }
 
 limpiar() {
   paso "limpieza"
-  systemctl stop ${NAME} lab-gunicorn lab-otra statussv-lab-ayudante.socket 2>/dev/null
-  systemctl stop 'statussv-lab-ayudante@*.service' 'statussv-step-*.service' 2>/dev/null
-  systemctl reset-failed ${NAME} 'statussv-lab-ayudante@*.service' 'statussv-step-*.service' 2>/dev/null
+  systemctl stop ${NAME} lab-gunicorn lab-otra statussv-unit-helper.socket 2>/dev/null
+  systemctl stop 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
+  systemctl reset-failed ${NAME} 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
   rm -rf "${UNIT}" "${DROPIN_DIR}" "${REGLA}" \
     /etc/systemd/system/lab-gunicorn.service /etc/systemd/system/lab-otra.service \
-    /etc/systemd/system/statussv-lab-ayudante.socket /etc/systemd/system/statussv-lab-ayudante@.service
+    /etc/systemd/system/statussv-unit-helper.socket /etc/systemd/system/statussv-unit-helper@.service
   systemctl daemon-reload
   rm -rf "${WD}" /etc/lab-systemd /etc/status-sv /var/lib/status-sv /run/status-sv /etc/paso-lab \
-    /usr/local/bin/sonda-systemd.sh /usr/local/bin/ayudante-falso.sh /usr/local/bin/cliente-ayudante.py
+    /usr/local/bin/sonda-systemd.sh /usr/local/bin/cliente-ayudante.py /usr/local/bin/statussv-agent
   userdel labapp 2>/dev/null
+  userdel labotro 2>/dev/null
   if [ -f "${MARCA_USUARIO}" ]; then
     userdel statussv 2>/dev/null
     rm -f "${MARCA_USUARIO}"
@@ -67,6 +68,8 @@ if ! id statussv >/dev/null 2>&1; then
 fi
 # El usuario del proyecto: con el que corre el servicio y sus pasos (run_as).
 useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin labapp
+# Otro usuario que está en el grupo del agent: llega al socket, y no es el agent.
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --groups statussv labotro
 
 # El workdir, con los permisos del runbook: de root, con escritura del grupo
 # statussv para git. El usuario del proyecto escribe solo en lo suyo.
@@ -77,6 +80,7 @@ cat >"${WD}/paso.sh" <<'EOF'
 # Lo que haría un `pip install`: código del repositorio corriendo en el servidor.
 echo "usuario=$(id -un)"
 echo "directorio=$(pwd)"
+echo "argumentos=$*"
 if [ -n "${LAB_SECRETO:-}" ]; then echo "entorno=presente"; else echo "entorno=ausente"; fi
 echo "cgroup=$(cut -d: -f3 /proc/self/cgroup)"
 if cat /var/lib/status-sv/agent.json >/dev/null 2>&1; then echo "credencial=legible"; else echo "credencial=no"; fi
@@ -107,62 +111,68 @@ ExecStart=/usr/bin/sleep infinity
 EOF
 done
 
-# La declaración que lee el ayudante: la escribe root, y de ahí sale lo que
-# corre. El ayudante de verdad lee el project.yaml con el parser del agent.
-cat >/etc/status-sv/lab-ayudante.conf <<EOF
-PROYECTO=lab
-RUN_AS=labapp
-WORKDIR=${WD}
-ENV_FILE=/etc/lab-systemd/env
-UNITS=(lab-gunicorn.service)
-PASO_build_0=(${WD}/paso.sh)
-TIEMPO_build_0=30
-PASO_build_1=(${WD}/falla.sh)
-TIEMPO_build_1=30
-PASO_pre_0=(/usr/bin/sleep 60)
-TIEMPO_pre_0=3
-PASO_post_0=(/usr/bin/sleep 120)
-TIEMPO_post_0=300
+# Los proyectos declarados, como los deja una persona: de root, legibles por
+# el grupo del agent. De ahí saca el ayudante lo que corre.
+install -d -o root -g statussv -m 0750 /etc/status-sv/projects.d
+cat >/etc/status-sv/projects.d/lab.yaml <<EOF
+name: lab
+environment: staging
+repo: github.com/status-sv/laboratorio
+branch: main
+runtime: systemd
+workdir: ${WD}
+units:
+  - lab-gunicorn.service
+run_as: labapp
+env_file: /etc/lab-systemd/env
+deploy:
+  build:
+    - command: ["./paso.sh", "un argumento", "--con=igual"]
+      timeout_seconds: 30
+    - command: ["./falla.sh"]
+      timeout_seconds: 30
+  pre:
+    - command: ["/usr/bin/sleep", "60"]
+      timeout_seconds: 3
+  post:
+    - command: ["/usr/bin/sleep", "120"]
+      timeout_seconds: 300
 EOF
-chmod 0600 /etc/status-sv/lab-ayudante.conf
+# Un proyecto que no se puede desplegar: su usuario y su unidad no existen.
+cat >/etc/status-sv/projects.d/roto.yaml <<EOF
+name: roto
+environment: staging
+repo: github.com/status-sv/laboratorio
+branch: main
+runtime: systemd
+workdir: ${WD}
+units:
+  - lab-no-existe.service
+run_as: nadie-con-este-nombre
+deploy:
+  build:
+    - command: ["./paso.sh"]
+EOF
+# Y uno de Docker, que al ayudante no le corresponde.
+cat >/etc/status-sv/projects.d/contenedores.yaml <<EOF
+name: contenedores
+environment: staging
+repo: github.com/status-sv/laboratorio
+branch: main
+runtime: docker
+compose_file: compose.yml
+workdir: ${WD}
+EOF
+chown root:statussv /etc/status-sv/projects.d/*.yaml
+chmod 0640 /etc/status-sv/projects.d/*.yaml
 
 install -m 0755 "${DIR}/sonda-systemd.sh" /usr/local/bin/sonda-systemd.sh
-install -m 0755 "${DIR}/ayudante-falso.sh" /usr/local/bin/ayudante-falso.sh
 install -m 0755 "${DIR}/cliente-ayudante.py" /usr/local/bin/cliente-ayudante.py
+install -m 0755 "${AGENT_BIN}" /usr/local/bin/statussv-agent
 
-# El ayudante: se activa por el socket, que es root:statussv 0660, y corre como
-# root sin capacidades, sin red y con el sistema de archivos en solo lectura.
-cat >/etc/systemd/system/statussv-lab-ayudante.socket <<EOF
-[Socket]
-ListenStream=${SOCKET}
-SocketUser=root
-SocketGroup=statussv
-SocketMode=0660
-Accept=yes
-EOF
-cat >/etc/systemd/system/statussv-lab-ayudante@.service <<'EOF'
-[Service]
-ExecStart=/usr/local/bin/ayudante-falso.sh
-StandardInput=socket
-StandardOutput=socket
-StandardError=journal
-CapabilityBoundingSet=
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-PrivateNetwork=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX
-RestrictNamespaces=true
-LockPersonality=true
-MemoryDenyWriteExecute=true
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-EOF
+# El ayudante, con sus unidades tal cual se instalan en un servidor.
+install -m 0644 "${DIR}/../systemd/statussv-unit-helper.socket" /etc/systemd/system/statussv-unit-helper.socket
+install -m 0644 "${DIR}/../systemd/statussv-unit-helper@.service" /etc/systemd/system/statussv-unit-helper@.service
 
 # La unidad real del agent, con dos cambios: qué ejecuta y que corre una sola vez.
 sed -e 's|^ExecStart=.*|ExecStart=/usr/local/bin/sonda-systemd.sh|' \
@@ -182,18 +192,36 @@ TasksMax=256
 EOF
 
 systemctl daemon-reload
-systemctl start lab-gunicorn lab-otra statussv-lab-ayudante.socket || { rojo "no arrancó la preparación"; exit 1; }
+systemctl start lab-gunicorn lab-otra statussv-unit-helper.socket || { rojo "no arrancó la preparación"; exit 1; }
 
 resultado=0
 
 paso "el socket del ayudante"
 ls -l "${SOCKET}"
+PEDIDO='{"op":"restart_units","project":"lab"}'
 # Otro usuario del servidor no llega al ayudante: el socket es del grupo statussv.
-if runuser -u labapp -- python3 /usr/local/bin/cliente-ayudante.py "${SOCKET}" "restart_units lab" >/dev/null 2>&1; then
+if runuser -u labapp -- python3 /usr/local/bin/cliente-ayudante.py "${SOCKET}" "${PEDIDO}" >/dev/null 2>&1; then
   rojo "FALLA otro usuario pudo pedirle un reinicio al ayudante"; resultado=1
 else
-  verde "OK    otro usuario no puede conectarse al ayudante"
+  verde "OK    un usuario que no es del grupo no puede conectarse al ayudante"
 fi
+# Y uno del grupo que no es el agent llega al socket, pero el ayudante lo rechaza.
+respuesta="$(runuser -u labotro -- python3 /usr/local/bin/cliente-ayudante.py "${SOCKET}" "${PEDIDO}" 2>&1)"
+case "${respuesta}" in
+  *'"code":"forbidden"'*) verde "OK    un usuario del grupo que no es el agent recibe forbidden" ;;
+  *) rojo "FALLA un usuario del grupo que no es el agent recibió: ${respuesta}"; resultado=1 ;;
+esac
+
+# El ayudante corre como root lo que diga el project.yaml: si el grupo del
+# agent pudiera escribirlo, el agent podría declararse sus propios pasos. Con
+# esos permisos el ayudante no lo usa.
+chmod 0660 /etc/status-sv/projects.d/lab.yaml
+respuesta="$(python3 /usr/local/bin/cliente-ayudante.py "${SOCKET}" '{"op":"check","project":"lab"}' 2>&1)"
+chmod 0640 /etc/status-sv/projects.d/lab.yaml
+case "${respuesta}" in
+  *'"code":"not_declared"'*) verde "OK    un project.yaml que el grupo puede escribir no se usa" ;;
+  *) rojo "FALLA con el project.yaml escribible por el grupo contestó: ${respuesta}"; resultado=1 ;;
+esac
 
 paso "la sonda, adentro de la unidad del agent"
 desde="$(date '+%Y-%m-%d %H:%M:%S')"
@@ -203,8 +231,10 @@ sleep 1
 journalctl -u ${NAME} --since "${desde}" -o cat --no-pager 2>/dev/null | grep -Ev '^(Starting|Started|Finished|Stopped|Deactivated|Consumed|statussv-sonda)'
 if [ "${rc}" -eq 0 ]; then verde "la sonda: todo lo que el motor necesita anda"; else rojo "la sonda: algo no dio lo esperado"; resultado=1; fi
 
-# Lo que dejó el ayudante en el diario, por si algo falló.
-journalctl -u 'statussv-lab-ayudante@*' --since "${desde}" -o cat --no-pager 2>/dev/null | grep -Ev '^(Starting|Started|Finished|Stopped|Deactivated|Consumed|statussv-lab-ayudante)' | sed 's/^/ayudante: /' | head -20
+# Lo que dejó el ayudante en el diario.
+echo
+journalctl -u 'statussv-unit-helper@*' --since "${desde}" -o cat --no-pager 2>/dev/null \
+  | grep -E 'componente=unit-helper' | sed 's/^/ayudante: /' | tail -25
 
 # --- La alternativa descartada: una regla de polkit por unidad ---
 #

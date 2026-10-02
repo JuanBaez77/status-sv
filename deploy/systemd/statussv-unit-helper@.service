@@ -1,0 +1,51 @@
+# Ayudante de deploy de status-sv (ADR-019): una instancia por conexión de
+# statussv-unit-helper.socket.
+#
+# Corre como root porque hace dos cosas que el agent no puede: arrancar una
+# unidad con el usuario de un proyecto y reiniciar un servicio. Por eso hace
+# solo eso, con lo que diga el project.yaml de /etc/status-sv/projects.d, y todo
+# lo demás está cerrado: sin capacidades, sin red y con el sistema de archivos
+# en solo lectura. A systemd le habla por su socket privado, que es de root.
+
+[Unit]
+Description=Ayudante de deploy de status-sv
+Documentation=https://github.com/JuanBaez77/status-sv/blob/main/docs/adr/ADR-019-deploy-de-proyectos-systemd.md
+
+[Service]
+ExecStart=/usr/local/bin/statussv-agent unit-helper
+# La conexión es la entrada estándar. Lo que el ayudante registra va al diario.
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+
+# Un paso puede tardar hasta 30 minutos; el ayudante espera a que termine.
+TimeoutStopSec=30
+
+# --- Endurecimiento ---
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+# De solo lectura y no escondido: el archivo de entorno de un proyecto puede
+# estar bajo /home, y el ayudante tiene que poder ver que existe.
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+MemoryMax=64M
+TasksMax=32

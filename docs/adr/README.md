@@ -47,6 +47,6 @@ Qué más se evaluó y por qué se descartó.
 | [016](ADR-016-pasos-declarados-del-deploy.md) | Pasos declarados del deploy (`deploy.pre` y `deploy.post`) | aceptada |
 | [017](ADR-017-deploy-desde-el-panel-y-auditoria.md) | El deploy se dispara desde el panel, con confirmación, y queda en `audit_log` | aceptada |
 | [018](ADR-018-control-plane-en-servidor-propio-compartido.md) | El control plane vive en un servidor propio compartido, detrás de su nginx | aceptada |
-| [019](ADR-019-deploy-de-proyectos-systemd.md) | Deploy de proyectos systemd, con un ayudante root de operaciones fijas | aceptada (el punto 3 espera el visto bueno) |
+| [019](ADR-019-deploy-de-proyectos-systemd.md) | Deploy de proyectos systemd, con un ayudante root de operaciones fijas | aceptada |
 | [020](ADR-020-que-se-audita-y-como-se-lee.md) | Qué se audita y cómo se lee la auditoría | aceptada |
 | [021](ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md) | El deploy desde cero se parte: primer deploy ahora, lo que necesita root después | aceptada |

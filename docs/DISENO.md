@@ -750,9 +750,8 @@ pasa al Sprint 6).
 
 - **El código de un proyecto no corre como hijo del agent.** Sus pasos corren en unidades
   transitorias de systemd, con el usuario del proyecto, y el reinicio del servicio lo hace un
-  ayudante root de tres operaciones fijas. El plan decía una regla de polkit; Ubuntu 22.04, que es
-  lo que corre `sv-gcg`, no la soporta. **Ese cambio espera el visto bueno de Juan** (ADR-019,
-  punto 3) y bloquea desde el PR 7.
+  ayudante root de operaciones fijas. El plan decía una regla de polkit; Ubuntu 22.04, que es lo
+  que corre `sv-gcg`, no la soporta. Juan aceptó el ayudante el 2026-10-02 (ADR-019, punto 3).
 - **El proyecto gunicorn real** es uno de demostración en `sv-gcg`, salvo que aparezca un servidor
   de cliente con gunicorn: los sitios fuera de Docker conocidos están en `srv936263`, donde el
   deploy no se prende ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)).
