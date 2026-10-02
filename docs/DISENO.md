@@ -366,7 +366,7 @@ el usuario con el que corren sus pasos y, si hace falta, su archivo de entorno. 
 ```yaml
 runtime: systemd
 units: [gunicorn-ypf-aca.service]
-run_as: ypfaca                    # ni root ni el usuario del agent
+run_as: ypfaca                    # hace falta si hay pasos; ni root ni el usuario del agent
 env_file: /etc/ypf-aca/env        # opcional; el agent no lo lee
 deploy:
   build:

@@ -127,9 +127,12 @@ deploy:
 rollback: previous_commit
 ```
 
-- `run_as` es obligatorio con systemd: un usuario del sistema que no sea `root` ni el del agent.
-- `env_file` es opcional: una ruta absoluta. De ese archivo viaja al control plane que existe,
-  nunca su contenido.
+- `run_as` es obligatorio si el proyecto declara pasos: un usuario del sistema que no sea `root`
+  ni el del agent. Sin pasos, desplegar es traer el código y reiniciar, y un proyecto systemd que
+  ya estaba declarado sigue valiendo.
+- `env_file` es opcional: una ruta absoluta.
+- Ni el usuario, ni el archivo de entorno, ni los pasos viajan al control plane: el proyecto que
+  recibe es el mismo que antes.
 - Un paso es un `command` como lista de argumentos y un `timeout_seconds`, sin `service`. El
   primer argumento es una ruta: absoluta, o relativa al `workdir` y sin salir de él. No se busca
   en el `PATH`: lo que corre es exactamente lo que se escribió.
