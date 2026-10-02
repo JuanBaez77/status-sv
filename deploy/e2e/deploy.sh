@@ -12,7 +12,11 @@
 #      rechaza.
 #   3. Un rollback manual al estado bueno anterior.
 #   4. El agent se reinicia a mitad de un build: al arrancar vuelve atrás.
-#   5. Todo quedó en audit_log.
+#   5. El primer deploy de un proyecto que todavía no corre (ADR-021): pide un
+#      código de la app aunque sea staging, clona en un workdir sin clonar sin
+#      pisar el .env que dejó una persona, baja lo que levantó si no queda
+#      bien y, una vez que quedó bien, lo que sigue son deploys.
+#   6. Todo quedó en audit_log.
 #
 # Corre con los binarios compilados acá, sin contenedores para el agent: tiene
 # que ver el Docker de la máquina como en un servidor. Hace falta:
@@ -41,6 +45,10 @@ USUARIO="deploy"
 CLAVE="clave-de-la-prueba-de-deploy"
 PROYECTO="tienda"
 COMPOSE_PROJECT="statussv-e2e-deploy"
+# El proyecto que todavía no corre: se levanta con un primer deploy.
+NUEVO="turnos"
+NUEVO_COMPOSE="statussv-e2e-bootstrap"
+PUERTO_NUEVO="${PUERTO_NUEVO:-18093}"
 # INICIO_MAX es la meta de docs/DISENO.md: inicio de un deploy en menos de 3 s.
 INICIO_MAX_MS=3000
 
@@ -48,6 +56,9 @@ TRABAJO="$(mktemp -d)"
 ORIGEN="${TRABAJO}/origen.git"
 FUENTE="${TRABAJO}/fuente"
 WD="${TRABAJO}/proyecto"
+ORIGEN_NUEVO="${TRABAJO}/origen-nuevo.git"
+FUENTE_NUEVO="${TRABAJO}/fuente-nuevo"
+WD_NUEVO="${TRABAJO}/nuevo"
 SERVER_PID=""
 AGENT_PID=""
 
@@ -57,6 +68,9 @@ paso() { printf '\n=== %s ===\n' "$*"; }
 
 compose_wd() {
   docker compose --project-directory "${WD}" -f "${WD}/compose.yml" -p "${COMPOSE_PROJECT}" "$@"
+}
+compose_nuevo() {
+  docker compose --project-directory "${WD_NUEVO}" -f "${WD_NUEVO}/compose.yml" -p "${NUEVO_COMPOSE}" "$@"
 }
 
 limpiar() {
@@ -70,8 +84,11 @@ limpiar() {
     tail -n 40 "${TRABAJO}/server.log" "${TRABAJO}"/agent*.log 2>/dev/null || true
   fi
   [ -d "${WD}" ] && compose_wd down --rmi local --volumes >/dev/null 2>&1 || true
-  for ref in $(docker images --format '{{.Repository}}:{{.Tag}}' "statussv-rollback/${COMPOSE_PROJECT}/*" 2>/dev/null); do
-    docker image rm "${ref}" >/dev/null 2>&1 || true
+  [ -f "${WD_NUEVO}/compose.yml" ] && compose_nuevo down --rmi local --volumes >/dev/null 2>&1 || true
+  for proyecto in "${COMPOSE_PROJECT}" "${NUEVO_COMPOSE}"; do
+    for ref in $(docker images --format '{{.Repository}}:{{.Tag}}' "statussv-rollback/${proyecto}/*" 2>/dev/null); do
+      docker image rm "${ref}" >/dev/null 2>&1 || true
+    done
   done
   rm -rf "${TRABAJO}"
   exit $salida
@@ -167,6 +184,55 @@ deploy:
   pre:
     - service: web
       command: ["cat", "/www/version"]
+EOF
+
+# El proyecto nuevo: declarado, con el workdir que creó una persona y su .env
+# adentro, pero sin clonar y sin nada corriendo. Su primera versión no tiene
+# /health, así que el primer intento no queda bien.
+"${G[@]}" init -q --bare "${ORIGEN_NUEVO}"
+"${G[@]}" init -q "${FUENTE_NUEVO}"
+"${G[@]}" -C "${FUENTE_NUEVO}" remote add origin "${ORIGEN_NUEVO}"
+cat >"${FUENTE_NUEVO}/Dockerfile" <<'EOF'
+FROM busybox:1.37
+COPY www/ /www/
+CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]
+EOF
+cat >"${FUENTE_NUEVO}/compose.yml" <<EOF
+services:
+  web:
+    build: .
+    environment:
+      SALUDO: \${SALUDO:?falta el .env del workdir}
+    ports:
+      - "127.0.0.1:${PUERTO_NUEVO}:8080"
+EOF
+version_nuevo() {
+  local nombre="$1" health="${2:-si}"
+  rm -rf "${FUENTE_NUEVO}/www"
+  mkdir -p "${FUENTE_NUEVO}/www"
+  echo "${nombre}" >"${FUENTE_NUEVO}/www/version"
+  [ "${health}" = si ] && echo ok >"${FUENTE_NUEVO}/www/health"
+  "${G[@]}" -C "${FUENTE_NUEVO}" add -A
+  "${G[@]}" -C "${FUENTE_NUEVO}" commit -qm "${nombre}"
+  "${G[@]}" -C "${FUENTE_NUEVO}" push -q origin main
+  git -C "${FUENTE_NUEVO}" rev-parse HEAD
+}
+N1="$(version_nuevo n1 no)"
+mkdir -p "${WD_NUEVO}"
+echo 'SALUDO=hola' >"${WD_NUEVO}/.env"
+cat >"${TRABAJO}/projects.d/${NUEVO}.yaml" <<EOF
+name: ${NUEVO}
+environment: staging
+repo: file://${ORIGEN_NUEVO}
+branch: main
+runtime: docker
+compose_file: compose.yml
+compose_project: ${NUEVO_COMPOSE}
+workdir: ${WD_NUEVO}
+healthcheck:
+  url: http://${HEALTH_HOST}:${PUERTO_NUEVO}/health
+  expect_status: 200
+  timeout_seconds: 2
 EOF
 
 # --- Control plane y agent ---
