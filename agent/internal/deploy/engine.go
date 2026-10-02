@@ -1,16 +1,20 @@
-// Package deploy es el motor de deploy de proyectos Docker (ADR-015).
+// Package deploy es el motor de deploy de proyectos Docker (ADR-015) y de
+// proyectos de systemd (ADR-019).
 //
 // Recibe un deploy o un rollback ya validado por el contrato, lo acepta o lo
 // rechaza enseguida, y lo corre aparte, paso por paso: chequeo previo, fetch,
-// foto de lo que corre, checkout, build, pasos declarados, up, verificación y
-// pasos posteriores. Si algo falla después de tocar lo que corre, vuelve atrás
-// solo. Cada cambio sale como una foto completa (deploy_event) y queda en un
-// diario en disco, así un deploy sobrevive a un corte del canal y, si el
-// agent se reinicia en el medio, se vuelve atrás al arrancar.
+// foto de lo que corre, checkout, build, pasos declarados, up o reinicio,
+// verificación y pasos posteriores. Si algo falla después de tocar lo que
+// corre, vuelve atrás solo. Cada cambio sale como una foto completa
+// (deploy_event) y queda en un diario en disco, así un deploy sobrevive a un
+// corte del canal y, si el agent se reinicia en el medio, se vuelve atrás al
+// arrancar.
 //
 // Solo opera sobre proyectos declarados en el servidor, con git y docker
-// compose ejecutados con argumentos fijos. No hay ningún camino por el que el
-// control plane haga correr un comando propio.
+// compose ejecutados con argumentos fijos. Los pasos de un proyecto de systemd
+// no los ejecuta el agent: se los pide al ayudante root, que corre lo que diga
+// el project.yaml. No hay ningún camino por el que el control plane haga
+// correr un comando propio.
 package deploy
 
 import (
@@ -127,6 +131,9 @@ type Engine struct {
 	log    *slog.Logger
 	now    func() time.Time
 	sleep  func(ctx context.Context, d time.Duration) error
+	// systemd son las piezas del deploy de proyectos de systemd; nil si el
+	// agent no las tiene (ADR-019).
+	systemd *Systemd
 
 	// root es el contexto del agent: un deploy sigue aunque se corte el canal
 	// y solo se interrumpe si el agent se apaga.
@@ -153,6 +160,13 @@ func New(root context.Context, cfg Config, api compose.ImageAPI, health healthCh
 	}
 	out.setOnAck(e.acked)
 	return e, nil
+}
+
+// SetSystemd le da al motor las piezas para desplegar proyectos de systemd
+// (ADR-019). Se llama antes de atender comandos; sin esto, esos proyectos se
+// rechazan.
+func (e *Engine) SetSystemd(deps Systemd) {
+	e.systemd = &deps
 }
 
 // Wait espera a que termine lo que esté corriendo. Se usa al apagar y en los
@@ -186,16 +200,25 @@ func (e *Engine) Start(id uuid.UUID, cmd proto.Command) proto.CommandAck {
 	if !e.cfg.Enabled {
 		return reject(id, proto.CommandDisabled, "el deploy está apagado en este servidor (STATUSSV_DEPLOY_ENABLED)")
 	}
-	if e.cfg.Git == "" || e.cfg.Docker == "" {
-		return reject(id, proto.CommandUnavailable, "falta git o docker en este servidor")
+	if e.cfg.Git == "" {
+		return reject(id, proto.CommandUnavailable, "falta git en este servidor")
 	}
 
 	spec, err := e.load(e.cfg.ProjectsDir, name)
 	if err != nil {
 		return reject(id, proto.CommandUnknownTarget, "el proyecto no está declarado en este servidor o su archivo es inválido")
 	}
-	if spec.Project.Runtime != proto.RuntimeDocker {
-		return reject(id, proto.CommandUnavailable, "el deploy de proyectos de systemd llega en el Sprint 5")
+	// Cada runtime necesita lo suyo: Docker, o las piezas del deploy de
+	// systemd (ADR-019). Un servidor puede tener uno solo de los dos.
+	switch spec.Project.Runtime {
+	case proto.RuntimeSystemd:
+		if e.systemd == nil {
+			return reject(id, proto.CommandUnavailable, "este agent no puede desplegar proyectos de systemd")
+		}
+	default:
+		if e.cfg.Docker == "" {
+			return reject(id, proto.CommandUnavailable, "falta docker en este servidor")
+		}
 	}
 
 	e.mu.Lock()

@@ -79,24 +79,36 @@ func (r *run) deploySteps(ctx context.Context) error {
 	if err := r.step(ctx, proto.StepCheckout, "", r.checkout(func() string { return r.j.Event.Commit })); err != nil {
 		return err
 	}
-	if err := r.step(ctx, proto.StepBuild, "", func(ctx context.Context, tail *runner.Tail) (string, error) {
-		return "", r.rt.Build(ctx, tail)
-	}); err != nil {
+	if err := r.builds(ctx); err != nil {
 		return err
 	}
-	for _, s := range r.spec.Pre {
-		if err := r.step(ctx, proto.StepPre, s.Service, r.declared(s)); err != nil {
+	for i, s := range r.spec.Pre {
+		if err := r.labeled(ctx, proto.StepPre, s.Service, commandLine(s), r.declared(phasePre, i, s)); err != nil {
 			return err
 		}
 	}
-	if err := r.step(ctx, proto.StepUp, "", r.up); err != nil {
+	if err := r.step(ctx, r.rt.StartStep(), "", r.up); err != nil {
 		return err
 	}
 	if err := r.step(ctx, proto.StepHealthcheck, "", r.verify); err != nil {
 		return err
 	}
-	for _, s := range r.spec.Post {
-		if err := r.step(ctx, proto.StepPost, s.Service, r.declared(s)); err != nil {
+	for i, s := range r.spec.Post {
+		if err := r.labeled(ctx, proto.StepPost, s.Service, commandLine(s), r.declared(phasePost, i, s)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// builds corre lo que prepara el código nuevo: con Docker es un solo paso, y
+// con systemd, uno por cada paso declarado en deploy.build.
+func (r *run) builds(ctx context.Context) error {
+	for _, b := range r.rt.Builds() {
+		err := r.labeled(ctx, proto.StepBuild, "", b.label, func(ctx context.Context, tail *runner.Tail) (string, error) {
+			return b.label, b.run(ctx, tail)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -104,7 +116,9 @@ func (r *run) deploySteps(ctx context.Context) error {
 }
 
 // rollbackSteps son los pasos de un rollback manual: a donde estaba el
-// proyecto antes del último deploy bueno, sin compilar ni pasos declarados.
+// proyecto antes del último deploy bueno, sin pasos declarados. Con Docker no
+// compila, porque vuelve a las imágenes guardadas; con systemd corre de nuevo
+// lo que prepara el código (ADR-019).
 func (r *run) rollbackSteps(ctx context.Context) error {
 	if err := r.step(ctx, proto.StepPreflight, "", r.preflight); err != nil {
 		return err
@@ -115,8 +129,14 @@ func (r *run) rollbackSteps(ctx context.Context) error {
 	if err := r.step(ctx, proto.StepCheckout, "", r.checkout(func() string { return r.target.Commit })); err != nil {
 		return err
 	}
-	r.skip(proto.StepBuild, "un rollback no compila: usa las imágenes guardadas")
-	if err := r.step(ctx, proto.StepUp, "", func(ctx context.Context, tail *runner.Tail) (string, error) {
+	if r.rt.RebuildsOnRollback() {
+		if err := r.builds(ctx); err != nil {
+			return err
+		}
+	} else {
+		r.skip(proto.StepBuild, "un rollback no compila: usa las imágenes guardadas")
+	}
+	if err := r.step(ctx, r.rt.StartStep(), "", func(ctx context.Context, tail *runner.Tail) (string, error) {
 		if err := r.rt.Restore(ctx, r.target.Images); err != nil {
 			return "", err
 		}
@@ -156,7 +176,7 @@ func (r *run) preflight(ctx context.Context, _ *runner.Tail) (string, error) {
 	if r.git, err = r.e.tools.Git(p, r.e.keyFor(p.Name)); err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
 	}
-	if r.rt, err = r.e.runtimeFor(p); err != nil {
+	if r.rt, err = r.e.runtimeFor(r.j, &r.spec); err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
 	}
 	if _, err := r.git.Head(ctx); err != nil {
@@ -215,7 +235,10 @@ func (r *run) snapshot(ctx context.Context, _ *runner.Tail) (string, error) {
 		j.Before = &GoodState{Commit: head, Images: images, At: r.e.now().UTC()}
 		j.Event.PreviousCommit = head
 	})
-	return fmt.Sprintf("%s con %d imágenes anotadas", short(head), len(images)), nil
+	if noted := r.rt.Describe(images); noted != "" {
+		return short(head) + " con " + noted, nil
+	}
+	return short(head), nil
 }
 
 // checkout deja el código en el commit que devuelve sha.
@@ -229,8 +252,9 @@ func (r *run) checkout(sha func() string) stepFunc {
 	}
 }
 
-// up recrea los contenedores con las imágenes que hay. Antes anota en el
-// diario que se empezó, por si el agent se reinicia en el medio.
+// up pone a correr lo que quedó preparado: recrea los contenedores o reinicia
+// las unidades. Antes anota en el diario que se empezó, por si el agent se
+// reinicia en el medio.
 func (r *run) up(ctx context.Context, tail *runner.Tail) (string, error) {
 	var err error
 	r.update(func(j *journal) {
@@ -243,13 +267,25 @@ func (r *run) up(ctx context.Context, tail *runner.Tail) (string, error) {
 	return "", r.rt.Up(ctx, tail)
 }
 
-// declared corre un paso declarado.
-func (r *run) declared(s projectspec.Step) stepFunc {
+// Las listas de pasos declarados del project.yaml.
+const (
+	phaseBuild = "build"
+	phasePre   = "pre"
+	phasePost  = "post"
+)
+
+// commandLine es un paso declarado como se muestra: su comando en un renglón.
+func commandLine(s projectspec.Step) string {
+	return strings.Join(s.Command, " ")
+}
+
+// declared corre un paso declarado: el número index de la lista phase.
+func (r *run) declared(phase string, index int, s projectspec.Step) stepFunc {
 	return func(ctx context.Context, tail *runner.Tail) (string, error) {
-		if err := r.rt.Run(ctx, s, tail); err != nil {
-			return "", stepFailure(err, proto.DeployStepFailed, strings.Join(s.Command, " ")+" falló")
+		if err := r.rt.Run(ctx, phase, index, s, tail); err != nil {
+			return "", stepFailure(err, proto.DeployStepFailed, commandLine(s)+" falló")
 		}
-		return strings.Join(s.Command, " "), nil
+		return commandLine(s), nil
 	}
 }
 
@@ -370,7 +406,7 @@ func (r *run) interrupted() {
 	if r.j.Touched {
 		var err error
 		if r.git, err = r.e.tools.Git(r.j.Project, r.e.keyFor(r.j.Project.Name)); err == nil {
-			r.rt, err = r.e.runtimeFor(r.j.Project)
+			r.rt, err = r.e.runtimeFor(r.j, nil)
 		}
 		if err == nil {
 			err = r.restore(message)
@@ -384,8 +420,9 @@ func (r *run) interrupted() {
 	r.finish(status, code, message)
 }
 
-// restore vuelve el proyecto a como estaba antes (la foto del diario):
-// imágenes, código y, si ya se habían recreado, los contenedores.
+// restore vuelve el proyecto a como estaba antes (la foto del diario): lo que
+// se había guardado, el código y, si ya se había tocado, lo que corre. Con
+// systemd, además, prepara de nuevo el código anterior (ADR-019).
 func (r *run) restore(reason string) error {
 	before := r.j.Before
 	if before == nil {
@@ -402,14 +439,22 @@ func (r *run) restore(reason string) error {
 		if err := r.git.Checkout(ctx, r.j.Project.Branch, before.Commit, tail); err != nil {
 			return "", fmt.Errorf("volver el código: %w", err)
 		}
+		if r.rt.RebuildsOnRollback() {
+			for _, b := range r.rt.Builds() {
+				tail.Add("preparando lo anterior: " + b.label)
+				if err := b.run(ctx, tail); err != nil {
+					return "", fmt.Errorf("preparar lo anterior: %w", err)
+				}
+			}
+		}
 		if !r.j.UpStarted {
-			return "el código y las imágenes volvieron; los contenedores no se habían tocado", nil
+			return r.rt.Untouched(), nil
 		}
 		if err := r.rt.Up(ctx, tail); err != nil {
 			return "", fmt.Errorf("levantar lo anterior: %w", err)
 		}
-		// Una verificación corta, solo de los contenedores: si lo anterior
-		// tampoco levanta, hay que mirarlo.
+		// Una verificación corta, solo de lo que corre, sin el healthcheck
+		// HTTP: si lo anterior tampoco levanta, hay que mirarlo.
 		detail, err := r.waitHealthy(ctx, tail, rollbackVerifyWindow, nil)
 		if err != nil {
 			return "", fmt.Errorf("lo anterior tampoco quedó bien: %w", err)
@@ -434,11 +479,18 @@ type stepFunc func(ctx context.Context, tail *runner.Tail) (string, error)
 // step corre un paso: lo anota en curso, manda fotos con su salida mientras
 // corre, y lo cierra bien o mal.
 func (r *run) step(ctx context.Context, name proto.StepName, service string, fn stepFunc) error {
+	return r.labeled(ctx, name, service, "", fn)
+}
+
+// labeled es step con un detalle desde el arranque: el comando de un paso
+// declarado se ve mientras corre, no recién cuando termina.
+func (r *run) labeled(ctx context.Context, name proto.StepName, service, label string, fn stepFunc) error {
 	var idx int
 	r.update(func(j *journal) {
 		idx = len(j.Event.Steps)
 		j.Event.Steps = append(j.Event.Steps, proto.DeployStep{
 			Name: name, Service: service, Status: proto.StepRunning, StartedAt: r.e.now().UTC().Truncate(time.Millisecond),
+			Detail: runner.Sanitize(label, proto.MaxDeployMessageLen),
 		})
 	})
 	r.emit()
