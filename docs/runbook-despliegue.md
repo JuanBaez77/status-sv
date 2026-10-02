@@ -452,8 +452,7 @@ El formato completo está en DISENO.md. Lo que conviene saber:
   código ([ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md)). El primer argumento es la ruta
   del programa, absoluta o relativa al `workdir` (`.venv/bin/pip`): no se busca en el `PATH`. Si
   hay pasos, hace falta `run_as`, el usuario con el que corren, que no puede ser `root` ni
-  `statussv`; `env_file` es opcional. El archivo ya se acepta así, pero **el deploy de proyectos
-  systemd todavía no está**: llega en este mismo sprint.
+  `statussv`; `env_file` es opcional. Ver "Prender el deploy de un proyecto de systemd".
 - Si declara `healthcheck`, el agent hace un `GET` a esa URL cada 60 s desde el propio servidor, sin
   proxy, verificando el certificado y **sin seguir redirecciones**: si la URL responde 301, hay que
   declarar `expect_status: 301` o apuntar a la URL final. Si no se fijan, `expect_status` es 200 y
@@ -482,7 +481,8 @@ journalctl -u statussv-agent --since '-1 hour' | grep -i healthcheck
 El agent puede desplegar los proyectos Docker declarados: trae la rama, compila, levanta, verifica
 y, si no queda sano, vuelve solo a lo anterior ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
 **Viene apagado en cada servidor.** Lo prende una persona acá, y el control plane no tiene forma de
-prenderlo.
+prenderlo. Los proyectos de systemd y el primer deploy de un proyecto nuevo tienen su sección más
+abajo.
 
 > **Nunca en el servidor donde vive el control plane**
 > ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)): un compose puede pedir
@@ -602,6 +602,157 @@ Lo que deja el deploy en el servidor:
 - Las imágenes de los últimos tres estados buenos quedan etiquetadas
   `statussv-rollback/<proyecto>/<servicio>:<commit>`, para volver atrás sin compilar.
 - El diario de cada deploy en `/var/lib/status-sv/deploys/`.
+
+### Prender el deploy de un proyecto de systemd
+
+Un proyecto que corre como servicio de systemd (gunicorn, uvicorn, un worker) se despliega con el
+mismo motor ([ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md)): trae la rama, corre los pasos
+declarados, reinicia las unidades, verifica y, si no queda sano, vuelve solo al commit anterior.
+Valen los puntos 2, 3 y 6 de arriba (la deploy key, los host keys y el instalador). Lo que cambia:
+
+**1. El agent no ejecuta nada del proyecto ni reinicia nada.** Se lo pide al **ayudante de deploy**,
+un proceso root que el instalador deja con `--enable-deploy` cuando hay algún proyecto de systemd
+declarado (`statussv-unit-helper.socket`). El ayudante solo corre lo que dice el `project.yaml`,
+que es de root: por eso el archivo y su directorio no pueden ser escribibles por el grupo.
+
+```bash
+systemctl status statussv-unit-helper.socket --no-pager | head -4
+ls -ld /etc/status-sv/projects.d /etc/status-sv/projects.d/*.yaml   # root:statussv, 0750 y 0640
+```
+
+**2. La declaración.** `units` son los servicios que se reinician, en orden. Los pasos corren con el
+usuario de `run_as`, parados en el `workdir`; el primer argumento es la ruta del programa, absoluta
+o relativa al `workdir` (no se busca en el `PATH`).
+
+```yaml
+name: facturas
+environment: production
+repo: github.com/extendsystem/facturas
+branch: main
+runtime: systemd
+workdir: /srv/facturas
+units: [gunicorn-facturas.service]
+run_as: facturas                  # ni root ni statussv
+env_file: /etc/facturas/env       # opcional; lo lee systemd, no el agent
+healthcheck:
+  url: http://127.0.0.1:8001/health
+deploy:
+  build:                          # lo que prepara el código, sin tocar lo que corre
+    - command: [".venv/bin/pip", "install", "-r", "requirements.txt"]
+      timeout_seconds: 600
+    - command: [".venv/bin/python", "manage.py", "collectstatic", "--noinput"]
+  pre:                            # justo antes de reiniciar: las migraciones
+    - command: [".venv/bin/python", "manage.py", "migrate", "--noinput"]
+rollback: previous_commit
+```
+
+**3. Permisos del `workdir`.** Son dos usuarios: el agent trae el código y el usuario del proyecto
+escribe lo que preparan sus pasos (el entorno virtual, los estáticos).
+
+```bash
+cd /srv/<PROYECTO>
+# El agent escribe el código, con el grupo statussv (igual que con Docker).
+sudo chgrp -R statussv .git && sudo chmod -R g+rwX .git
+sudo find .git -type d -exec chmod g+s {} +
+{ echo .; git ls-tree -r -d --name-only HEAD; } | while read -r d; do
+  sudo chgrp statussv "$d" && sudo chmod g+rwxs "$d"
+done
+# El usuario del proyecto tiene que poder escribir donde escriben sus pasos.
+sudo chown -R <RUN_AS> .venv staticfiles   # los que correspondan
+```
+
+El usuario del proyecto lee el código que trae el agent por los permisos de "otros" (los archivos
+quedan `0664`), así que el `workdir` y lo que tiene arriba no pueden cerrarle el paso.
+
+**4. El archivo de entorno**, si hay, puede ser solo de root (`0600`): lo lee systemd al arrancar
+cada paso. El agent no lo abre, y lo que un paso imprima sale enmascarado.
+
+**5. Revisar.** En un servidor sin Docker, sin `-G docker`:
+
+```bash
+sudo runuser -u statussv -g statussv -G systemd-journal -- /usr/local/bin/statussv-agent deploy-check <PROYECTO>
+```
+
+Dice si el ayudante responde, si el usuario, el archivo de entorno y las unidades existen, y qué
+pasos va a correr.
+
+Lo que conviene saber antes del primer deploy:
+
+- **Volver atrás corre los pasos `build` de nuevo** sobre el commit anterior: no hay una copia
+  guardada del entorno virtual. Con las versiones de las dependencias fijadas, vuelve a lo mismo.
+- **Los pasos `pre` no se deshacen** (una migración): tienen que ser compatibles hacia atrás.
+- El servicio se da por bueno si sus unidades quedan `active (running)` con el mismo proceso tres
+  miradas seguidas, y el healthcheck responde. Uno que arranca, se cae y systemd levanta de nuevo no
+  pasa: a los 120 s el deploy vuelve atrás.
+- La salida de cada paso queda en el diario, en una unidad propia:
+
+  ```bash
+  journalctl -u 'statussv-step-<ID DEL DEPLOY>-*' --no-pager
+  journalctl -u 'statussv-unit-helper@*' --since '-1 hour' --no-pager   # lo que se le pidió al ayudante
+  ```
+
+### El primer deploy de un proyecto nuevo
+
+Un proyecto que todavía no corre en el servidor se levanta desde el panel con **Primer deploy**
+([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)): el agent clona la rama
+en el `workdir`, lo prepara, lo levanta y verifica. Lo que necesita root lo deja antes una persona,
+por SSH. La lista:
+
+| | Qué | Cómo |
+| --- | --- | --- |
+| 1 | Declarar el proyecto | `/etc/status-sv/projects.d/<PROYECTO>.yaml`, como en "Declarar un proyecto" |
+| 2 | La deploy key y los host keys | Puntos 2 y 3 de "Prender el deploy" |
+| 3 | El `workdir`, vacío de código | Abajo |
+| 4 | Los secretos | El `.env` en el `workdir` (Docker) o el `env_file` (systemd) |
+| 5 | Solo systemd: el usuario y la unidad | `useradd --system`, y la unidad en `/etc/systemd/system/`, **sin arrancarla** |
+| 6 | Si es un sitio: el bloque del proxy y el certificado | Como cualquier sitio del servidor |
+| 7 | Correr el instalador de nuevo | Suma el `workdir` al drop-in y revisa el proyecto |
+
+```bash
+# 3. El workdir. Con Docker, de root y del grupo del agent:
+sudo install -d -o root -g statussv -m 2775 /srv/<PROYECTO>
+# Con systemd, del usuario del proyecto, que escribe ahí lo que preparan sus pasos:
+sudo install -d -o <RUN_AS> -g statussv -m 2775 /srv/<PROYECTO>
+
+# 4. Con Docker, el .env que lee docker compose (legible por el grupo):
+sudo install -o root -g statussv -m 0640 /dev/stdin /srv/<PROYECTO>/.env <<'ENV'
+CLAVE=valor
+ENV
+
+# 5. Con systemd, el usuario del proyecto (va antes que el workdir) y, después de
+# escribir la unidad con User=<RUN_AS> y WorkingDirectory=/srv/<PROYECTO>:
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin <RUN_AS>
+sudo systemctl daemon-reload
+
+# 7. El instalador, y lo que dice deploy-check del proyecto:
+cd /tmp && sudo STATUSSV_SERVER_URL=https://<DOMINIO> ./install-agent.sh --enable-deploy ./statussv-agent
+```
+
+`deploy-check` tiene que terminar con **"todavía no se desplegó: está listo para su primer
+deploy"**: probó que el agent puede escribir en el `workdir` y que el repo contesta con la llave,
+sin traer nada. Después, en el panel, el proyecto muestra el botón **Primer deploy**, que pide el
+nombre del proyecto y **siempre** un código nuevo de la app, también en staging.
+
+Lo que conviene saber:
+
+- **El `workdir` no tiene que estar vacío, sino sin clonar.** Lo que dejó una persona (el `.env`)
+  queda como está: si un archivo choca con uno del repositorio, el deploy falla sin pisarlo.
+- **Si no queda bien, baja lo que levantó**: `docker compose down` (los volúmenes quedan) o parar
+  las unidades. **El código clonado queda**, para mirar qué pasó, y el intento siguiente lo acepta.
+- Con algo del proyecto ya corriendo, el primer deploy se niega (`already_deployed`): lo que va es
+  un deploy común. Y al revés, un deploy común sobre un `workdir` sin clonar dice que hace falta el
+  primer deploy.
+- Es siempre la punta de la rama declarada.
+- El `workdir` tiene que existir **antes** de correr el instalador: el agent solo puede escribir en
+  los directorios que el instalador encontró. Si se creó después, correr el instalador de nuevo.
+- Con systemd, el primer deploy **arranca** las unidades pero no las habilita. Cuando quedó bien:
+
+  ```bash
+  sudo systemctl enable <UNIDAD>
+  ```
+
+- El repositorio que deja el agent es suyo (`statussv`). Para correr `git` a mano ahí como root:
+  `git -c safe.directory=/srv/<PROYECTO> -C /srv/<PROYECTO> log -1`.
 
 ## 3. Actualizar
 
