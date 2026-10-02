@@ -52,6 +52,35 @@ func systemdDeployEvent() proto.DeployEvent {
 	}
 }
 
+// bootstrapDeployEvent es un primer deploy que levantó el proyecto, no quedó
+// bien y bajó lo que había levantado (ADR-021): sin foto de lo anterior ni
+// commit anterior.
+func bootstrapDeployEvent() proto.DeployEvent {
+	start := goldenTS
+	at := func(s int) time.Time { return start.Add(time.Duration(s) * time.Second) }
+	return proto.DeployEvent{
+		DeployID:   goldenID,
+		Seq:        11,
+		Project:    "turnos",
+		Kind:       proto.DeployKindBootstrap,
+		Status:     proto.DeployRolledBack,
+		Commit:     shaV2,
+		StartedAt:  start,
+		FinishedAt: at(215),
+		Code:       proto.DeployUnhealthy,
+		Message:    "no quedó bien en 120 s: turnos-backend-1: terminó con código 1",
+		Steps: []proto.DeployStep{
+			{Name: proto.StepPreflight, Status: proto.StepOK, StartedAt: at(0), FinishedAt: at(0), Detail: "workdir sin clonar; compose 2.39.1"},
+			{Name: proto.StepFetch, Status: proto.StepOK, StartedAt: at(0), FinishedAt: at(4), Detail: "main en 89abcdef"},
+			{Name: proto.StepCheckout, Status: proto.StepOK, StartedAt: at(4), FinishedAt: at(5), Detail: "89abcdef"},
+			{Name: proto.StepBuild, Status: proto.StepOK, StartedAt: at(5), FinishedAt: at(80)},
+			{Name: proto.StepUp, Status: proto.StepOK, StartedAt: at(80), FinishedAt: at(88)},
+			{Name: proto.StepHealthcheck, Status: proto.StepFailed, StartedAt: at(88), FinishedAt: at(208), Detail: "no quedó bien en 120 s"},
+			{Name: proto.StepRollback, Status: proto.StepOK, StartedAt: at(208), FinishedAt: at(215), Detail: "bajó lo que había levantado; el código quedó en el workdir"},
+		},
+	}
+}
+
 // validDeployEvent es un deploy que terminó bien, con todos los pasos.
 func validDeployEvent() proto.DeployEvent {
 	start := goldenTS
@@ -133,6 +162,23 @@ func TestDeployCommandValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{name: "rollback de un proyecto inválido", cmd: proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: ""}}, wantErr: true},
+		{name: "primer deploy", cmd: proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: "web"}}},
+		{name: "primer deploy sin parámetros", cmd: proto.Command{Operation: proto.OpBootstrap}, wantErr: true},
+		{name: "primer deploy de un proyecto inválido", cmd: proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: "../web"}}, wantErr: true},
+		{
+			name:    "primer deploy con los parámetros de deploy",
+			cmd:     proto.Command{Operation: proto.OpBootstrap, Deploy: &proto.DeployParams{Project: "web"}},
+			wantErr: true,
+		},
+		{
+			name: "primer deploy con parámetros de más",
+			cmd: proto.Command{
+				Operation: proto.OpBootstrap,
+				Bootstrap: &proto.BootstrapParams{Project: "web"},
+				Deploy:    &proto.DeployParams{Project: "web"},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -173,6 +219,17 @@ func TestDeployEventValidate(t *testing.T) {
 			},
 		},
 		{name: "rollback manual", mutate: func(e *proto.DeployEvent) { e.Kind = proto.DeployKindRollback }},
+		// Un primer deploy (ADR-021) no tiene de dónde volver.
+		{name: "primer deploy", mutate: func(e *proto.DeployEvent) { e.Kind, e.PreviousCommit = proto.DeployKindBootstrap, "" }},
+		{name: "primer deploy con commit anterior", mutate: func(e *proto.DeployEvent) { e.Kind = proto.DeployKindBootstrap }, wantErr: true},
+		{
+			name: "primer deploy de un proyecto que ya corre",
+			mutate: func(e *proto.DeployEvent) {
+				e.Kind, e.PreviousCommit, e.Commit = proto.DeployKindBootstrap, "", ""
+				e.Status, e.Code = proto.DeployFailed, proto.DeployAlreadyDeployed
+				e.Steps = e.Steps[:1]
+			},
+		},
 		{name: "sin ID", mutate: func(e *proto.DeployEvent) { e.DeployID = uuid.Nil }, wantErr: true},
 		{name: "secuencia cero", mutate: func(e *proto.DeployEvent) { e.Seq = 0 }, wantErr: true},
 		{name: "proyecto inválido", mutate: func(e *proto.DeployEvent) { e.Project = "a b" }, wantErr: true},

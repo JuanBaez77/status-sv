@@ -189,6 +189,108 @@ func TestHeadOutsideARepository(t *testing.T) {
 	}
 }
 
+// El primer deploy (ADR-021) arranca de un workdir sin clonar, donde una
+// persona pudo haber dejado un .env: se inicia el repositorio, se trae la rama
+// y el checkout no pisa lo que ya estaba.
+func TestFirstDeployFlow(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, ".env"), "SECRETO=1\n")
+	repo, err := Open(f.repo.cfg, workdir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cloned, err := repo.Cloned(); err != nil || cloned {
+		t.Fatalf("Cloned en un workdir sin clonar = %v, %v", cloned, err)
+	}
+	// El workdir lo crea una persona: si no está, no se inicia nada.
+	missing, err := Open(f.repo.cfg, filepath.Join(workdir, "no-existe"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := missing.Cloned(); !errors.Is(err, ErrNoWorkdir) {
+		t.Fatalf("Cloned sin workdir = %v, se esperaba ErrNoWorkdir", err)
+	}
+	// La punta se puede preguntar sin repositorio: así se prueba la llave.
+	if tip, err := repo.RemoteTip(ctx, "file://"+f.origin, "main"); err != nil || tip != f.v2 {
+		t.Fatalf("RemoteTip = %q, %v; se esperaba v2", tip, err)
+	}
+	if _, err := repo.RemoteTip(ctx, "file://"+f.origin, "no-existe"); err == nil {
+		t.Error("RemoteTip de una rama que no existe no falló")
+	}
+
+	tail := runner.NewTail(20, 200)
+	if err := repo.Init(ctx, tail); err != nil {
+		t.Fatalf("Init: %v (%v)", err, tail.Lines())
+	}
+	if cloned, err := repo.Cloned(); err != nil || !cloned {
+		t.Fatalf("Cloned después de Init = %v, %v", cloned, err)
+	}
+	// La plantilla de git no se copia: no hay hooks, ni de ejemplo.
+	if entries, err := os.ReadDir(filepath.Join(workdir, ".git", "hooks")); err == nil && len(entries) > 0 {
+		t.Errorf("Init dejó %d hooks de la plantilla", len(entries))
+	}
+	if _, err := repo.Head(ctx); !errors.Is(err, ErrNoCommit) {
+		t.Fatalf("Head de un repositorio recién iniciado = %v, se esperaba ErrNoCommit", err)
+	}
+	// Iniciar de nuevo (un intento anterior que no llegó a traer nada) no rompe.
+	if err := repo.Init(ctx, tail); err != nil {
+		t.Fatalf("Init por segunda vez: %v", err)
+	}
+
+	if err := repo.Fetch(ctx, "file://"+f.origin, "main", tail); err != nil {
+		t.Fatalf("Fetch: %v (%v)", err, tail.Lines())
+	}
+	tip, err := repo.Resolve(ctx, "main", "")
+	if err != nil || tip != f.v2 {
+		t.Fatalf("Resolve = %q, %v; se esperaba v2", tip, err)
+	}
+	if err := repo.Checkout(ctx, "main", tip, tail); err != nil {
+		t.Fatalf("Checkout: %v (%v)", err, tail.Lines())
+	}
+	if head, err := repo.Head(ctx); err != nil || head != f.v2 {
+		t.Fatalf("Head = %q, %v; se esperaba v2", head, err)
+	}
+	if branch := plainGit(t, workdir, "rev-parse", "--abbrev-ref", "HEAD"); branch != "main" {
+		t.Errorf("la rama local quedó en %q y no en main", branch)
+	}
+	if env, err := os.ReadFile(filepath.Join(workdir, ".env")); err != nil || string(env) != "SECRETO=1\n" { //nolint:gosec // archivo de prueba
+		t.Errorf("el .env que estaba de antes = %q, %v", env, err)
+	}
+	if err := repo.CheckClean(ctx); err != nil {
+		t.Errorf("CheckClean después del primer checkout: %v", err)
+	}
+}
+
+// Si en el workdir ya hay un archivo con el nombre de uno versionado, el
+// primer checkout falla en vez de pisarlo.
+func TestFirstCheckoutDoesNotOverwrite(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	workdir := t.TempDir()
+	writeFile(t, filepath.Join(workdir, "index.html"), "lo que había\n")
+	repo, err := Open(f.repo.cfg, workdir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Init(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Fetch(ctx, "file://"+f.origin, "main", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tail := runner.NewTail(20, 200)
+	if err := repo.Checkout(ctx, "main", f.v2, tail); err == nil {
+		t.Fatal("el checkout pisó un archivo que no era del repositorio")
+	}
+	if got, _ := os.ReadFile(filepath.Join(workdir, "index.html")); string(got) != "lo que había\n" { //nolint:gosec // archivo de prueba
+		t.Errorf("index.html = %q", got)
+	}
+}
+
 // Sin permiso para file://, git no trae nada de ahí: protocol.allow=never.
 func TestFetchRefusesFileWithoutPermission(t *testing.T) {
 	f := newFixture(t)

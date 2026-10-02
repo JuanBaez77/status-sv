@@ -61,6 +61,8 @@ type fakeSystemd struct {
 	gate chan struct{}
 	// failRestart es la unidad que no se puede reiniciar.
 	failRestart string
+	// failStop es la unidad que no se puede parar.
+	failStop string
 	// missing son las unidades que systemd no conoce.
 	missing map[string]bool
 }
@@ -84,6 +86,9 @@ func (f *fakeSystemd) Stop(_ context.Context, unit string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, unit)
+	if unit != "" && unit == f.failStop {
+		return errors.New("el trabajo terminó en failed")
+	}
 	return nil
 }
 
@@ -244,6 +249,9 @@ func TestRejectedRequestsNeverReachSystemd(t *testing.T) {
 		"deploy que no es un UUID":    {`{"op":"run_step","project":"facturas","phase":"build","index":0,"deploy":"../../etc"}`, CodeInvalidRequest},
 		"deploy en mayúsculas":        {`{"op":"run_step","project":"facturas","phase":"build","index":0,"deploy":"` + strings.ToUpper(deployID) + `"}`, CodeInvalidRequest},
 		"reinicio con datos de paso":  {`{"op":"restart_units","project":"facturas",` + step + `}`, CodeInvalidRequest},
+		"parada con una unidad":       {`{"op":"stop_units","project":"facturas","unit":"ssh.service"}`, CodeInvalidRequest},
+		"parada con datos de paso":    {`{"op":"stop_units","project":"facturas",` + step + `}`, CodeInvalidRequest},
+		"parada de uno de Docker":     {`{"op":"stop_units","project":"tienda"}`, CodeNotDeclared},
 		"proyecto con barra":          {`{"op":"check","project":"../facturas"}`, CodeInvalidRequest},
 		"pedido enorme":               {`{"op":"check","project":"` + strings.Repeat("a", maxRequestBytes) + `"}`, CodeInvalidRequest},
 		"proyecto sin declarar":       {`{"op":"restart_units","project":"otro"}`, CodeNotDeclared},
@@ -284,6 +292,31 @@ func TestRestartUnitsInDeclaredOrder(t *testing.T) {
 	}
 	if len(sd.restarts) != 1 {
 		t.Errorf("siguió reiniciando después de la falla: %v", sd.restarts)
+	}
+}
+
+// Un primer deploy que no quedó bien para lo que levantó (ADR-021): las
+// unidades declaradas, al revés de como arrancan.
+func TestStopUnitsInReverseOrder(t *testing.T) {
+	sd := &fakeSystemd{}
+	if resp := ask(t, newHelper(t, sd), `{"op":"stop_units","project":"facturas"}`); !resp.OK {
+		t.Fatalf("respuesta = %+v", resp)
+	}
+	if got := strings.Join(sd.Stopped(), " "); got != "facturas-worker.service gunicorn-facturas.service" {
+		t.Errorf("paradas = %q", got)
+	}
+	if len(sd.restarts) != 0 {
+		t.Errorf("parar reinició algo: %v", sd.restarts)
+	}
+
+	// Si una no para, sigue con las demás y dice cuál quedó.
+	sd = &fakeSystemd{failStop: "facturas-worker.service"}
+	resp := ask(t, newHelper(t, sd), `{"op":"stop_units","project":"facturas"}`)
+	if resp.OK || resp.Code != CodeStopFailed || resp.Unit != "facturas-worker.service" {
+		t.Errorf("respuesta = %+v", resp)
+	}
+	if len(sd.Stopped()) != 2 {
+		t.Errorf("no intentó parar las dos: %v", sd.Stopped())
 	}
 }
 

@@ -294,11 +294,16 @@ func TestDeployGoesToTheEngine(t *testing.T) {
 	if rollback.Status != proto.CommandOK {
 		t.Fatalf("rollback: %+v", rollback)
 	}
+	// Un primer deploy (ADR-021) va al mismo motor.
+	first := e.Handle(context.Background(), uuid.New(), proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: "tienda"}})
+	if first.Status != proto.CommandOK {
+		t.Fatalf("primer deploy: %+v", first)
+	}
 	// Repetido, contesta lo mismo sin volver a llamar al motor.
 	e.Handle(context.Background(), id, deployCmd)
 	deployer.mu.Lock()
 	defer deployer.mu.Unlock()
-	if len(deployer.seen) != 2 {
-		t.Errorf("el motor recibió %d pedidos, se esperaban 2", len(deployer.seen))
+	if len(deployer.seen) != 3 {
+		t.Errorf("el motor recibió %d pedidos, se esperaban 3", len(deployer.seen))
 	}
 }

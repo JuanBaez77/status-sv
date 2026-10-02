@@ -61,6 +61,21 @@ func (p RollbackParams) Validate() error {
 	return nil
 }
 
+// BootstrapParams es lo que se pide levantar por primera vez: un proyecto
+// declarado. No lleva commit: el primer deploy es la punta de la rama
+// declarada (ADR-021).
+type BootstrapParams struct {
+	Project string `json:"project"`
+}
+
+// Validate revisa el nombre del proyecto.
+func (p BootstrapParams) Validate() error {
+	if !ValidProjectName(p.Project) {
+		return fmt.Errorf("proyecto inválido %q", p.Project)
+	}
+	return nil
+}
+
 // ValidCommit dice si s es un SHA-1 completo de git, en minúscula. No se
 // aceptan abreviaturas ni nombres de ramas: lo que se despliega es exacto.
 func ValidCommit(s string) bool {
@@ -75,14 +90,23 @@ func ValidCommit(s string) bool {
 	return true
 }
 
-// DeployKind dice si el deploy trae código nuevo o vuelve al último estado bueno.
+// DeployKind dice si el deploy trae código nuevo, vuelve al último estado
+// bueno o levanta el proyecto por primera vez.
 type DeployKind string
 
 // Tipos de deploy.
 const (
 	DeployKindDeploy   DeployKind = "deploy"
 	DeployKindRollback DeployKind = "rollback"
+	// DeployKindBootstrap es el primer deploy (ADR-021): no tiene un estado
+	// anterior al que volver. Si falla después de levantar algo, lo baja.
+	DeployKindBootstrap DeployKind = "bootstrap"
 )
+
+// Valid dice si es un tipo de deploy conocido.
+func (k DeployKind) Valid() bool {
+	return k == DeployKindDeploy || k == DeployKindRollback || k == DeployKindBootstrap
+}
 
 // DeployStatus es cómo va un deploy. Los tres últimos son finales.
 type DeployStatus string
@@ -96,7 +120,8 @@ const (
 	// falló y además no pudo volver atrás (código rollback_failed).
 	DeployFailed DeployStatus = "failed"
 	// DeployRolledBack es que falló después de tocar lo que corre y volvió
-	// atrás bien: el proyecto quedó como estaba.
+	// atrás bien: el proyecto quedó como estaba. En un primer deploy, como
+	// estaba es sin nada corriendo: se bajó lo que había levantado.
 	DeployRolledBack DeployStatus = "rolled_back"
 )
 
@@ -141,6 +166,10 @@ const (
 	DeployNoPrevious DeployErrorCode = "no_previous"
 	// DeployMissingImage: la imagen a la que había que volver ya no existe.
 	DeployMissingImage DeployErrorCode = "missing_image"
+	// DeployAlreadyDeployed: se pidió un primer deploy de un proyecto que ya
+	// tiene un estado bueno anotado o algo suyo corriendo. Lo que sigue son
+	// deploys (ADR-021).
+	DeployAlreadyDeployed DeployErrorCode = "already_deployed"
 	// DeployRollbackFailed: falló y tampoco pudo volver atrás. Es el único
 	// caso en que el proyecto puede quedar a medias: hay que mirarlo.
 	DeployRollbackFailed DeployErrorCode = "rollback_failed"
@@ -152,7 +181,8 @@ var knownDeployCodes = map[DeployErrorCode]bool{
 	DeployPreflightFailed: true, DeployDirtyWorktree: true, DeployFetchFailed: true,
 	DeployCommitNotOnBranch: true, DeployBuildFailed: true, DeployStepFailed: true,
 	DeployUpFailed: true, DeployRestartFailed: true, DeployUnhealthy: true, DeployTimeout: true, DeployInterrupted: true,
-	DeployNoPrevious: true, DeployMissingImage: true, DeployRollbackFailed: true, DeployInternal: true,
+	DeployNoPrevious: true, DeployMissingImage: true, DeployAlreadyDeployed: true,
+	DeployRollbackFailed: true, DeployInternal: true,
 }
 
 // StepName es un paso del deploy, en el orden de ADR-015. Un proyecto systemd
@@ -174,7 +204,7 @@ const (
 	StepHealthcheck StepName = "healthcheck"
 	StepPost        StepName = "post"
 	// StepRollback es la vuelta atrás, cuando algo falló después de tocar lo
-	// que corre.
+	// que corre. En un primer deploy es bajar lo que se había levantado.
 	StepRollback StepName = "rollback"
 )
 
@@ -231,8 +261,10 @@ func (e DeployEvent) Validate() error {
 		return errors.New("la secuencia empieza en 1")
 	case !ValidProjectName(e.Project):
 		return fmt.Errorf("proyecto inválido %q", e.Project)
-	case e.Kind != DeployKindDeploy && e.Kind != DeployKindRollback:
+	case !e.Kind.Valid():
 		return fmt.Errorf("tipo de deploy desconocido %q", e.Kind)
+	case e.Kind == DeployKindBootstrap && e.PreviousCommit != "":
+		return errors.New("un primer deploy no tiene commit anterior")
 	case e.Commit != "" && !ValidCommit(e.Commit):
 		return errors.New("commit inválido")
 	case e.PreviousCommit != "" && !ValidCommit(e.PreviousCommit):

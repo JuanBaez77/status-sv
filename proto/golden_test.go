@@ -70,8 +70,10 @@ func TestGoldenEnvelopes(t *testing.T) {
 		},
 		{name: "command_deploy", msg: proto.Command{Operation: proto.OpDeploy, Deploy: &proto.DeployParams{Project: "cristales-baez", Commit: shaV2}}},
 		{name: "command_rollback", msg: proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: "cristales-baez"}}},
+		{name: "command_bootstrap", msg: proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: "turnos"}}},
 		{name: "deploy_event", msg: validDeployEvent()},
 		{name: "deploy_event_systemd", msg: systemdDeployEvent()},
+		{name: "deploy_event_bootstrap", msg: bootstrapDeployEvent()},
 		{name: "deploy_event_ack", msg: proto.DeployEventAck{DeployID: goldenID, Seq: 9}},
 		{name: "error", msg: proto.NewError(proto.CodeInvalidToken, "el token no existe o ya se usó", goldenID)},
 	}

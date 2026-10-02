@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/compose"
 	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
@@ -23,6 +24,16 @@ type runtime interface {
 	// Preflight revisa lo propio del runtime antes de tocar nada. Devuelve el
 	// detalle del paso.
 	Preflight(ctx context.Context) (string, error)
+	// Available es la parte de Preflight que no necesita el código en el
+	// workdir: que el servidor tenga con qué correr el proyecto. Es lo que se
+	// puede revisar antes de un primer deploy (ADR-021).
+	Available(ctx context.Context) (string, error)
+	// Running dice qué hay del proyecto corriendo, o nada. Un primer deploy
+	// solo arranca si no hay nada.
+	Running(ctx context.Context) (string, error)
+	// Down baja lo que corre del proyecto. Es lo que deshace un primer deploy
+	// que no quedó bien: no hay nada anterior a lo que volver.
+	Down(ctx context.Context, tail *runner.Tail) error
 	// Snapshot anota lo que corre: es a lo que se vuelve si el deploy falla.
 	Snapshot(ctx context.Context) ([]compose.ServiceImage, error)
 	// Describe dice en palabras lo que anotó Snapshot, o nada.
@@ -72,15 +83,49 @@ type dockerRuntime struct {
 }
 
 func (d dockerRuntime) Preflight(ctx context.Context) (string, error) {
-	version, err := d.project.Version(ctx)
+	detail, err := d.Available(ctx)
 	if err != nil {
-		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+		return "", err
 	}
 	validate := runner.NewTail(proto.MaxStepOutputLines, proto.MaxStepOutputLineLen)
 	if err := d.project.Validate(ctx, validate); err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "el archivo de Compose no es válido: %s", lastLine(validate, err))
 	}
+	return detail, nil
+}
+
+func (d dockerRuntime) Available(ctx context.Context) (string, error) {
+	version, err := d.project.Version(ctx)
+	if err != nil {
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
 	return "compose " + version, nil
+}
+
+// Running son los servicios del proyecto que tienen algún contenedor, esté
+// andando o parado: con uno solo, el proyecto ya se levantó alguna vez.
+func (d dockerRuntime) Running(ctx context.Context) (string, error) {
+	images, err := d.project.Snapshot(ctx, d.api)
+	if err != nil {
+		return "", fmt.Errorf("mirar los contenedores: %w", err)
+	}
+	if len(images) == 0 {
+		return "", nil
+	}
+	services := make([]string, 0, len(images))
+	for _, img := range images {
+		services = append(services, img.Service)
+	}
+	return "contenedores de " + strings.Join(services, ", "), nil
+}
+
+// Down saca los contenedores y las redes del proyecto. Los volúmenes y las
+// imágenes quedan.
+func (d dockerRuntime) Down(ctx context.Context, tail *runner.Tail) error {
+	if err := d.project.Down(ctx, tail); err != nil {
+		return stepFailure(err, proto.DeployRollbackFailed, "docker compose down falló")
+	}
+	return nil
 }
 
 func (d dockerRuntime) Snapshot(ctx context.Context) ([]compose.ServiceImage, error) {
