@@ -28,19 +28,47 @@ const (
 	imageNew  = "sha256:new"
 )
 
-// fakeGit es un repo en memoria: la punta de main es commitNew.
+// fakeGit es un repo en memoria: la punta de main es commitNew. Con head
+// vacío es un workdir sin clonar, como el de un proyecto que nunca se desplegó.
 type fakeGit struct {
 	mu        sync.Mutex
 	head      string
 	dirty     bool
 	fetchErr  error
 	checkouts []string
+	// missing es que el workdir no existe; inits, las veces que se inició el
+	// repositorio.
+	missing bool
+	inits   int
+}
+
+func (g *fakeGit) Cloned() (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.missing {
+		return false, gitops.ErrNoWorkdir
+	}
+	return g.head != "" || g.inits > 0, nil
+}
+
+func (g *fakeGit) Init(context.Context, *runner.Tail) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.inits++
+	return nil
 }
 
 func (g *fakeGit) Head(context.Context) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.head, nil
+	switch {
+	case g.head != "":
+		return g.head, nil
+	case g.inits > 0:
+		return "", gitops.ErrNoCommit
+	default:
+		return "", gitops.ErrNotRepository
+	}
 }
 
 func (g *fakeGit) CheckClean(context.Context) error {
@@ -89,6 +117,7 @@ type fakeCompose struct {
 	calls    []string
 	buildErr error
 	stepErr  error
+	downErr  error
 	// ready dice si los contenedores están bien con la imagen que corre.
 	ready func(running string) bool
 	// buildGate, si no es nil, frena el build hasta que se cierra.
@@ -144,6 +173,18 @@ func (c *fakeCompose) Up(context.Context, *runner.Tail) error {
 	return nil
 }
 
+// Down saca los contenedores: no queda nada corriendo.
+func (c *fakeCompose) Down(context.Context, *runner.Tail) error {
+	c.call("down")
+	if c.downErr != nil {
+		return c.downErr
+	}
+	c.mu.Lock()
+	c.running = ""
+	c.mu.Unlock()
+	return nil
+}
+
 func (c *fakeCompose) Run(_ context.Context, s projectspec.Step, _ *runner.Tail) error {
 	c.call("run " + s.Service + " " + strings.Join(s.Command, " "))
 	return c.stepErr
@@ -152,6 +193,10 @@ func (c *fakeCompose) Run(_ context.Context, s projectspec.Step, _ *runner.Tail)
 func (c *fakeCompose) Snapshot(context.Context, compose.ImageAPI) ([]compose.ServiceImage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.running == "" {
+		// Sin contenedores: el proyecto no se levantó nunca, o se bajó.
+		return nil, nil
+	}
 	return []compose.ServiceImage{{Service: "web", ID: c.running, Ref: "tienda-web"}}, nil
 }
 

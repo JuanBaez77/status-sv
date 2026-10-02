@@ -139,6 +139,27 @@ else
   falla "reinicio: se reinició una unidad que no es del proyecto"
 fi
 
+# --- Parar las unidades del proyecto: lo que deshace un primer deploy ---
+
+respuesta="$(pide '{"op":"stop_units","project":"lab"}')"
+if [ "${respuesta}" = '{"ok":true}' ] && [ "$(prop lab-gunicorn.service ActiveState)" = inactive ]; then
+  ok "parada: la unidad declarada quedó parada"
+else
+  falla "parada: ${respuesta} (lab-gunicorn.service quedó $(prop lab-gunicorn.service ActiveState))"
+fi
+if [ "$(prop lab-otra.service MainPID)" = "${otra_antes}" ]; then
+  ok "parada: la unidad que no es del proyecto no se tocó"
+else
+  falla "parada: se tocó una unidad que no es del proyecto"
+fi
+# Un reinicio la levanta de nuevo, que es como arranca un primer deploy.
+respuesta="$(pide '{"op":"restart_units","project":"lab"}')"
+if [ "${respuesta}" = '{"ok":true}' ] && [ "$(prop lab-gunicorn.service ActiveState)" = active ]; then
+  ok "parada: un reinicio levanta de nuevo la unidad parada"
+else
+  falla "parada: después de reiniciar, ${respuesta} (lab-gunicorn.service quedó $(prop lab-gunicorn.service ActiveState))"
+fi
+
 # --- Lo que el ayudante rechaza ---
 
 rechaza() { # $1 = pedido, $2 = código esperado, $3 = qué prueba
@@ -155,6 +176,7 @@ rechaza "$(paso run_step lab build 4)" no_such_step "un paso que no está declar
 rechaza "$(paso run_step lab shell 0)" invalid_request "una fase que no existe"
 rechaza '{"op":"run_step","project":"lab","phase":"build","index":0,"deploy":"'"${DEPLOY}"'","command":["/bin/sh"]}' invalid_request "un pedido que trae un comando"
 rechaza '{"op":"restart_units","project":"lab","unit":"lab-otra.service"}' invalid_request "un pedido que trae una unidad"
+rechaza '{"op":"stop_units","project":"lab","unit":"lab-otra.service"}' invalid_request "una parada que trae una unidad"
 rechaza '{"op":"restart","project":"lab"}' invalid_request "una operación que no existe"
 rechaza '{"op":"run_step","project":"lab","phase":"build","index":0,"deploy":"../../etc"}' invalid_request "un deploy que no es un identificador"
 rechaza 'run_step lab build 0' invalid_request "un pedido que no es JSON"

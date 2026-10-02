@@ -80,6 +80,10 @@ func hidden(workdir string) bool {
 // la rama declarada (eso solo escribe refs/remotes/statussv), así se prueba
 // también la deploy key.
 //
+// Si el workdir todavía no tiene el código, revisa que se pueda hacer el
+// primer deploy (ADR-021): ahí no trae nada, solo le pregunta al repo por la
+// punta de la rama.
+//
 // Se corre como el usuario del agent, con sus grupos (el de Docker, si el
 // servidor lo tiene):
 //
@@ -101,7 +105,11 @@ func runDeployCheck(ctx context.Context, args []string) error {
 	if c.failures > 0 {
 		return fmt.Errorf("%d comprobaciones fallaron: el deploy de %s no va a andar hasta arreglarlas", c.failures, flags.Arg(0))
 	}
-	_, _ = fmt.Fprintf(c.out, "\n%s se puede desplegar", flags.Arg(0))
+	if c.first {
+		_, _ = fmt.Fprintf(c.out, "\n%s todavía no se desplegó: está listo para su primer deploy", flags.Arg(0))
+	} else {
+		_, _ = fmt.Fprintf(c.out, "\n%s se puede desplegar", flags.Arg(0))
+	}
 	if !cfg.DeployEnabled {
 		_, _ = fmt.Fprint(c.out, " cuando se prenda el deploy (STATUSSV_DEPLOY_ENABLED)")
 	}
@@ -112,6 +120,9 @@ func runDeployCheck(ctx context.Context, args []string) error {
 type checker struct {
 	out      io.Writer
 	failures int
+	// first es que el proyecto todavía no tiene el código en su workdir: lo
+	// que se revisa es que se pueda hacer el primer deploy (ADR-021).
+	first bool
 }
 
 func (c *checker) ok(format string, args ...any) {
@@ -183,7 +194,17 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 		c.fail("%v", err)
 		return
 	}
+	cloned, err := repo.Cloned()
+	if err != nil {
+		c.fail("workdir %s: %v (lo crea una persona, con permiso de escritura para el agent)", p.Workdir, err)
+		return
+	}
 	head, err := repo.Head(ctx)
+	if !cloned || errors.Is(err, gitops.ErrNoCommit) {
+		c.first = true
+		c.firstDeploy(ctx, cfg, spec, repo, url, stateDir)
+		return
+	}
 	if err != nil {
 		c.fail("repositorio en %s: %v", p.Workdir, err)
 		return
@@ -214,11 +235,39 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 		c.systemd(ctx, cfg, spec)
 		return
 	}
-	c.docker(ctx, cfg, spec, stateDir)
+	c.docker(ctx, cfg, spec, stateDir, true)
 }
 
-// docker revisa lo propio de un proyecto de Docker: Compose y el socket.
-func (c *checker) docker(ctx context.Context, cfg config.Config, spec projectspec.Spec, stateDir string) {
+// firstDeploy revisa un proyecto que todavía no tiene el código en su workdir
+// (ADR-021): que el agent pueda escribir ahí, que el repo conteste (así se
+// prueba la deploy key, sin traer nada) y lo del runtime que no depende del
+// código. El archivo de Compose se valida recién en el primer deploy, cuando
+// existe.
+func (c *checker) firstDeploy(ctx context.Context, cfg config.Config, spec projectspec.Spec, repo *gitops.Repo, url, stateDir string) {
+	p := spec.Project
+	c.ok("%s todavía no tiene el código: le toca un primer deploy", p.Workdir)
+	if err := writable(p.Workdir); err != nil {
+		c.fail("el agent no puede escribir en %s: %v", p.Workdir, err)
+	} else {
+		c.ok("puede escribir en %s", p.Workdir)
+	}
+	if tip, err := repo.RemoteTip(ctx, url, p.Branch); err != nil {
+		c.fail("consultar %s en %s: %v", p.Branch, url, err)
+	} else {
+		c.ok("el repo contesta desde %s: la punta de %s está en %s", url, p.Branch, tip[:8])
+	}
+
+	if p.Runtime == proto.RuntimeSystemd {
+		c.systemd(ctx, cfg, spec)
+		return
+	}
+	c.docker(ctx, cfg, spec, stateDir, false)
+}
+
+// docker revisa lo propio de un proyecto de Docker: Compose y el socket. Sin
+// el código en el workdir (cloned en falso) no hay archivo de Compose que
+// validar.
+func (c *checker) docker(ctx context.Context, cfg config.Config, spec projectspec.Spec, stateDir string, cloned bool) {
 	p := spec.Project
 	dockerPath, err := exec.LookPath("docker")
 	if err != nil {
@@ -236,16 +285,21 @@ func (c *checker) docker(ctx context.Context, cfg config.Config, spec projectspe
 		return
 	}
 	c.ok("docker compose %s", version)
-	validate := runner.NewTail(3, 200)
-	if err := project.Validate(ctx, validate); err != nil {
-		c.fail("el archivo de Compose no es válido: %s", strings.Join(validate.Lines(), " | "))
-	} else {
-		c.ok("archivo de Compose %s", p.ComposeFile)
+	if cloned {
+		validate := runner.NewTail(3, 200)
+		if err := project.Validate(ctx, validate); err != nil {
+			c.fail("el archivo de Compose no es válido: %s", strings.Join(validate.Lines(), " | "))
+		} else {
+			c.ok("archivo de Compose %s", p.ComposeFile)
+		}
 	}
 	containers, err := docker.NewClient(cfg.DockerSocket).ProjectContainers(ctx, p.ComposeProject)
-	if err != nil {
+	switch {
+	case err != nil:
 		c.fail("socket de Docker: %v", err)
-	} else {
+	case !cloned && len(containers) > 0:
+		c.fail("el proyecto %s ya tiene %d contenedores y su workdir no tiene el código: un primer deploy se va a negar", p.ComposeProject, len(containers))
+	default:
 		c.ok("socket de Docker: %d contenedores del proyecto %s", len(containers), p.ComposeProject)
 	}
 	for _, s := range append(append([]projectspec.Step{}, spec.Pre...), spec.Post...) {
@@ -287,8 +341,9 @@ func (c *checker) systemd(ctx context.Context, cfg config.Config, spec projectsp
 		for _, s := range phase.steps {
 			c.ok("paso %s: %s", phase.name, strings.Join(s.Command, " "))
 			// Puede no existir todavía y que lo cree un paso anterior (el
-			// entorno virtual, por ejemplo): es un aviso.
-			if _, err := os.Stat(s.Exec); err != nil {
+			// entorno virtual, por ejemplo): es un aviso. Antes del primer
+			// deploy no existe ninguno: el código todavía no está.
+			if _, err := os.Stat(s.Exec); err != nil && !c.first {
 				c.warn("el programa %s no existe o el agent no lo ve; si no lo crea un paso anterior, el deploy va a fallar ahí", s.Exec)
 			}
 		}

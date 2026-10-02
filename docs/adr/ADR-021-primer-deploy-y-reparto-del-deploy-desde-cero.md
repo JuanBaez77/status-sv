@@ -33,18 +33,36 @@ preparó en el servidor:
 
 | Paso | Qué hace | Si falla |
 | --- | --- | --- |
-| `preflight` | El proyecto no tiene ningún estado bueno anotado, nada suyo corre, el `workdir` existe y está vacío (o tiene el clon de un intento anterior), la llave y los host keys están | Nada que deshacer |
-| `fetch` | Inicia el repositorio en el `workdir` y trae la rama declarada | Nada que deshacer |
-| `checkout` | Deja el código en la punta de la rama | Nada que deshacer |
+| `preflight` | El proyecto no tiene ningún estado bueno anotado, nada suyo corre, el `workdir` existe y todavía no tiene el código (o tiene el clon de un intento anterior), y el servidor tiene con qué correrlo | Nada que deshacer |
+| `fetch` | Inicia el repositorio en el `workdir` y trae la rama declarada, con la llave y los host keys del proyecto | Nada que deshacer |
+| `checkout` | Deja el código en la punta de la rama y, ya con el código, revisa lo que antes no se podía (el archivo de Compose) | Nada que deshacer |
 | `build`, `pre` | Como en un deploy | Nada corre todavía |
 | `up` / `restart` | Levanta los contenedores o arranca las unidades | Baja lo que levantó |
 | `healthcheck`, `post` | Como en un deploy | Baja lo que levantó |
 
 - No hay `snapshot` ni vuelta a un estado anterior: no existe. Deshacer es bajar lo que este
-  primer deploy levantó (`docker compose down`, sin borrar volúmenes, o parar las unidades).
+  primer deploy levantó (`docker compose down`, sin borrar volúmenes, o parar las unidades), y el
+  deploy termina `rolled_back`. Si falló antes de levantar nada, termina `failed`.
 - **El código clonado no se borra si falla.** El agent no borra directorios, y el clon sirve para
   mirar qué pasó. El intento siguiente lo acepta mientras el proyecto no tenga un estado bueno.
-- Con un estado bueno anotado, `bootstrap` se rechaza: lo que sigue son deploys.
+- Con un estado bueno anotado, o con algo del proyecto corriendo (contenedores suyos, o una de sus
+  unidades activa), el primer deploy termina con el código `already_deployed` sin tocar nada: lo
+  que sigue son deploys.
+- El primer deploy es siempre de la punta de la rama declarada: no lleva commit.
+
+Al construirlo cambiaron dos cosas de lo que se había escrito acá:
+
+- **El `workdir` no tiene que estar vacío: tiene que estar sin clonar.** Un proyecto Docker lee su
+  `.env` del `workdir`, y una persona lo deja ahí antes del primer deploy. Lo que se cuida es no
+  pisar nada: git no escribe sobre un archivo que ya estaba, así que si algo del `workdir` choca
+  con un archivo versionado, el `checkout` falla y no se pierde nada.
+- **Parar las unidades de un proyecto systemd necesita root**, así que el ayudante de
+  [ADR-019](ADR-019-deploy-de-proyectos-systemd.md) suma una operación fija, `stop_units`, que
+  recibe solo el nombre del proyecto.
+
+`deploy-check` reconoce un proyecto que todavía no tiene el código: en vez de darlo por roto, prueba
+que el agent pueda escribir en el `workdir` y que el repo conteste con la llave del proyecto, sin
+traer nada.
 
 **2. Siempre con la confirmación completa: el nombre del proyecto y un código TOTP.**
 

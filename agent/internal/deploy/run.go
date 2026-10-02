@@ -47,9 +47,12 @@ func (r *run) execute() {
 	defer cancel()
 
 	var err error
-	if r.j.Event.Kind == proto.DeployKindRollback {
+	switch r.j.Event.Kind {
+	case proto.DeployKindRollback:
 		err = r.rollbackSteps(ctx)
-	} else {
+	case proto.DeployKindBootstrap:
+		err = r.bootstrapSteps(ctx)
+	default:
 		err = r.deploySteps(ctx)
 	}
 	if err == nil {
@@ -79,6 +82,28 @@ func (r *run) deploySteps(ctx context.Context) error {
 	if err := r.step(ctx, proto.StepCheckout, "", r.checkout(func() string { return r.j.Event.Commit })); err != nil {
 		return err
 	}
+	return r.launch(ctx)
+}
+
+// bootstrapSteps son los pasos de un primer deploy (ADR-021): los de un
+// deploy, sin la foto de lo anterior, porque no hay nada anterior. El
+// repositorio se inicia acá, en un workdir que una persona dejó preparado.
+func (r *run) bootstrapSteps(ctx context.Context) error {
+	if err := r.step(ctx, proto.StepPreflight, "", r.firstPreflight); err != nil {
+		return err
+	}
+	if err := r.step(ctx, proto.StepFetch, "", r.clone); err != nil {
+		return err
+	}
+	if err := r.step(ctx, proto.StepCheckout, "", r.firstCheckout); err != nil {
+		return err
+	}
+	return r.launch(ctx)
+}
+
+// launch prepara el código que quedó en el workdir, lo pone a correr y lo
+// verifica: lo que tienen en común un deploy y un primer deploy.
+func (r *run) launch(ctx context.Context) error {
 	if err := r.builds(ctx); err != nil {
 		return err
 	}
@@ -179,19 +204,111 @@ func (r *run) preflight(ctx context.Context, _ *runner.Tail) (string, error) {
 	if r.rt, err = r.e.runtimeFor(r.j, &r.spec); err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
 	}
-	if _, err := r.git.Head(ctx); err != nil {
-		if errors.Is(err, gitops.ErrNotRepository) {
-			return "", deployError(proto.DeployPreflightFailed, "%s no es un repositorio de git (o el agent no lo puede leer)", p.Workdir)
-		}
+	switch _, err := r.git.Head(ctx); {
+	case errors.Is(err, gitops.ErrNotRepository), errors.Is(err, gitops.ErrNoCommit):
+		return "", deployError(proto.DeployPreflightFailed,
+			"%s no tiene el código clonado (o el agent no lo puede leer); si el proyecto no se desplegó nunca, lo que va es un primer deploy", p.Workdir)
+	case err != nil:
 		return "", deployError(proto.DeployPreflightFailed, "no se pudo leer el repositorio: %v", err)
 	}
-	if err := r.git.CheckClean(ctx); err != nil {
-		if errors.Is(err, gitops.ErrDirty) {
-			return "", deployError(proto.DeployDirtyWorktree, "hay archivos versionados cambiados a mano en %s; el deploy no los pisa", p.Workdir)
-		}
-		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	if err := r.clean(ctx); err != nil {
+		return "", err
 	}
 	return r.rt.Preflight(ctx)
+}
+
+// clean revisa que nadie haya cambiado a mano archivos versionados.
+func (r *run) clean(ctx context.Context) error {
+	err := r.git.CheckClean(ctx)
+	switch {
+	case errors.Is(err, gitops.ErrDirty):
+		return deployError(proto.DeployDirtyWorktree, "hay archivos versionados cambiados a mano en %s; el deploy no los pisa", r.j.Project.Workdir)
+	case err != nil:
+		return deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	return nil
+}
+
+// firstPreflight es el chequeo previo de un primer deploy (ADR-021): el
+// proyecto no se desplegó nunca, nada suyo corre, y su workdir existe y
+// todavía no tiene el código (o tiene el clon de un intento anterior).
+func (r *run) firstPreflight(ctx context.Context, _ *runner.Tail) (string, error) {
+	p := r.j.Project
+	var err error
+	if r.git, err = r.e.tools.Git(p, r.e.keyFor(p.Name)); err != nil {
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	if r.rt, err = r.e.runtimeFor(r.j, &r.spec); err != nil {
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+
+	st, err := r.e.store.loadState(p.Name)
+	if err != nil {
+		return "", err
+	}
+	if len(st.History) > 0 {
+		return "", deployError(proto.DeployAlreadyDeployed, "el proyecto ya se desplegó (está en %s): lo que sigue son deploys", short(st.History[0].Commit))
+	}
+	running, err := r.rt.Running(ctx)
+	if err != nil {
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	if running != "" {
+		return "", deployError(proto.DeployAlreadyDeployed, "el proyecto ya tiene algo corriendo (%s): lo que sigue son deploys", running)
+	}
+
+	cloned, err := r.git.Cloned()
+	switch {
+	case errors.Is(err, gitops.ErrNoWorkdir):
+		return "", deployError(proto.DeployPreflightFailed, "el workdir %s no existe: lo crea una persona, con permiso de escritura para el agent", p.Workdir)
+	case err != nil:
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	state := "workdir sin clonar"
+	if cloned {
+		// Lo que dejó un intento anterior, que no llegó a quedar bien.
+		state = "workdir con el clon de un intento anterior"
+		switch _, err := r.git.Head(ctx); {
+		case errors.Is(err, gitops.ErrNoCommit):
+		case err != nil:
+			return "", deployError(proto.DeployPreflightFailed, "no se pudo leer el repositorio de %s: %v", p.Workdir, err)
+		default:
+			if err := r.clean(ctx); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	detail, err := r.rt.Available(ctx)
+	if err != nil {
+		return "", err
+	}
+	return state + "; " + detail, nil
+}
+
+// clone inicia el repositorio en el workdir, si no estaba, y trae la rama
+// declarada. No configura ningún origin: como en un deploy, el código sale de
+// la URL que se arma desde el repo declarado.
+func (r *run) clone(ctx context.Context, tail *runner.Tail) (string, error) {
+	if err := r.git.Init(ctx, tail); err != nil {
+		return "", stepFailure(err, proto.DeployFetchFailed, "no se pudo iniciar el repositorio en "+r.j.Project.Workdir)
+	}
+	return r.fetch(ctx, tail)
+}
+
+// firstCheckout deja el código en el workdir y, ya con el código, revisa lo
+// que el chequeo previo no podía: el archivo de Compose, por ejemplo. Git no
+// pisa un archivo que ya estaba (un .env que dejó una persona): si choca con
+// uno versionado, falla.
+func (r *run) firstCheckout(ctx context.Context, tail *runner.Tail) (string, error) {
+	detail, err := r.checkout(func() string { return r.j.Event.Commit })(ctx, tail)
+	if err != nil {
+		return "", err
+	}
+	if _, err := r.rt.Preflight(ctx); err != nil {
+		return "", err
+	}
+	return detail, nil
 }
 
 // fetch trae la rama declarada y resuelve el commit que se despliega.
@@ -377,14 +494,52 @@ func (r *run) fail(cause error) {
 	r.e.log.Warn("el deploy falló", "deploy", r.j.Event.DeployID, "proyecto", r.j.Event.Project, "codigo", code, "detalle", message)
 
 	status := proto.DeployFailed
-	if r.j.Touched {
-		if err := r.restore(message); err != nil {
-			code, message = proto.DeployRollbackFailed, fmt.Sprintf("%s; y no pudo volver atrás: %v", message, err)
-		} else {
-			status = proto.DeployRolledBack
-		}
+	switch undone, err := r.undo(message); {
+	case err != nil:
+		code, message = proto.DeployRollbackFailed, r.undoFailed(message, err)
+	case undone:
+		status = proto.DeployRolledBack
 	}
 	r.finish(status, code, message)
+}
+
+// undo deshace lo que el deploy llegó a tocar, y dice si había algo que
+// deshacer. Un deploy vuelve a como estaba el proyecto. Un primer deploy no
+// tiene a dónde volver: baja lo que levantó, si llegó a levantar algo, y el
+// código clonado queda (ADR-021).
+func (r *run) undo(reason string) (bool, error) {
+	if r.j.Event.Kind == proto.DeployKindBootstrap {
+		if !r.j.UpStarted {
+			return false, nil
+		}
+		return true, r.teardown(reason)
+	}
+	if !r.j.Touched {
+		return false, nil
+	}
+	return true, r.restore(reason)
+}
+
+func (r *run) undoFailed(message string, err error) string {
+	what := "volver atrás"
+	if r.j.Event.Kind == proto.DeployKindBootstrap {
+		what = "bajar lo que había levantado"
+	}
+	return fmt.Sprintf("%s; y no pudo %s: %v", message, what, err)
+}
+
+// teardown baja lo que levantó un primer deploy que no quedó bien.
+func (r *run) teardown(reason string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.e.root), rollbackTimeout)
+	defer cancel()
+
+	return r.step(ctx, proto.StepRollback, "", func(ctx context.Context, tail *runner.Tail) (string, error) {
+		tail.Add("bajando lo que levantó este primer deploy: " + reason)
+		if err := r.rt.Down(ctx, tail); err != nil {
+			return "", err
+		}
+		return "bajó lo que había levantado; el código quedó en el workdir", nil
+	})
 }
 
 // interrupted cierra un deploy que quedó a medias porque el agent se
@@ -408,12 +563,14 @@ func (r *run) interrupted() {
 		if r.git, err = r.e.tools.Git(r.j.Project, r.e.keyFor(r.j.Project.Name)); err == nil {
 			r.rt, err = r.e.runtimeFor(r.j, nil)
 		}
+		undone := false
 		if err == nil {
-			err = r.restore(message)
+			undone, err = r.undo(message)
 		}
-		if err != nil {
-			code, message = proto.DeployRollbackFailed, fmt.Sprintf("%s; y no pudo volver atrás: %v", message, err)
-		} else {
+		switch {
+		case err != nil:
+			code, message = proto.DeployRollbackFailed, r.undoFailed(message, err)
+		case undone:
 			status = proto.DeployRolledBack
 		}
 	}

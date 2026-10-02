@@ -64,6 +64,11 @@ func (c *Client) RestartUnits(ctx context.Context, project string) error {
 	return c.do(ctx, Request{Op: OpRestartUnits, Project: project})
 }
 
+// StopUnits para las unidades declaradas del proyecto.
+func (c *Client) StopUnits(ctx context.Context, project string) error {
+	return c.do(ctx, Request{Op: OpStopUnits, Project: project})
+}
+
 // do manda un pedido y espera la respuesta. Una conexión por pedido.
 func (c *Client) do(ctx context.Context, req Request) error {
 	if err := req.Validate(); err != nil {

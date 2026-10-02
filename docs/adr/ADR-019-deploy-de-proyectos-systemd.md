@@ -92,10 +92,15 @@ Al construirlo se sumó una cuarta, que no cambia nada: `check` (proyecto) dice 
 puede desplegar, mirando lo que solo root ve: que el usuario de `run_as` exista, que el archivo de
 `env_file` exista y que systemd conozca las unidades. La usa el chequeo previo del deploy.
 
+Con el primer deploy ([ADR-021](ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)) se sumó
+una quinta: `stop_units` (proyecto) para las unidades declaradas del proyecto, al revés de como
+arrancan. Es lo que deshace un primer deploy que levantó el servicio y no quedó bien: no hay una
+versión anterior a la que volver. Como las demás, recibe solo el nombre del proyecto.
+
 - **El agent no nombra unidades ni comandos: nombra un proyecto y un número de paso.** El ayudante
   lee él mismo el `project.yaml` de `/etc/status-sv/projects.d`, con el mismo parser estricto, y de
   ahí saca el comando, el usuario y las unidades. Un agent comprometido puede pedir que corra un
-  paso declarado o que se reinicie un servicio declarado, y nada más.
+  paso declarado, o que se reinicie o se pare un servicio declarado, y nada más.
 - **El ayudante solo usa un archivo que sea de root** y que ni el grupo ni otros puedan escribir,
   igual que su directorio. Si por un error de permisos el agent pudiera escribirlo, podría
   declararse sus propios pasos: en ese caso el ayudante no hace nada.
@@ -223,6 +228,7 @@ CI): el ayudante de verdad, con sus unidades tal cual se instalan, y una sonda q
 | Un paso con 3 s de tiempo máximo | `timeout` a los 3 s |
 | Se cierra la conexión en medio de un paso | el paso se para |
 | `restart_units` | la unidad declarada cambia de proceso; la que no es del proyecto, no |
+| `stop_units` | la unidad declarada queda parada; la que no es del proyecto, no; un reinicio la levanta |
 | Proyecto sin declarar o de Docker, paso o fase que no existen | rechazados |
 | Un pedido que trae un comando, una unidad o que no es JSON | `invalid_request`, sin tocar systemd |
 | El ayudante, sin capacidades ni red, habla con systemd por su socket privado | funciona |

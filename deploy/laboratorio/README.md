@@ -114,6 +114,7 @@ lectura. Lo que corre sale del `project.yaml`, no del pedido.
 | Un paso que falla informa su código; uno que se pasa de tiempo se corta | El resultado del paso |
 | Si la conexión se cierra, el paso se para | Un paso no queda corriendo sin un deploy que lo espere |
 | `restart_units`: la unidad declarada cambia de proceso y la otra no | El reinicio |
+| `stop_units`: la unidad declarada queda parada, la otra no se toca, y un reinicio la levanta | Lo que deshace un primer deploy que no quedó bien (ADR-021) |
 | `check`: un proyecto listo, y uno cuyo usuario no existe | El chequeo previo del deploy |
 | Proyecto sin declarar o de Docker; paso, fase u operación que no existen | **Tienen que rechazarse** |
 | Un pedido que trae un comando o una unidad, o que no es JSON | **Tiene que rechazarse** sin tocar systemd |
@@ -133,6 +134,6 @@ Al final **mide, sin comprobar**, la alternativa descartada: una regla de polkit
 unidad y el verbo. Con polkit 124 funciona (permite esa unidad y rechaza otra y las transitorias);
 Ubuntu 22.04 trae polkit 0.105, que no entiende esas reglas.
 
-Resultado del 2026-10-02 (systemd 255, polkit 124): las 34 comprobaciones de la sonda, las 3 de
+Resultado del 2026-10-02 (systemd 255, polkit 124): las 38 comprobaciones de la sonda, las 3 de
 afuera y las del instalador dan lo esperado. Los pasos corren en su propio cgroup, así que no cuentan contra la memoria
 del agent.

@@ -13,7 +13,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -36,6 +39,11 @@ const remoteRefPrefix = "refs/remotes/statussv/"
 // Errores que distinguen por qué no se puede desplegar.
 var (
 	ErrNotRepository = errors.New("el workdir no es un repositorio de git")
+	// ErrNoWorkdir es que el directorio del proyecto no existe.
+	ErrNoWorkdir = errors.New("el workdir no existe o no es un directorio")
+	// ErrNoCommit es un repositorio recién iniciado, sin ningún commit: lo
+	// que deja un primer deploy que no llegó a traer el código.
+	ErrNoCommit      = errors.New("el repositorio del workdir todavía no tiene ningún commit")
 	ErrDirty         = errors.New("hay archivos versionados cambiados a mano en el workdir")
 	ErrNotOnBranch   = errors.New("el commit pedido no está en la rama declarada")
 	ErrUnknownCommit = errors.New("el commit pedido no existe en el repositorio")
@@ -213,12 +221,64 @@ func (r *Repo) Head(ctx context.Context) (string, error) {
 	if err != nil || inside != "true" {
 		return "", ErrNotRepository
 	}
-	sha, err := r.query(ctx, "rev-parse", "--verify", "HEAD^{commit}")
+	sha, err := r.query(ctx, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	var exit *runner.ExitError
+	if errors.As(err, &exit) && exit.Code == 1 {
+		// Con --quiet, git sale con 1 y sin decir nada cuando HEAD no apunta
+		// a ningún commit.
+		return "", ErrNoCommit
+	}
 	if err != nil {
 		return "", fmt.Errorf("leer el commit actual: %w", err)
 	}
 	if !proto.ValidCommit(sha) {
 		return "", fmt.Errorf("leer el commit actual: respuesta inesperada de git")
+	}
+	return sha, nil
+}
+
+// Cloned dice si el workdir ya tiene un repositorio propio. Se mira el
+// directorio, no se le pregunta a git: un workdir vacío adentro de otro
+// repositorio no cuenta como clonado. Si el workdir no existe devuelve
+// ErrNoWorkdir: el agent no lo crea.
+func (r *Repo) Cloned() (bool, error) {
+	info, err := os.Stat(r.workdir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist) || (err == nil && !info.IsDir()):
+		return false, ErrNoWorkdir
+	case err != nil:
+		return false, fmt.Errorf("mirar %s: %w", r.workdir, err)
+	}
+	_, err = os.Lstat(filepath.Join(r.workdir, ".git"))
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, fmt.Errorf("mirar %s: %w", r.workdir, err)
+	}
+}
+
+// Init inicia un repositorio vacío en el workdir, para el primer deploy
+// (ADR-021). No copia la plantilla de git, que trae hooks de ejemplo, ni
+// configura ningún origin: el código se trae siempre de la URL que se arma
+// desde el repo declarado. Sobre un repositorio que ya existe no cambia nada.
+func (r *Repo) Init(ctx context.Context, tail *runner.Tail) error {
+	return runner.Run(ctx, r.command(queryTimeout, "init", "--quiet", "--template="), tail)
+}
+
+// RemoteTip le pregunta al servidor de git por la punta de branch, sin traer
+// nada ni necesitar un repositorio. Sirve para probar la deploy key de un
+// proyecto que todavía no se clonó.
+func (r *Repo) RemoteTip(ctx context.Context, fetchURL, branch string) (string, error) {
+	out, err := runner.Output(ctx, r.command(FetchTimeout, "ls-remote", "--heads", "--", fetchURL, "refs/heads/"+branch), nil)
+	if err != nil {
+		return "", err
+	}
+	sha, _, _ := strings.Cut(runner.FirstLine(out), "\t")
+	if !proto.ValidCommit(sha) {
+		return "", fmt.Errorf("el repo no tiene la rama %s", branch)
 	}
 	return sha, nil
 }

@@ -124,6 +124,13 @@ func (p *Project) Up(ctx context.Context, tail *runner.Tail) error {
 	return runner.Run(ctx, p.command(UpTimeout, "up", "--detach", "--no-build"), tail)
 }
 
+// Down baja el proyecto: saca sus contenedores y sus redes. Los volúmenes y
+// las imágenes quedan. Es lo que deshace un primer deploy que no quedó bien
+// (ADR-021).
+func (p *Project) Down(ctx context.Context, tail *runner.Tail) error {
+	return runner.Run(ctx, p.command(UpTimeout, "down"), tail)
+}
+
 // Run corre un paso declarado en un contenedor de una sola vez (ADR-016), con
 // la imagen recién compilada.
 func (p *Project) Run(ctx context.Context, step projectspec.Step, tail *runner.Tail) error {

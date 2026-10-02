@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
@@ -21,7 +22,7 @@ const (
 	// pedido por colgado: el que corta el paso es systemd, con el tiempo del
 	// propio paso; esto es por si systemd no contesta.
 	stepMargin = 30 * time.Second
-	// restartTimeout acota el reinicio de cada unidad.
+	// restartTimeout acota el reinicio, o la parada, de cada unidad.
 	restartTimeout = 2 * time.Minute
 	// cleanupTimeout acota parar un paso cuando el agent se fue.
 	cleanupTimeout = 30 * time.Second
@@ -162,6 +163,8 @@ func (h *Helper) handle(ctx context.Context, req Request) Response {
 		return Response{OK: true}
 	case OpRestartUnits:
 		return h.restart(ctx, spec)
+	case OpStopUnits:
+		return h.stop(ctx, spec)
 	default:
 		return Response{Code: CodeInvalidRequest, Message: "operación desconocida"}
 	}
@@ -245,6 +248,25 @@ func (h *Helper) restart(ctx context.Context, spec projectspec.Spec) Response {
 			h.Log.Error("no se pudo reiniciar una unidad", "unidad", unit, "error", err)
 			return Response{Code: CodeRestartFailed, Unit: unit, Message: "no se pudo reiniciar " + unit}
 		}
+	}
+	return Response{OK: true}
+}
+
+// stop para las unidades declaradas, en el orden inverso al de arranque. No
+// se queda en la primera que falla: lo que se pueda parar, se para.
+func (h *Helper) stop(ctx context.Context, spec projectspec.Spec) Response {
+	failed := ""
+	for _, unit := range slices.Backward(spec.Project.Units) {
+		unitCtx, cancel := context.WithTimeout(ctx, restartTimeout)
+		err := h.Systemd.Stop(unitCtx, unit)
+		cancel()
+		if err != nil {
+			h.Log.Error("no se pudo parar una unidad", "unidad", unit, "error", err)
+			failed = unit
+		}
+	}
+	if failed != "" {
+		return Response{Code: CodeStopFailed, Unit: failed, Message: "no se pudo parar " + failed}
 	}
 	return Response{OK: true}
 }

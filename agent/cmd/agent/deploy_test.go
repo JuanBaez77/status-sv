@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
+	"github.com/JuanBaez77/status-sv/agent/internal/gitops"
 	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -70,5 +73,61 @@ func TestCheckSystemdWithoutHelper(t *testing.T) {
 
 	if c.failures != 1 || !strings.Contains(out.String(), "install-agent.sh --enable-deploy") {
 		t.Errorf("fallas = %d, salida = %q", c.failures, out.String())
+	}
+}
+
+// Un proyecto cuyo workdir todavía no tiene el código no está roto: le toca
+// un primer deploy (ADR-021). deploy-check prueba que el agent pueda escribir
+// ahí y que el repo conteste, sin traer nada.
+func TestCheckBeforeTheFirstDeploy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("el agent corre en Linux")
+	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no hay git")
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitPath, append([]string{"-c", "user.name=prueba", "-c", "user.email=prueba@status-sv.invalid", "-c", "init.defaultBranch=main"}, args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+t.TempDir())
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	origin := t.TempDir()
+	git(origin, "init", "-q")
+	git(origin, "commit", "-q", "--allow-empty", "-m", "v1")
+
+	workdir := t.TempDir()
+	cfg := config.Config{AllowFileRepos: true, UnitHelperSocket: filepath.Join(t.TempDir(), "no-hay-socket")}
+	spec := projectspec.Spec{Project: proto.Project{
+		Name: "facturas", Runtime: proto.RuntimeSystemd, Workdir: workdir, Branch: "main", Units: []string{"gunicorn-facturas.service"},
+	}}
+	repo, err := gitops.Open(gitops.Config{Git: gitPath, StateDir: t.TempDir(), AllowFileRepos: true}, workdir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	c := &checker{out: &out, first: true}
+	c.firstDeploy(t.Context(), cfg, spec, repo, "file://"+origin, t.TempDir())
+
+	for _, want := range []string{"le toca un primer deploy", "puede escribir en " + workdir, "el repo contesta", "la punta de main"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("falta %q en la salida:\n%s", want, out.String())
+		}
+	}
+	// Lo único que falla es el ayudante, que acá no está.
+	if c.failures != 1 || !strings.Contains(out.String(), "install-agent.sh --enable-deploy") {
+		t.Errorf("fallas = %d, salida:\n%s", c.failures, out.String())
+	}
+	// No trajo nada: el workdir sigue sin repositorio.
+	if cloned, err := repo.Cloned(); err != nil || cloned {
+		t.Errorf("deploy-check dejó un repositorio en el workdir: %v, %v", cloned, err)
+	}
+	if entries, _ := os.ReadDir(workdir); len(entries) != 0 {
+		t.Errorf("deploy-check dejó archivos en el workdir: %v", entries)
 	}
 }

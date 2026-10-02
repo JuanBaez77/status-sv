@@ -31,11 +31,13 @@ const journalTimeout = 10 * time.Second
 // probar el motor sin systemd.
 type (
 	// UnitHelper es el ayudante root: corre los pasos declarados con el
-	// usuario del proyecto y reinicia sus unidades. Lo cumple unithelper.Client.
+	// usuario del proyecto, y reinicia o para sus unidades. Lo cumple
+	// unithelper.Client.
 	UnitHelper interface {
 		Check(ctx context.Context, project string) error
 		RunStep(ctx context.Context, project string, phase unithelper.Phase, index int, deploy uuid.UUID) error
 		RestartUnits(ctx context.Context, project string) error
+		StopUnits(ctx context.Context, project string) error
 	}
 	// UnitWatcher lee el estado de una unidad, sin privilegios.
 	UnitWatcher interface {
@@ -88,6 +90,43 @@ func (s *systemdRuntime) Preflight(ctx context.Context) (string, error) {
 	}
 	steps := len(s.spec.Build) + len(s.spec.Pre) + len(s.spec.Post)
 	return fmt.Sprintf("%s y %s", count(len(s.spec.Project.Units), "unidad", "unidades"), count(steps, "paso declarado", "pasos declarados")), nil
+}
+
+// Available es lo mismo que Preflight: lo que revisa el ayudante no depende
+// del código del proyecto.
+func (s *systemdRuntime) Available(ctx context.Context) (string, error) {
+	return s.Preflight(ctx)
+}
+
+// Running es la primera unidad del proyecto que no está parada.
+func (s *systemdRuntime) Running(ctx context.Context) (string, error) {
+	for _, unit := range s.spec.Project.Units {
+		state, err := s.deps.Units.UnitState(ctx, unit)
+		if err != nil {
+			return "", fmt.Errorf("mirar la unidad %s: %w", unit, err)
+		}
+		if state.Active != "inactive" && state.Active != "failed" {
+			return fmt.Sprintf("%s está %s", unit, state.Active), nil
+		}
+	}
+	return "", nil
+}
+
+// Down para las unidades declaradas.
+func (s *systemdRuntime) Down(ctx context.Context, tail *runner.Tail) error {
+	tail.Add("parando " + s.StartLabel())
+	err := s.deps.Helper.StopUnits(ctx, s.spec.Project.Name)
+	var helperErr *unithelper.Error
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &helperErr) && helperErr.Unit != "":
+		return fmt.Errorf("no se pudo parar %s", helperErr.Unit)
+	case errors.As(err, &helperErr):
+		return fmt.Errorf("no se pudieron parar las unidades: %s", helperErr.Message)
+	default:
+		return fmt.Errorf("no se pudieron parar las unidades: %w", err)
+	}
 }
 
 // Un proyecto de systemd no tiene imágenes: a lo que se vuelve es al commit

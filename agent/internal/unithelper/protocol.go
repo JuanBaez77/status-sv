@@ -9,8 +9,8 @@
 // y qué unidades se reinician lo saca el ayudante del project.yaml que escribió
 // root, leyéndolo él mismo en cada pedido.
 //
-// Un agent comprometido puede pedir que corra un paso declarado o que se
-// reinicie un servicio declarado. Nada más.
+// Un agent comprometido puede pedir que corra un paso declarado, o que se
+// reinicie o se pare un servicio declarado. Nada más.
 package unithelper
 
 import (
@@ -48,6 +48,9 @@ const (
 	OpStopStep Op = "stop_step"
 	// OpRestartUnits reinicia las unidades declaradas del proyecto.
 	OpRestartUnits Op = "restart_units"
+	// OpStopUnits para las unidades declaradas del proyecto. Es lo que deshace
+	// un primer deploy que no quedó bien (ADR-021).
+	OpStopUnits Op = "stop_units"
 )
 
 // Phase es de qué lista de pasos del project.yaml es un paso.
@@ -78,7 +81,7 @@ func (r Request) Validate() error {
 		return errors.New("proyecto inválido")
 	}
 	switch r.Op {
-	case OpCheck, OpRestartUnits:
+	case OpCheck, OpRestartUnits, OpStopUnits:
 		if r.Phase != "" || r.Index != 0 || r.Deploy != "" {
 			return errors.New("esa operación lleva solo el proyecto")
 		}
@@ -124,6 +127,8 @@ const (
 	CodeTimeout Code = "timeout"
 	// CodeRestartFailed: una unidad no se pudo reiniciar.
 	CodeRestartFailed Code = "restart_failed"
+	// CodeStopFailed: una unidad no se pudo parar.
+	CodeStopFailed Code = "stop_failed"
 	// CodeInternal: cualquier otra cosa.
 	CodeInternal Code = "internal"
 )
@@ -133,7 +138,7 @@ type Response struct {
 	OK      bool   `json:"ok"`
 	Code    Code   `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
-	// Unit es la unidad que no se pudo reiniciar.
+	// Unit es la unidad que no se pudo reiniciar o parar.
 	Unit string `json:"unit,omitempty"`
 	// ExitCode es el código de salida de un paso que terminó mal.
 	ExitCode int `json:"exit_code,omitempty"`

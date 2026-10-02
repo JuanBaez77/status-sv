@@ -5,7 +5,9 @@
 // rechaza enseguida, y lo corre aparte, paso por paso: chequeo previo, fetch,
 // foto de lo que corre, checkout, build, pasos declarados, up o reinicio,
 // verificación y pasos posteriores. Si algo falla después de tocar lo que
-// corre, vuelve atrás solo. Cada cambio sale como una foto completa
+// corre, vuelve atrás solo. El primer deploy de un proyecto (ADR-021) son los
+// mismos pasos sobre un workdir sin clonar, sin foto de lo anterior: si falla
+// después de levantar algo, lo baja. Cada cambio sale como una foto completa
 // (deploy_event) y queda en un diario en disco, así un deploy sobrevive a un
 // corte del canal y, si el agent se reinicia en el medio, se vuelve atrás al
 // arrancar.
@@ -88,6 +90,8 @@ type Config struct {
 // Docker. Las cumplen gitops.Repo y compose.Project.
 type (
 	gitRepo interface {
+		Cloned() (bool, error)
+		Init(ctx context.Context, tail *runner.Tail) error
 		Head(ctx context.Context) (string, error)
 		CheckClean(ctx context.Context) error
 		Fetch(ctx context.Context, fetchURL, branch string, tail *runner.Tail) error
@@ -100,6 +104,7 @@ type (
 		Validate(ctx context.Context, tail *runner.Tail) error
 		Build(ctx context.Context, tail *runner.Tail) error
 		Up(ctx context.Context, tail *runner.Tail) error
+		Down(ctx context.Context, tail *runner.Tail) error
 		Run(ctx context.Context, step projectspec.Step, tail *runner.Tail) error
 		Snapshot(ctx context.Context, api compose.ImageAPI) ([]compose.ServiceImage, error)
 		Retain(ctx context.Context, api compose.ImageAPI, commit string, images []compose.ServiceImage) error
@@ -175,8 +180,8 @@ func (e *Engine) Wait() {
 	e.wg.Wait()
 }
 
-// Start acepta o rechaza un deploy o un rollback. Si lo acepta, lo corre
-// aparte y contesta enseguida: el avance sale por la bandeja.
+// Start acepta o rechaza un deploy, un rollback o un primer deploy. Si lo
+// acepta, lo corre aparte y contesta enseguida: el avance sale por la bandeja.
 //
 // El ID del comando es el del deploy. Un comando repetido (el control plane
 // no recibió el acuse) se contesta igual, sin volver a ejecutarlo.
@@ -190,6 +195,8 @@ func (e *Engine) Start(id uuid.UUID, cmd proto.Command) proto.CommandAck {
 		name, commit = cmd.Deploy.Project, cmd.Deploy.Commit
 	case cmd.Operation == proto.OpRollback && cmd.Rollback != nil:
 		kind, name = proto.DeployKindRollback, cmd.Rollback.Project
+	case cmd.Operation == proto.OpBootstrap && cmd.Bootstrap != nil:
+		kind, name = proto.DeployKindBootstrap, cmd.Bootstrap.Project
 	default:
 		return reject(id, proto.CommandUnknownOperation, "el motor de deploy no atiende esa operación")
 	}

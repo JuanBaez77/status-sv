@@ -28,6 +28,9 @@ const (
 	OpDeploy Operation = "deploy"
 	// OpRollback vuelve un proyecto declarado a su último estado bueno.
 	OpRollback Operation = "rollback"
+	// OpBootstrap es el primer deploy de un proyecto declarado que todavía no
+	// corre: trae el código a un workdir sin clonar y lo levanta (ADR-021).
+	OpBootstrap Operation = "bootstrap"
 )
 
 // Límites de los comandos y sus respuestas.
@@ -57,10 +60,11 @@ const (
 // Lleva los parámetros de su operación en su propio campo, tipado: no hay un
 // mapa de parámetros sueltos que cada operación interprete a su manera.
 type Command struct {
-	Operation Operation       `json:"operation"`
-	GetLogs   *GetLogsParams  `json:"get_logs,omitempty"`
-	Deploy    *DeployParams   `json:"deploy,omitempty"`
-	Rollback  *RollbackParams `json:"rollback,omitempty"`
+	Operation Operation        `json:"operation"`
+	GetLogs   *GetLogsParams   `json:"get_logs,omitempty"`
+	Deploy    *DeployParams    `json:"deploy,omitempty"`
+	Rollback  *RollbackParams  `json:"rollback,omitempty"`
+	Bootstrap *BootstrapParams `json:"bootstrap,omitempty"`
 }
 
 // Type implementa Message.
@@ -70,7 +74,7 @@ func (Command) Type() MessageType { return TypeCommand }
 // y ningún otro: parámetros de más son un error, no algo que se ignora.
 func (c Command) Validate() error {
 	params := 0
-	for _, present := range []bool{c.GetLogs != nil, c.Deploy != nil, c.Rollback != nil} {
+	for _, present := range []bool{c.GetLogs != nil, c.Deploy != nil, c.Rollback != nil, c.Bootstrap != nil} {
 		if present {
 			params++
 		}
@@ -95,6 +99,11 @@ func (c Command) Validate() error {
 			return errors.New("rollback sin parámetros")
 		}
 		return c.Rollback.Validate()
+	case OpBootstrap:
+		if c.Bootstrap == nil {
+			return errors.New("bootstrap sin parámetros")
+		}
+		return c.Bootstrap.Validate()
 	case "":
 		return errors.New("falta la operación")
 	default:
@@ -174,8 +183,8 @@ var knownCommandCodes = map[CommandErrorCode]bool{
 }
 
 // CommandAck es la respuesta del agent a un comando: el acuse y el resultado
-// juntos, porque get_logs termina enseguida. Un deploy o un rollback se
-// contestan apenas se aceptan (o se rechazan), sin resultado: el avance y el
+// juntos, porque get_logs termina enseguida. Un deploy, un rollback o un primer
+// deploy se contestan apenas se aceptan (o se rechazan), sin resultado: el avance y el
 // final llegan aparte, en deploy_event, con el ID del comando.
 type CommandAck struct {
 	CommandID uuid.UUID        `json:"command_id"`

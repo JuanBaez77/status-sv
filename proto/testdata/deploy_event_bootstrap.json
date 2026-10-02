@@ -1,0 +1,67 @@
+{
+  "v": 1,
+  "type": "deploy_event",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "deploy_id": "01924f9c-0000-7000-8000-000000000001",
+    "seq": 11,
+    "project": "turnos",
+    "kind": "bootstrap",
+    "status": "rolled_back",
+    "commit": "89abcdef0123456789abcdef0123456789abcdef",
+    "started_at": "2026-09-20T12:00:00Z",
+    "finished_at": "2026-09-20T12:03:35Z",
+    "code": "unhealthy",
+    "message": "no quedó bien en 120 s: turnos-backend-1: terminó con código 1",
+    "steps": [
+      {
+        "name": "preflight",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:00Z",
+        "finished_at": "2026-09-20T12:00:00Z",
+        "detail": "workdir sin clonar; compose 2.39.1"
+      },
+      {
+        "name": "fetch",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:00Z",
+        "finished_at": "2026-09-20T12:00:04Z",
+        "detail": "main en 89abcdef"
+      },
+      {
+        "name": "checkout",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:04Z",
+        "finished_at": "2026-09-20T12:00:05Z",
+        "detail": "89abcdef"
+      },
+      {
+        "name": "build",
+        "status": "ok",
+        "started_at": "2026-09-20T12:00:05Z",
+        "finished_at": "2026-09-20T12:01:20Z"
+      },
+      {
+        "name": "up",
+        "status": "ok",
+        "started_at": "2026-09-20T12:01:20Z",
+        "finished_at": "2026-09-20T12:01:28Z"
+      },
+      {
+        "name": "healthcheck",
+        "status": "failed",
+        "started_at": "2026-09-20T12:01:28Z",
+        "finished_at": "2026-09-20T12:03:28Z",
+        "detail": "no quedó bien en 120 s"
+      },
+      {
+        "name": "rollback",
+        "status": "ok",
+        "started_at": "2026-09-20T12:03:28Z",
+        "finished_at": "2026-09-20T12:03:35Z",
+        "detail": "bajó lo que había levantado; el código quedó en el workdir"
+      }
+    ]
+  }
+}

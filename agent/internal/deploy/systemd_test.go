@@ -58,7 +58,10 @@ type fakeHelper struct {
 	failStep   string
 	stepErr    error
 	restartErr error
-	broken     func() bool
+	stopErr    error
+	// stopped es que las unidades se pararon y no se arrancaron de nuevo.
+	stopped bool
+	broken  func() bool
 	// gate, si no es nil, frena el primer paso hasta que se cierra o se cancela.
 	gate chan struct{}
 }
@@ -103,6 +106,18 @@ func (h *fakeHelper) RestartUnits(context.Context, string) error {
 	}
 	h.mu.Lock()
 	h.restarts++
+	h.stopped = false
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *fakeHelper) StopUnits(context.Context, string) error {
+	h.call("stop")
+	if h.stopErr != nil {
+		return h.stopErr
+	}
+	h.mu.Lock()
+	h.stopped = true
 	h.mu.Unlock()
 	return nil
 }

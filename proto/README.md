@@ -129,6 +129,7 @@ tipados y validados. Con parámetros de otra operación además de los suyos, el
 | `get_logs` | `kind` (`container` o `service`), `target` (ID completo del contenedor o nombre de la unidad) y `lines` (1 a 1000) | Los últimos renglones del log, del más viejo al más nuevo |
 | `deploy` | `project` (un proyecto declarado) y, opcional, `commit` (SHA completo de 40 caracteres hexadecimales en minúscula; sin él, la punta de la rama declarada) | Despliega el proyecto (ADR-015). El acuse dice si se aceptó; el avance llega en `deploy_event` |
 | `rollback` | `project` | Vuelve el proyecto a su último estado bueno, sin recompilar |
+| `bootstrap` | `project` | El primer deploy de un proyecto declarado que todavía no corre (ADR-021): trae el código a un `workdir` sin clonar y lo levanta. Sin `commit`: es la punta de la rama declarada |
 
 El ID del envelope es el ID del comando. El agent lo usa para no ejecutar dos veces un comando
 repetido (devuelve la misma respuesta) y lo devuelve en `command_ack.command_id`.
@@ -147,12 +148,12 @@ agent **sin secuencias de escape de terminal, con los secretos enmascarados y re
 recortados** a 2048 bytes (ADR-011). Si mil renglones no entran en un mensaje, se dejan afuera los
 más viejos y se marca `truncated`.
 
-`disabled` es un `deploy` o un `rollback` en un servidor donde una persona no prendió el deploy
+`disabled` es un `deploy`, un `rollback` o un `bootstrap` en un servidor donde una persona no prendió el deploy
 (`STATUSSV_DEPLOY_ENABLED`, ADR-015). El control plane no tiene forma de prenderlo.
 
 ## Deploy: la foto entera, con secuencia
 
-Un `deploy` o un `rollback` se contestan con `command_ack` apenas el agent los acepta o los rechaza
+Un `deploy`, un `rollback` o un `bootstrap` se contestan con `command_ack` apenas el agent los acepta o los rechaza
 (proyecto no declarado, deploy apagado, otro deploy en curso). El avance viaja después en
 `deploy_event`, cuyo `deploy_id` es el ID del comando:
 
@@ -181,6 +182,13 @@ Los pasos son una lista cerrada, y cambian según cómo corre el proyecto:
 Un `restart` que falla termina el deploy con el código `restart_failed`. Los dos son del
 Sprint 5: un control plane anterior rechaza la foto que los trae, así que se actualiza primero el
 control plane y después los agents, como siempre.
+
+Un **primer deploy** (`kind: bootstrap`, ADR-021) no tiene `snapshot` ni `previous_commit`: no hay
+un estado anterior. Sus pasos son `preflight`, `fetch` (que además inicia el repositorio),
+`checkout`, `build`, `pre`, `up` o `restart`, `healthcheck` y `post`. Si falla después de levantar
+algo, el paso `rollback` es bajarlo, y el deploy termina `rolled_back`; el código queda clonado. Si
+el proyecto ya tiene un estado bueno anotado o algo suyo corriendo, termina `failed` con el código
+`already_deployed`, sin tocar nada.
 
 ## Reglas de versionado
 
