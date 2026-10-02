@@ -57,6 +57,18 @@ roadmap de [DISENO.md](DISENO.md).
   restaurados solo se probaron a mano, el día de la mudanza. Un job que lo haga con la base de la
   prueba de punta a punta lo cubriría.
 
+## Lo que deja afuera el deploy systemd del Sprint 5
+
+- **Rollback exacto del entorno virtual.** Hoy volver atrás es correr `deploy.build` de nuevo
+  sobre el commit anterior: depende de versiones fijadas y de la red o la caché de `pip`. Una
+  copia del entorno antes de instalar lo haría exacto y sin red (ver
+  [adr/ADR-019-deploy-de-proyectos-systemd.md](adr/ADR-019-deploy-de-proyectos-systemd.md)).
+- **`reload` en vez de `restart`.** gunicorn sabe recargar sin cortar los pedidos en curso; hoy el
+  deploy reinicia.
+- **Servicios que corren como root.** No se pueden declarar: `run_as` no acepta `root`.
+- **La regla de polkit por unidad**, como alternativa al ayudante root, cuando ningún servidor
+  quede en Ubuntu 22.04.
+
 ## Lo que deja afuera el deploy del Sprint 4
 
 - **El deploy roto a propósito en un servidor real.** Era parte del cierre del Sprint 4 y se
