@@ -80,3 +80,46 @@ deploy key; `docker compose` hace `build`, `run --rm` y `up -d --no-build`, el c
 `healthy`, el healthcheck HTTP responde y la API de Docker etiqueta la imagen para el rollback. No
 puede escribir en `/etc` ni en el `workdir` de otro proyecto. Al final informa el pico de memoria
 y de tareas de la unidad.
+
+## El deploy de systemd: `systemd.sh`
+
+Un proyecto systemd no tiene contenedor: instalar dependencias o migrar es ejecutar código del
+repositorio en el servidor, y reiniciar su servicio necesita root. El agent no hace ninguna de las
+dos cosas: se las pide a un ayudante root con operaciones fijas
+([ADR-019](../../docs/adr/ADR-019-deploy-de-proyectos-systemd.md)). Este laboratorio prueba ese
+reparto antes de programarlo. Necesita systemd y `python3`; no necesita Docker.
+
+```bash
+sudo ./systemd.sh   # prepara, corre la sonda y limpia al salir
+```
+
+Arma un proyecto con su usuario (`labapp`), un servicio (`lab-gunicorn.service`), otro que no es
+suyo (`lab-otra.service`) y un archivo de entorno que solo lee root. El ayudante de verdad todavía
+no existe: lo reemplaza `ayudante-falso.sh`, con el socket (`root:statussv 0660`) y el
+endurecimiento que va a tener (root sin capacidades, sin red, sistema de archivos en solo lectura).
+Lo que corre sale de un archivo de root, no del pedido.
+
+`sonda-systemd.sh` corre adentro de la unidad real del agent y comprueba:
+
+| Comprobación | Por qué |
+| --- | --- |
+| Reiniciar una unidad o arrancar una transitoria, directo | **Tiene que fallar**: el agent no tiene ese permiso |
+| Leer el estado de la unidad (`ActiveState`, `MainPID`, `NRestarts`) | La verificación del deploy |
+| `run_step`: el paso corre con el usuario del proyecto, en el `workdir`, con su archivo de entorno, en su propio cgroup | El código del proyecto no corre como hijo del agent |
+| El paso no lee la credencial del agent ni las deploy keys, ni escribe en `/etc` | Lo que se gana con eso |
+| El agent lee la salida del paso con `journalctl` | El avance del deploy |
+| El agent no lee el archivo de entorno | Los secretos no pasan por él |
+| Un paso que falla informa su código; uno que se pasa de tiempo se corta | El resultado del paso |
+| Si la conexión se cierra, el paso se para | Un paso no queda corriendo sin un deploy que lo espere |
+| `restart_units`: la unidad declarada cambia de proceso y la otra no | El reinicio |
+| Proyecto, paso, fase u operación que no existen; parámetros de más | **Tienen que rechazarse** |
+
+Afuera de la unidad comprueba que otro usuario del servidor no llega al socket.
+
+Al final **mide, sin comprobar**, la alternativa descartada: una regla de polkit que nombra la
+unidad y el verbo. Con polkit 124 funciona (permite esa unidad y rechaza otra y las transitorias);
+Ubuntu 22.04 trae polkit 0.105, que no entiende esas reglas.
+
+Resultado del 2026-10-02 (systemd 255, polkit 124): las 25 comprobaciones de la sonda y la del socket dan lo esperado. El pico
+de memoria de la unidad del agent durante la sonda fue de 7,5 MiB: los pasos no cuentan en su
+cgroup.
