@@ -337,18 +337,74 @@ func TestDeployEventFromAnotherServer(t *testing.T) {
 	}
 }
 
+// Un proyecto de systemd se despliega igual que uno de Docker (ADR-019): el
+// control plane manda el mismo comando y guarda los pasos como los manda el
+// agent, con sus build sin servicio y el reinicio en lugar del up.
+func TestSystemdDeployFromThePanel(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.97"
+	cookie := f.login(t, ip)
+	conn, _ := connectAgent(t, f, "vps-gunicorn", "203.0.113.97")
+	agent := newDeployAgent(t, conn, acceptAll)
+	agent.declare(t, proto.Project{
+		Name: "facturas", Environment: proto.EnvStaging, Repo: "github.com/a/facturas", Branch: "main",
+		Runtime: proto.RuntimeSystemd, Workdir: "/srv/facturas", Units: []string{"gunicorn-facturas.service"},
+	})
+	path := "/v1/projects/" + f.projectID(t, cookie, ip, "facturas") + "/deploys"
+
+	status, created, body := f.postDeploy(t, path, `{"confirm":"facturas"}`, ip, cookie)
+	if status != http.StatusCreated || created.Status != "pending" {
+		t.Fatalf("deploy = %d %s", status, body)
+	}
+	envelope := <-agent.commands
+	cmd, _ := proto.Decode[proto.Command](envelope)
+	if envelope.ID != created.ID || cmd.Operation != proto.OpDeploy || cmd.Deploy.Project != "facturas" {
+		t.Fatalf("comando = %s %+v", envelope.ID, cmd)
+	}
+
+	start := time.Now().UTC().Truncate(time.Millisecond)
+	final := proto.DeployEvent{
+		DeployID: created.ID, Seq: 7, Project: "facturas", Kind: proto.DeployKindDeploy, Status: proto.DeployRolledBack,
+		Code: proto.DeployRestartFailed, Message: "no se pudo reiniciar gunicorn-facturas.service",
+		StartedAt: start, FinishedAt: start.Add(time.Minute), Commit: commitB, PreviousCommit: commitA,
+		Steps: []proto.DeployStep{
+			{Name: proto.StepBuild, Status: proto.StepOK, Detail: ".venv/bin/pip install -r requirements.txt"},
+			{Name: proto.StepBuild, Status: proto.StepOK, Detail: "scripts/estaticos.sh"},
+			{Name: proto.StepPre, Status: proto.StepOK, Detail: ".venv/bin/python manage.py migrate"},
+			{Name: proto.StepRestart, Status: proto.StepFailed, Detail: "no se pudo reiniciar gunicorn-facturas.service"},
+			{Name: proto.StepRollback, Status: proto.StepOK},
+		},
+	}
+	if ack := agent.event(t, final); ack.Type != proto.TypeDeployEventAck {
+		t.Fatalf("llegó %q", ack.Type)
+	}
+
+	done := decodeJSON[deployBody](t, f.do(t, http.MethodGet, "/v1/deploys/"+created.ID.String(), "", ip, cookie, nil))
+	if done.Status != "rolled_back" || done.Code != "restart_failed" || len(done.Steps) != 5 {
+		t.Fatalf("terminado = %+v", done)
+	}
+	if done.Steps[0].Name != proto.StepBuild || done.Steps[1].Name != proto.StepBuild || done.Steps[0].Service != "" ||
+		done.Steps[2].Service != "" || done.Steps[3].Name != proto.StepRestart {
+		t.Errorf("pasos = %+v", done.Steps)
+	}
+
+	// El rollback de un proyecto de systemd también se pide.
+	if status, _, body := f.postDeploy(t, strings.TrimSuffix(path, "/deploys")+"/rollback", `{"confirm":"facturas"}`, ip, cookie); status != http.StatusCreated {
+		t.Fatalf("rollback = %d %s", status, body)
+	}
+	if cmd, _ := proto.Decode[proto.Command](<-agent.commands); cmd.Operation != proto.OpRollback || cmd.Rollback.Project != "facturas" {
+		t.Fatalf("comando de rollback = %+v", cmd)
+	}
+}
+
 func TestDeployRequestErrors(t *testing.T) {
 	f := setup(t)
 	const ip = "198.51.100.96"
 	cookie := f.login(t, ip)
 	conn, _ := connectAgent(t, f, "vps-errores", "203.0.113.96")
 	agent := newDeployAgent(t, conn, acceptAll)
-	agent.declare(t, dockerProject("tienda", proto.EnvStaging), proto.Project{
-		Name: "facturas", Environment: proto.EnvStaging, Repo: "github.com/a/facturas", Branch: "main",
-		Runtime: proto.RuntimeSystemd, Workdir: "/srv/facturas", Units: []string{"facturas.service"},
-	})
+	agent.declare(t, dockerProject("tienda", proto.EnvStaging))
 	tienda := "/v1/projects/" + f.projectID(t, cookie, ip, "tienda") + "/deploys"
-	facturas := "/v1/projects/" + f.projectID(t, cookie, ip, "facturas") + "/deploys"
 
 	tests := []struct {
 		name   string
@@ -360,7 +416,6 @@ func TestDeployRequestErrors(t *testing.T) {
 		{"sin sesión", tienda, `{"confirm":"tienda"}`, nil, http.StatusUnauthorized},
 		{"campo de más", tienda, `{"confirm":"tienda","steps":["rm -rf /"]}`, cookie, http.StatusBadRequest},
 		{"proyecto que no existe", "/v1/projects/" + uuid.Must(uuid.NewV7()).String() + "/deploys", `{"confirm":"x"}`, cookie, http.StatusNotFound},
-		{"systemd todavía no", facturas, `{"confirm":"facturas"}`, cookie, http.StatusConflict},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

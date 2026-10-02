@@ -210,11 +210,75 @@ describe('DeploysCard', () => {
     expect(within(form).queryByLabelText(/Commit/)).not.toBeInTheDocument()
   })
 
-  it('un proyecto de systemd no se despliega todavía', async () => {
-    stubFetch(() => json({ deploys: [] }))
-    renderWithQuery(<DeploysCard project={project({ runtime: 'systemd' })} />)
+  describe('con un proyecto de systemd', () => {
+    const facturas = () =>
+      project({
+        name: 'facturas',
+        runtime: 'systemd',
+        compose_file: undefined,
+        compose_project: undefined,
+        declared_units: ['gunicorn-facturas.service', 'facturas-worker.service'],
+      })
 
-    expect(await screen.findByText(/llega en el Sprint 5/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Desplegar/ })).not.toBeInTheDocument()
+    it('se despliega igual, y dice qué servicios reinicia', async () => {
+      stubFetch(() => json({ deploys: [] }))
+      renderWithQuery(<DeploysCard project={facturas()} />)
+
+      expect(
+        await screen.findByText(/reinicia gunicorn-facturas.service y facturas-worker.service/),
+      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Desplegar/ })).toBeEnabled()
+      expect(screen.getByRole('button', { name: /Volver atrás/ })).toBeEnabled()
+    })
+
+    it('muestra sus pasos: preparar con su comando y reiniciar', async () => {
+      stubFetch((path) => {
+        if (path === '/v1/projects/p1/deploys') {
+          return json({
+            deploys: [summary({ id: 'd4', status: 'running', finished_at: undefined })],
+          })
+        }
+        return json(
+          detail({
+            id: 'd4',
+            status: 'running',
+            finished_at: undefined,
+            steps: [
+              { name: 'build', status: 'ok', detail: '.venv/bin/pip install -r requirements.txt' },
+              { name: 'pre', status: 'ok', detail: '.venv/bin/python manage.py migrate' },
+              {
+                name: 'restart',
+                status: 'running',
+                output: ['reiniciando gunicorn-facturas.service'],
+              },
+            ],
+          }),
+        )
+      })
+      renderWithQuery(<DeploysCard project={facturas()} />)
+
+      // No compila nada: prepara el código, y el comando va al lado.
+      expect(await screen.findByText('Preparar')).toBeInTheDocument()
+      expect(screen.queryByText('Compilar')).not.toBeInTheDocument()
+      expect(screen.getByText('.venv/bin/pip install -r requirements.txt')).toBeInTheDocument()
+      // Un paso declarado de systemd no lleva servicio de Compose.
+      expect(screen.getByText('Paso previo')).toBeInTheDocument()
+      expect(screen.getByText('Reiniciar')).toBeInTheDocument()
+      expect(screen.getByText('reiniciando gunicorn-facturas.service')).toBeInTheDocument()
+    })
+
+    it('el rollback avisa que corre de nuevo lo que prepara el código', async () => {
+      stubFetch(() => json({ deploys: [summary()] }))
+      renderWithQuery(<DeploysCard project={facturas()} />)
+
+      await screen.findByText('Desplegado')
+      fireEvent.click(screen.getByRole('button', { name: /Volver atrás/ }))
+      const form = screen.getByRole('form', { name: 'Volver atrás' })
+      expect(
+        within(form).getByText(/se\s+corren de nuevo los pasos que lo preparan/),
+      ).toBeInTheDocument()
+      expect(within(form).queryByText(/sin compilar/)).not.toBeInTheDocument()
+      expect(within(form).getByText(/no se deshacen/)).toBeInTheDocument()
+    })
   })
 })

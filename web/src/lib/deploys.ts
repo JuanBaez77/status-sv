@@ -48,13 +48,22 @@ const stepLabels: Record<StepName, string> = {
   build: 'Compilar',
   pre: 'Paso previo',
   up: 'Levantar',
+  restart: 'Reiniciar',
   healthcheck: 'Verificar',
   post: 'Paso posterior',
   rollback: 'Volver atrás',
 }
 
-/** stepLabel es el nombre de un paso, con su servicio si es un paso declarado. */
-export function stepLabel(step: Pick<DeployStep, 'name' | 'service'>): string {
+/**
+ * stepLabel es el nombre de un paso, con su servicio si es un paso declarado
+ * de un proyecto Docker. Con systemd (ADR-019), `build` no compila nada: son
+ * los pasos declarados que preparan el código, y su comando va en el detalle.
+ */
+export function stepLabel(
+  step: Pick<DeployStep, 'name' | 'service'>,
+  runtime: 'docker' | 'systemd' = 'docker',
+): string {
+  if (runtime === 'systemd' && step.name === 'build') return 'Preparar'
   const label = stepLabels[step.name] ?? step.name
   return step.service ? `${label} (${step.service})` : label
 }
@@ -64,7 +73,7 @@ const codeTexts: Record<string, string> = {
   disabled: 'El deploy está apagado en ese servidor: lo prende una persona en el servidor.',
   busy: 'El agent ya está desplegando otra cosa; se despliega de a uno.',
   unknown_target: 'El agent no encuentra la declaración del proyecto.',
-  unavailable: 'Al agent le falta algo para desplegar (git o docker).',
+  unavailable: 'Al agent le falta algo para desplegar (git, Docker o las piezas de systemd).',
   agent_offline: 'El agent se desconectó antes de recibir el pedido.',
   no_answer: 'El agent nunca confirmó el pedido.',
   // Fallas del deploy.
@@ -72,9 +81,10 @@ const codeTexts: Record<string, string> = {
   dirty_worktree: 'Hay archivos cambiados a mano en el servidor; el deploy no los pisa.',
   fetch_failed: 'No se pudo traer la rama.',
   commit_not_on_branch: 'Ese commit no está en la rama declarada.',
-  build_failed: 'La compilación falló.',
+  build_failed: 'Falló la compilación, o un paso que prepara el código.',
   step_failed: 'Falló un paso declarado.',
   up_failed: 'No se pudieron levantar los contenedores.',
+  restart_failed: 'No se pudo reiniciar el servicio.',
   unhealthy: 'No quedó sano a tiempo.',
   timeout: 'Se pasó del tiempo máximo.',
   interrupted: 'El agent se reinició en medio del deploy.',
@@ -122,7 +132,6 @@ const requestErrors: Record<string, string> = {
   invalid_code: 'El código no sirve: usá uno nuevo de la app (no el que usaste para entrar).',
   deploy_in_progress: 'Ese proyecto ya tiene un deploy en curso.',
   agent_offline: 'El agent de ese servidor no está conectado.',
-  unsupported: 'El deploy de proyectos de systemd todavía no existe.',
   rate_limited: 'Demasiados pedidos seguidos; esperá un minuto.',
 }
 

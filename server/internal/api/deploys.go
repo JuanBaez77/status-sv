@@ -176,10 +176,6 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 		writeJSON(ctx, w, http.StatusBadRequest, errorResponse{Error: "confirmation_required", Message: "para confirmar hay que escribir el nombre del proyecto"})
 		return
 	}
-	if project.Runtime != string(proto.RuntimeDocker) {
-		writeJSON(ctx, w, http.StatusConflict, errorResponse{Error: "unsupported", Message: "el deploy de proyectos de systemd llega en el Sprint 5"})
-		return
-	}
 	// En producción, además, un código TOTP nuevo.
 	if project.Environment == string(proto.EnvProduction) {
 		if !s.totpLimiter.allow(ip) {
