@@ -127,6 +127,9 @@ const (
 	DeployStepFailed DeployErrorCode = "step_failed"
 	// DeployUpFailed: docker compose up falló.
 	DeployUpFailed DeployErrorCode = "up_failed"
+	// DeployRestartFailed: no se pudieron reiniciar las unidades de un
+	// proyecto systemd (ADR-019).
+	DeployRestartFailed DeployErrorCode = "restart_failed"
 	// DeployUnhealthy: la verificación no pasó a tiempo.
 	DeployUnhealthy DeployErrorCode = "unhealthy"
 	// DeployTimeout: el deploy entero se pasó de su tiempo máximo.
@@ -148,22 +151,26 @@ const (
 var knownDeployCodes = map[DeployErrorCode]bool{
 	DeployPreflightFailed: true, DeployDirtyWorktree: true, DeployFetchFailed: true,
 	DeployCommitNotOnBranch: true, DeployBuildFailed: true, DeployStepFailed: true,
-	DeployUpFailed: true, DeployUnhealthy: true, DeployTimeout: true, DeployInterrupted: true,
+	DeployUpFailed: true, DeployRestartFailed: true, DeployUnhealthy: true, DeployTimeout: true, DeployInterrupted: true,
 	DeployNoPrevious: true, DeployMissingImage: true, DeployRollbackFailed: true, DeployInternal: true,
 }
 
-// StepName es un paso del deploy, en el orden de ADR-015.
+// StepName es un paso del deploy, en el orden de ADR-015. Un proyecto systemd
+// (ADR-019) usa los mismos, con restart en lugar de up, y puede traer más de
+// un build: uno por cada paso declarado en deploy.build.
 type StepName string
 
 // Pasos de un deploy.
 const (
-	StepPreflight   StepName = "preflight"
-	StepFetch       StepName = "fetch"
-	StepSnapshot    StepName = "snapshot"
-	StepCheckout    StepName = "checkout"
-	StepBuild       StepName = "build"
-	StepPre         StepName = "pre"
-	StepUp          StepName = "up"
+	StepPreflight StepName = "preflight"
+	StepFetch     StepName = "fetch"
+	StepSnapshot  StepName = "snapshot"
+	StepCheckout  StepName = "checkout"
+	StepBuild     StepName = "build"
+	StepPre       StepName = "pre"
+	StepUp        StepName = "up"
+	// StepRestart reinicia las unidades de un proyecto systemd.
+	StepRestart     StepName = "restart"
 	StepHealthcheck StepName = "healthcheck"
 	StepPost        StepName = "post"
 	// StepRollback es la vuelta atrás, cuando algo falló después de tocar lo
@@ -173,7 +180,7 @@ const (
 
 var knownSteps = map[StepName]bool{
 	StepPreflight: true, StepFetch: true, StepSnapshot: true, StepCheckout: true, StepBuild: true,
-	StepPre: true, StepUp: true, StepHealthcheck: true, StepPost: true, StepRollback: true,
+	StepPre: true, StepUp: true, StepRestart: true, StepHealthcheck: true, StepPost: true, StepRollback: true,
 }
 
 // StepStatus es cómo va un paso.
@@ -276,7 +283,8 @@ func (e DeployEvent) Validate() error {
 }
 
 // DeployStep es un paso del deploy con su resultado. Service va solo en los
-// pasos declarados (pre y post): es el servicio de Compose donde corrió.
+// pasos declarados (pre y post) de un proyecto Docker: es el servicio de
+// Compose donde corrió. Los de un proyecto systemd no lo llevan (ADR-019).
 type DeployStep struct {
 	Name       StepName   `json:"name"`
 	Service    string     `json:"service,omitempty"`
@@ -297,8 +305,8 @@ func (s DeployStep) Validate() error {
 		return fmt.Errorf("paso desconocido %q", s.Name)
 	case s.Service != "" && s.Name != StepPre && s.Name != StepPost:
 		return errors.New("solo los pasos declarados llevan servicio")
-	case (s.Name == StepPre || s.Name == StepPost) && !validName(s.Service, MaxStepServiceLen, isDockerNameRune):
-		return errors.New("un paso declarado necesita un servicio válido")
+	case s.Service != "" && !validName(s.Service, MaxStepServiceLen, isDockerNameRune):
+		return errors.New("el servicio de un paso declarado no es un nombre válido")
 	case s.Status != StepRunning && s.Status != StepOK && s.Status != StepFailed && s.Status != StepSkipped:
 		return fmt.Errorf("estado de paso desconocido %q", s.Status)
 	case s.Status == StepRunning && !s.FinishedAt.IsZero():

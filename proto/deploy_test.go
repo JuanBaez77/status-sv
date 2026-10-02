@@ -16,6 +16,42 @@ const (
 	shaV2 = "89abcdef0123456789abcdef0123456789abcdef"
 )
 
+// systemdDeployEvent es el deploy de un proyecto systemd que falló al
+// verificar y volvió atrás (ADR-019): los pasos declarados no llevan servicio,
+// hay un build por cada paso de deploy.build y un reinicio en lugar del up.
+func systemdDeployEvent() proto.DeployEvent {
+	start := goldenTS
+	at := func(s int) time.Time { return start.Add(time.Duration(s) * time.Second) }
+	return proto.DeployEvent{
+		DeployID:       goldenID,
+		Seq:            14,
+		Project:        "ypf-aca",
+		Kind:           proto.DeployKindDeploy,
+		Status:         proto.DeployRolledBack,
+		Commit:         shaV2,
+		PreviousCommit: shaV1,
+		StartedAt:      start,
+		FinishedAt:     at(190),
+		Code:           proto.DeployUnhealthy,
+		Message:        "no quedó bien en 120 s: gunicorn-ypf-aca.service se reinició 3 veces",
+		Steps: []proto.DeployStep{
+			{Name: proto.StepPreflight, Status: proto.StepOK, StartedAt: at(0), FinishedAt: at(0)},
+			{Name: proto.StepFetch, Status: proto.StepOK, StartedAt: at(0), FinishedAt: at(2), Detail: "main en 89abcdef"},
+			{Name: proto.StepSnapshot, Status: proto.StepOK, StartedAt: at(2), FinishedAt: at(2), Detail: "01234567"},
+			{Name: proto.StepCheckout, Status: proto.StepOK, StartedAt: at(2), FinishedAt: at(3)},
+			{
+				Name: proto.StepBuild, Status: proto.StepOK, StartedAt: at(3), FinishedAt: at(40),
+				Detail: ".venv/bin/pip install -r requirements.txt", Output: []string{"Successfully installed gunicorn-23.0.0"},
+			},
+			{Name: proto.StepBuild, Status: proto.StepOK, StartedAt: at(40), FinishedAt: at(45), Detail: ".venv/bin/python manage.py collectstatic --noinput"},
+			{Name: proto.StepPre, Status: proto.StepOK, StartedAt: at(45), FinishedAt: at(50), Detail: ".venv/bin/python manage.py migrate --noinput"},
+			{Name: proto.StepRestart, Status: proto.StepOK, StartedAt: at(50), FinishedAt: at(52), Detail: "gunicorn-ypf-aca.service"},
+			{Name: proto.StepHealthcheck, Status: proto.StepFailed, StartedAt: at(52), FinishedAt: at(172), Detail: "no quedó bien en 120 s"},
+			{Name: proto.StepRollback, Status: proto.StepOK, StartedAt: at(172), FinishedAt: at(190), Detail: "volvió a 01234567"},
+		},
+	}
+}
+
 // validDeployEvent es un deploy que terminó bien, con todos los pasos.
 func validDeployEvent() proto.DeployEvent {
 	start := goldenTS
@@ -165,7 +201,25 @@ func TestDeployEventValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{name: "paso desconocido", mutate: func(e *proto.DeployEvent) { e.Steps[0].Name = "shell" }, wantErr: true},
-		{name: "paso pre sin servicio", mutate: func(e *proto.DeployEvent) { e.Steps[5].Service = "" }, wantErr: true},
+		// Los pasos declarados de un proyecto systemd no corren en un servicio de
+		// Compose (ADR-019).
+		{name: "paso pre sin servicio", mutate: func(e *proto.DeployEvent) { e.Steps[5].Service = "" }},
+		{name: "reinicio en lugar de up", mutate: func(e *proto.DeployEvent) { e.Steps[6].Name = proto.StepRestart }},
+		{name: "servicio en el reinicio", mutate: func(e *proto.DeployEvent) {
+			e.Steps[6] = proto.DeployStep{Name: proto.StepRestart, Service: "backend", Status: proto.StepOK}
+		}, wantErr: true},
+		{
+			name: "más de un build",
+			mutate: func(e *proto.DeployEvent) {
+				e.Steps = append(e.Steps, proto.DeployStep{Name: proto.StepBuild, Status: proto.StepOK, Detail: ".venv/bin/pip install -r requirements.txt"})
+			},
+		},
+		{
+			name: "no pudo reiniciar",
+			mutate: func(e *proto.DeployEvent) {
+				e.Status, e.Code = proto.DeployRolledBack, proto.DeployRestartFailed
+			},
+		},
 		{name: "servicio en un paso fijo", mutate: func(e *proto.DeployEvent) { e.Steps[4].Service = "backend" }, wantErr: true},
 		{name: "servicio con espacio", mutate: func(e *proto.DeployEvent) { e.Steps[5].Service = "back end" }, wantErr: true},
 		{name: "estado de paso inventado", mutate: func(e *proto.DeployEvent) { e.Steps[0].Status = "maso" }, wantErr: true},
