@@ -567,8 +567,16 @@ y valida el archivo de Compose. Se puede correr solo cuando haga falta:
 sudo runuser -u statussv -g statussv -G docker -- /usr/local/bin/statussv-agent deploy-check <PROYECTO>
 ```
 
+Docker y el plugin de Compose hacen falta solo si hay proyectos de Docker declarados. Si hay algún
+proyecto de systemd, el instalador deja además el **ayudante de deploy**
+([ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md)): `statussv-unit-helper.socket`, por donde
+el agent le pide a un proceso root que corra los pasos declarados de esos proyectos y reinicie sus
+unidades. Sin proyectos de systemd, lo saca. En un servidor sin Docker, `deploy-check` se corre sin
+`-G docker`.
+
 Después de declarar un proyecto nuevo, correr el instalador otra vez (sin flags, o con
-`--enable-deploy`) para sumar su `workdir`. Para apagarlo:
+`--enable-deploy`) para sumar su `workdir` y, si es el primero de systemd, el ayudante. Para
+apagarlo, y sacar el ayudante:
 
 ```bash
 sudo ./install-agent.sh --disable-deploy /usr/local/bin/statussv-agent
