@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JuanBaez77/status-sv/agent/internal/compose"
 	"github.com/JuanBaez77/status-sv/agent/internal/gitops"
 	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
@@ -27,8 +26,8 @@ type run struct {
 	// commit es el pedido; vacío es la punta de la rama.
 	commit string
 
-	git     gitRepo
-	project composeProject
+	git gitRepo
+	rt  runtime
 	// target es a dónde va un rollback manual.
 	target *GoodState
 
@@ -81,10 +80,7 @@ func (r *run) deploySteps(ctx context.Context) error {
 		return err
 	}
 	if err := r.step(ctx, proto.StepBuild, "", func(ctx context.Context, tail *runner.Tail) (string, error) {
-		if err := r.project.Build(ctx, tail); err != nil {
-			return "", stepFailure(err, proto.DeployBuildFailed, "docker compose build falló")
-		}
-		return "", nil
+		return "", r.rt.Build(ctx, tail)
 	}); err != nil {
 		return err
 	}
@@ -121,10 +117,7 @@ func (r *run) rollbackSteps(ctx context.Context) error {
 	}
 	r.skip(proto.StepBuild, "un rollback no compila: usa las imágenes guardadas")
 	if err := r.step(ctx, proto.StepUp, "", func(ctx context.Context, tail *runner.Tail) (string, error) {
-		if err := r.project.Restore(ctx, r.e.api, r.target.Images); err != nil {
-			if errors.Is(err, compose.ErrMissingImage) {
-				return "", deployError(proto.DeployMissingImage, "%v", err)
-			}
+		if err := r.rt.Restore(ctx, r.target.Images); err != nil {
 			return "", err
 		}
 		return r.up(ctx, tail)
@@ -148,14 +141,8 @@ func (r *run) rollbackTarget(ctx context.Context, tail *runner.Tail) (string, er
 	if !r.git.HasCommit(ctx, target.Commit) {
 		return "", deployError(proto.DeployNoPrevious, "el commit anterior %s ya no está en el repositorio", short(target.Commit))
 	}
-	for _, img := range target.Images {
-		ok, err := r.e.api.ImageExists(ctx, img.ID)
-		if err != nil {
-			return "", err
-		}
-		if !ok {
-			return "", deployError(proto.DeployMissingImage, "la imagen anterior de %s ya no existe en el servidor", img.Service)
-		}
+	if err := r.rt.CanRestore(ctx, target.Images); err != nil {
+		return "", err
 	}
 	r.target = &target
 	r.update(func(j *journal) { j.Event.Commit = target.Commit })
@@ -169,7 +156,7 @@ func (r *run) preflight(ctx context.Context, _ *runner.Tail) (string, error) {
 	if r.git, err = r.e.tools.Git(p, r.e.keyFor(p.Name)); err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
 	}
-	if r.project, err = r.e.tools.Compose(p); err != nil {
+	if r.rt, err = r.e.runtimeFor(p); err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
 	}
 	if _, err := r.git.Head(ctx); err != nil {
@@ -184,15 +171,7 @@ func (r *run) preflight(ctx context.Context, _ *runner.Tail) (string, error) {
 		}
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
 	}
-	version, err := r.project.Version(ctx)
-	if err != nil {
-		return "", deployError(proto.DeployPreflightFailed, "%v", err)
-	}
-	validate := runner.NewTail(proto.MaxStepOutputLines, proto.MaxStepOutputLineLen)
-	if err := r.project.Validate(ctx, validate); err != nil {
-		return "", deployError(proto.DeployPreflightFailed, "el archivo de Compose no es válido: %s", lastLine(validate, err))
-	}
-	return "compose " + version, nil
+	return r.rt.Preflight(ctx)
 }
 
 // fetch trae la rama declarada y resuelve el commit que se despliega.
@@ -225,11 +204,11 @@ func (r *run) snapshot(ctx context.Context, _ *runner.Tail) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	images, err := r.project.Snapshot(ctx, r.e.api)
+	images, err := r.rt.Snapshot(ctx)
 	if err != nil {
 		return "", fmt.Errorf("anotar las imágenes: %w", err)
 	}
-	if err := r.project.Retain(ctx, r.e.api, head, images); err != nil {
+	if err := r.rt.Retain(ctx, head, images); err != nil {
 		return "", err
 	}
 	r.update(func(j *journal) {
@@ -261,16 +240,13 @@ func (r *run) up(ctx context.Context, tail *runner.Tail) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := r.project.Up(ctx, tail); err != nil {
-		return "", stepFailure(err, proto.DeployUpFailed, "docker compose up falló")
-	}
-	return "", nil
+	return "", r.rt.Up(ctx, tail)
 }
 
 // declared corre un paso declarado.
 func (r *run) declared(s projectspec.Step) stepFunc {
 	return func(ctx context.Context, tail *runner.Tail) (string, error) {
-		if err := r.project.Run(ctx, s, tail); err != nil {
+		if err := r.rt.Run(ctx, s, tail); err != nil {
 			return "", stepFailure(err, proto.DeployStepFailed, strings.Join(s.Command, " ")+" falló")
 		}
 		return strings.Join(s.Command, " "), nil
@@ -316,9 +292,9 @@ func (r *run) waitHealthy(ctx context.Context, tail *runner.Tail, window time.Du
 
 // healthy mira una vez los contenedores y el healthcheck HTTP.
 func (r *run) healthy(ctx context.Context, hc *proto.HealthcheckSpec) (bool, string, error) {
-	status, err := r.project.Check(ctx, r.e.api)
+	status, err := r.rt.Check(ctx)
 	if err != nil {
-		return false, "", fmt.Errorf("mirar los contenedores: %w", err)
+		return false, "", err
 	}
 	if !status.Ready {
 		return false, status.Detail, nil
@@ -338,7 +314,7 @@ func (r *run) succeed() {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.e.root), time.Minute)
 	defer cancel()
 
-	images, err := r.project.Snapshot(ctx, r.e.api)
+	images, err := r.rt.Snapshot(ctx)
 	if err != nil {
 		r.e.log.Warn("no se pudieron anotar las imágenes del deploy bueno", "deploy", r.j.Event.DeployID, "error", err)
 	} else {
@@ -346,7 +322,7 @@ func (r *run) succeed() {
 		st, err := r.e.store.pushState(r.j.Project.Name, current, r.j.Before)
 		if err != nil {
 			r.e.log.Warn("no se pudo anotar el estado bueno", "deploy", r.j.Event.DeployID, "error", err)
-		} else if err := r.project.Prune(ctx, r.e.api, st.commits()); err != nil {
+		} else if err := r.rt.Prune(ctx, st.commits()); err != nil {
 			r.e.log.Warn("no se pudieron quitar etiquetas de rollback viejas", "deploy", r.j.Event.DeployID, "error", err)
 		}
 	}
@@ -394,7 +370,7 @@ func (r *run) interrupted() {
 	if r.j.Touched {
 		var err error
 		if r.git, err = r.e.tools.Git(r.j.Project, r.e.keyFor(r.j.Project.Name)); err == nil {
-			r.project, err = r.e.tools.Compose(r.j.Project)
+			r.rt, err = r.e.runtimeFor(r.j.Project)
 		}
 		if err == nil {
 			err = r.restore(message)
@@ -420,7 +396,7 @@ func (r *run) restore(reason string) error {
 
 	return r.step(ctx, proto.StepRollback, "", func(ctx context.Context, tail *runner.Tail) (string, error) {
 		tail.Add("volviendo a " + short(before.Commit) + ": " + reason)
-		if err := r.project.Restore(ctx, r.e.api, before.Images); err != nil {
+		if err := r.rt.Restore(ctx, before.Images); err != nil {
 			return "", err
 		}
 		if err := r.git.Checkout(ctx, r.j.Project.Branch, before.Commit, tail); err != nil {
@@ -429,7 +405,7 @@ func (r *run) restore(reason string) error {
 		if !r.j.UpStarted {
 			return "el código y las imágenes volvieron; los contenedores no se habían tocado", nil
 		}
-		if err := r.project.Up(ctx, tail); err != nil {
+		if err := r.rt.Up(ctx, tail); err != nil {
 			return "", fmt.Errorf("levantar lo anterior: %w", err)
 		}
 		// Una verificación corta, solo de los contenedores: si lo anterior
