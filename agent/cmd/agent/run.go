@@ -19,6 +19,8 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
+	"github.com/JuanBaez77/status-sv/agent/internal/systemd"
+	"github.com/JuanBaez77/status-sv/agent/internal/unithelper"
 	"github.com/JuanBaez77/status-sv/agent/internal/ws"
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
 )
@@ -70,7 +72,8 @@ func runAgent(ctx context.Context, args []string) error {
 		client.SetRuntime(outbox)
 		parts := newRuntimeParts(cfg, log)
 		// Los comandos solo operan sobre lo que el agent vio en su última foto.
-		executor := commands.NewExecutor(parts.dockerClient, journal.NewReader(), parts.assembler.Knows, log)
+		journalReader := journal.NewReader()
+		executor := commands.NewExecutor(parts.dockerClient, journalReader, parts.assembler.Knows, log)
 		client.SetCommands(executor)
 
 		// El motor de deploy (ADR-015). Viene apagado: lo prende una persona
@@ -81,6 +84,16 @@ func runAgent(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		// Los proyectos de systemd se despliegan con el ayudante root, que
+		// corre sus pasos y reinicia sus unidades (ADR-019). Si no está
+		// instalado, el chequeo previo de cada deploy lo dice.
+		units := systemd.NewUnitReader()
+		defer units.Close()
+		engine.SetSystemd(deploy.Systemd{
+			Helper:  unithelper.NewClient(cfg.UnitHelperSocket),
+			Units:   units,
+			Journal: journalReader,
+		})
 		executor.SetDeployer(engine)
 		client.SetDeploys(deploys)
 		wg.Go(engine.Recover)
