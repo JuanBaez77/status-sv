@@ -129,6 +129,11 @@ func (s *systemdRuntime) RebuildsOnRollback() bool { return true }
 
 func (s *systemdRuntime) StartStep() proto.StepName { return proto.StepRestart }
 
+// StartLabel son las unidades que se reinician.
+func (s *systemdRuntime) StartLabel() string {
+	return strings.Join(s.spec.Project.Units, ", ")
+}
+
 func (s *systemdRuntime) Untouched() string {
 	return "el código volvió y se preparó de nuevo; el servicio no se había reiniciado"
 }
@@ -199,8 +204,7 @@ func (s *systemdRuntime) Up(ctx context.Context, tail *runner.Tail) error {
 	clear(s.seen)
 	s.mu.Unlock()
 
-	units := strings.Join(s.spec.Project.Units, ", ")
-	tail.Add("reiniciando " + units)
+	tail.Add("reiniciando " + s.StartLabel())
 	err := s.deps.Helper.RestartUnits(ctx, s.spec.Project.Name)
 	var helperErr *unithelper.Error
 	switch {

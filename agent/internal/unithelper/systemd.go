@@ -120,6 +120,11 @@ func (s *Systemd) Stop(ctx context.Context, unit string) error {
 
 // Restart reinicia una unidad y espera a que el trabajo termine.
 func (s *Systemd) Restart(ctx context.Context, unit string) error {
+	// Un servicio que se cae en bucle termina en "failed" por el límite de
+	// arranques de systemd, y así no se deja reiniciar. Es justo el caso de
+	// volver atrás un deploy roto: se le suelta la falla antes de reiniciarlo.
+	_ = s.conn.ResetFailedUnitContext(ctx, unit)
+
 	done := make(chan string, 1)
 	if _, err := s.conn.RestartUnitContext(ctx, unit, "replace", done); err != nil {
 		return fmt.Errorf("reiniciar %s: %w", unit, err)

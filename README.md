@@ -139,6 +139,24 @@ sobreviva a un reinicio del control plane.
 Se limpia sola al terminar, incluso si falla, y en ese caso imprime los registros del control
 plane y del agent. Es el mismo script que corre el CI.
 
+### Deploy de punta a punta
+
+Dos pruebas piden deploys por la API, como los pide el panel, y miran que el sitio de muestra quede
+como tiene que quedar: un deploy bueno, uno roto que vuelve atrás solo, un rollback manual y el
+agent reiniciado en medio de un deploy.
+
+```bash
+# Proyecto Docker Compose, con el Docker de la máquina.
+DATABASE_URL='postgres://...' ./deploy/e2e/deploy.sh
+
+# Proyecto de systemd (ADR-019). Instala el agent de verdad con install-agent.sh, con el ayudante
+# root: va como root y en una máquina descartable con systemd (el runner del CI, una VM).
+sudo DATABASE_URL='postgres://...' SERVER_BIN=bin/server AGENT_BIN=bin/agent ./deploy/e2e/deploy-systemd.sh
+```
+
+La de systemd se niega a correr si la máquina ya tiene un agent instalado, y al terminar saca todo
+lo que puso: el agent, el ayudante, los usuarios y las unidades de prueba.
+
 ### Prueba de carga
 
 Diez agents simulados más uno de verdad contra el control plane, para las metas de rendimiento de

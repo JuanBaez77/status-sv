@@ -42,6 +42,8 @@ type runtime interface {
 	Run(ctx context.Context, phase string, index int, step projectspec.Step, tail *runner.Tail) error
 	// StartStep es el nombre del paso que pone a correr lo preparado.
 	StartStep() proto.StepName
+	// StartLabel es lo que se muestra de ese paso: qué se pone a correr.
+	StartLabel() string
 	// Up pone a correr lo que quedó preparado.
 	Up(ctx context.Context, tail *runner.Tail) error
 	// Check mira una vez si lo que corre está bien.
@@ -122,6 +124,8 @@ func (d dockerRuntime) Run(ctx context.Context, _ string, _ int, step projectspe
 }
 
 func (d dockerRuntime) StartStep() proto.StepName { return proto.StepUp }
+
+func (d dockerRuntime) StartLabel() string { return "" }
 
 func (d dockerRuntime) Up(ctx context.Context, tail *runner.Tail) error {
 	if err := d.project.Up(ctx, tail); err != nil {

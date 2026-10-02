@@ -185,6 +185,47 @@ jobs:
           DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_deploy?sslmode=disable
         run: ./deploy/e2e/deploy.sh
 
+  deploy-systemd:
+    name: "Deploy de systemd de punta a punta: ayudante root, roto, rollback y agent reiniciado"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: statussv
+          POSTGRES_PASSWORD: statussv
+          POSTGRES_DB: statussv_deploy_systemd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U statussv -d statussv_deploy_systemd"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Binarios del control plane y del agent
+        run: CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/bin/" ./server/cmd/server ./agent/cmd/agent
+
+      # El agent instalado de verdad con install-agent.sh bajo el systemd del
+      # runner, con su unidad endurecida y el ayudante root, desplegando por la
+      # API un servicio de systemd de muestra (ADR-019). Los pasos del proyecto
+      # corren con su usuario, en unidades transitorias.
+      - name: Deploy de systemd de punta a punta
+        env:
+          DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_deploy_systemd?sslmode=disable
+        run: >-
+          sudo DATABASE_URL="${DATABASE_URL}"
+          SERVER_BIN="${RUNNER_TEMP}/bin/server" AGENT_BIN="${RUNNER_TEMP}/bin/agent"
+          bash ./deploy/e2e/deploy-systemd.sh
+
   laboratorio:
     name: "Laboratorio: la unidad del agent con el drop-in de deploy"
     runs-on: ubuntu-latest

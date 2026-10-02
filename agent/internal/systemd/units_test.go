@@ -84,6 +84,45 @@ func TestUnitReaderReconnects(t *testing.T) {
 	}
 }
 
+// La conexión se usa de un deploy al siguiente: no puede morir con el
+// contexto del pedido que la abrió. Y si igual se cortó entre un pedido y el
+// siguiente, el lector abre otra y contesta, en vez de devolver el error.
+//
+// Lo encontró la prueba de punta a punta: el segundo deploy fallaba al mirar
+// las unidades, con "connection closed by user".
+func TestUnitReaderOutlivesTheRequestThatOpenedIt(t *testing.T) {
+	values := map[string]any{"ActiveState": "active", "SubState": "running", "MainPID": uint32(7), "NRestarts": uint32(0)}
+	first := &fakeProps{values: values}
+	second := &fakeProps{values: values}
+	conns := []*fakeProps{first, second}
+	var dialed []context.Context
+	reader := &UnitReader{dial: func(ctx context.Context) (unitProps, error) {
+		dialed = append(dialed, ctx)
+		next := conns[0]
+		conns = conns[1:]
+		return next, nil
+	}}
+
+	request, cancel := context.WithCancel(t.Context())
+	if _, err := reader.UnitState(request, "x.service"); err != nil {
+		t.Fatalf("UnitState: %v", err)
+	}
+	cancel()
+	if dialed[0].Err() != nil {
+		t.Fatal("la conexión se abrió con el contexto del pedido: se cierra cuando el pedido termina")
+	}
+
+	// La conexión se cortó mientras nadie la usaba.
+	first.err = errors.New("dbus: connection closed by user")
+	state, err := reader.UnitState(t.Context(), "x.service")
+	if err != nil || state.MainPID != 7 {
+		t.Fatalf("con la conexión cortada: %+v, %v", state, err)
+	}
+	if !first.closed || len(dialed) != 2 {
+		t.Errorf("no abrió una conexión nueva: cerrada %v, %d conexiones", first.closed, len(dialed))
+	}
+}
+
 func TestUnitReaderWithoutBus(t *testing.T) {
 	reader := &UnitReader{dial: func(context.Context) (unitProps, error) {
 		return nil, errors.New("no hay bus")

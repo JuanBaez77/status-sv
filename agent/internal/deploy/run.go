@@ -87,7 +87,7 @@ func (r *run) deploySteps(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := r.step(ctx, r.rt.StartStep(), "", r.up); err != nil {
+	if err := r.labeled(ctx, r.rt.StartStep(), "", r.rt.StartLabel(), r.up); err != nil {
 		return err
 	}
 	if err := r.step(ctx, proto.StepHealthcheck, "", r.verify); err != nil {
@@ -136,7 +136,7 @@ func (r *run) rollbackSteps(ctx context.Context) error {
 	} else {
 		r.skip(proto.StepBuild, "un rollback no compila: usa las imágenes guardadas")
 	}
-	if err := r.step(ctx, r.rt.StartStep(), "", func(ctx context.Context, tail *runner.Tail) (string, error) {
+	if err := r.labeled(ctx, r.rt.StartStep(), "", r.rt.StartLabel(), func(ctx context.Context, tail *runner.Tail) (string, error) {
 		if err := r.rt.Restore(ctx, r.target.Images); err != nil {
 			return "", err
 		}
@@ -264,7 +264,7 @@ func (r *run) up(ctx context.Context, tail *runner.Tail) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "", r.rt.Up(ctx, tail)
+	return r.rt.StartLabel(), r.rt.Up(ctx, tail)
 }
 
 // Las listas de pasos declarados del project.yaml.
