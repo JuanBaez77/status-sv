@@ -1,0 +1,26 @@
+# Socket del ayudante de deploy de status-sv (ADR-019).
+#
+# Lo instala deploy/install-agent.sh con --enable-deploy; sin eso no existe en
+# el servidor. Por acá el agent, que corre sin privilegios, le pide al ayudante
+# que corra un paso declarado de un proyecto systemd o que reinicie sus
+# unidades. Cada conexión arranca un statussv-unit-helper@.service, que atiende
+# un pedido y termina: no hay un proceso root esperando.
+
+[Unit]
+Description=Ayudante de deploy de status-sv (socket)
+Documentation=https://github.com/JuanBaez77/status-sv/blob/main/docs/adr/ADR-019-deploy-de-proyectos-systemd.md
+
+[Socket]
+ListenStream=/run/status-sv/unit-helper.sock
+# Solo root y el grupo del agent llegan al socket. El ayudante verifica además,
+# con las credenciales de la conexión, que quien pide sea el agent.
+SocketUser=root
+SocketGroup=statussv
+SocketMode=0660
+DirectoryMode=0755
+Accept=yes
+# Un deploy es un pedido por vez; el resto es margen.
+MaxConnections=8
+
+[Install]
+WantedBy=sockets.target

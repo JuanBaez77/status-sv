@@ -9,6 +9,7 @@
 //	agent runtime                    imprime la foto de contenedores, servicios y procesos
 //	agent deploy-check PROYECTO      revisa que un proyecto se pueda desplegar
 //	agent deploy-paths               lista los workdirs que el deploy tiene que poder escribir
+//	agent unit-helper                atiende un pedido del agent como root (lo arranca systemd)
 //	agent version                    imprime la versión
 package main
 
@@ -59,6 +60,8 @@ func run(ctx context.Context, args []string) error {
 		return runDeployCheck(ctx, args[1:])
 	case "deploy-paths":
 		return runDeployPaths(ctx, args[1:])
+	case "unit-helper":
+		return runUnitHelper(ctx, args[1:])
 	case "version", "--version", "-version":
 		fmt.Println(buildinfo.Line(name))
 		return nil
@@ -85,6 +88,8 @@ Uso:
                                     pueda desplegar (correrlo como el usuario del agent)
   agent deploy-paths                lista los proyectos de Docker y su workdir, para el
                                     drop-in del deploy
+  agent unit-helper                 atiende un pedido del agent como root; no se corre a
+                                    mano: lo arranca systemd desde su socket (ADR-019)
   agent version                     imprime la versión
 
 Configuración (variables de entorno):

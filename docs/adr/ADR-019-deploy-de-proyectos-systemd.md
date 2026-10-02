@@ -1,8 +1,7 @@
 # ADR-019: Deploy de proyectos systemd, con un ayudante root de operaciones fijas
 
-- **Estado:** aceptada, salvo el punto 3. El plan que aprobó Juan decía "una regla de polkit"; acá
-  es un ayudante root, por lo que cuenta el Contexto. Ese punto espera su visto bueno y el
-  laboratorio del Sprint 5.
+- **Estado:** aceptada. El plan que aprobó Juan decía "una regla de polkit"; por lo que cuenta el
+  Contexto, pasó a ser un ayudante root, que Juan aceptó el mismo día.
 - **Fecha:** 2026-10-02
 
 ## Contexto
@@ -89,16 +88,26 @@ existe en el servidor.
 | `stop_step` | los mismos | Para esa unidad (tiempo agotado o deploy cortado) |
 | `restart_units` | proyecto | Reinicia las unidades declaradas del proyecto |
 
+Al construirlo se sumó una cuarta, que no cambia nada: `check` (proyecto) dice si el proyecto se
+puede desplegar, mirando lo que solo root ve: que el usuario de `run_as` exista, que el archivo de
+`env_file` exista y que systemd conozca las unidades. La usa el chequeo previo del deploy.
+
 - **El agent no nombra unidades ni comandos: nombra un proyecto y un número de paso.** El ayudante
   lee él mismo el `project.yaml` de `/etc/status-sv/projects.d`, con el mismo parser estricto, y de
   ahí saca el comando, el usuario y las unidades. Un agent comprometido puede pedir que corra un
   paso declarado o que se reinicie un servicio declarado, y nada más.
+- **El ayudante solo usa un archivo que sea de root** y que ni el grupo ni otros puedan escribir,
+  igual que su directorio. Si por un error de permisos el agent pudiera escribirlo, podría
+  declararse sus propios pasos: en ese caso el ayudante no hace nada.
 - El socket es `root:statussv 0660`, y el ayudante verifica además que quien se conecta sea el
   usuario del agent (credenciales del socket).
 - Si la conexión se corta mientras corre un paso, el ayudante para la unidad: un paso no queda
   corriendo sin un deploy que lo espere.
+- No hay un proceso root esperando: el socket arranca una instancia del ayudante por conexión, que
+  atiende un pedido y termina.
 - El ayudante corre sin capacidades, sin red, con el sistema de archivos en solo lectura y sin
-  estado propio. Habla con systemd por el bus, que a root lo deja pasar.
+  estado propio. Habla con systemd por su socket privado, el que usa `systemctl` como root: no
+  pasa por el bus del sistema ni por polkit.
 - Como lee la declaración en cada pedido, no hay archivos generados que puedan quedar viejos:
   cambiar el `project.yaml` no obliga a correr el instalador de nuevo.
 
@@ -191,6 +200,35 @@ hasta 120 s, junto con el healthcheck HTTP declarado.
 - Un servicio que hoy corre como root no se puede declarar hasta darle un usuario propio.
 - Reiniciar no es recargar: un `restart` de gunicorn corta los pedidos en curso. El `reload`
   queda en "más adelante".
+
+## Verificación
+
+Probado el 2026-10-02 con systemd 255 (`deploy/laboratorio/systemd.sh`, en el job `laboratorio` del
+CI): el ayudante de verdad, con sus unidades tal cual se instalan, y una sonda que le habla como
+`statussv` desde adentro de la unidad endurecida del agent.
+
+| Comprobación | Resultado |
+| --- | --- |
+| El agent reinicia una unidad o arranca una transitoria, directo | rechazado, como tiene que ser |
+| Un usuario fuera del grupo `statussv` se conecta al socket | no puede |
+| Un usuario del grupo que no es el agent pide un reinicio | `forbidden` |
+| Un `project.yaml` que el grupo puede escribir | el ayudante no lo usa (`not_declared`) |
+| `check` de un proyecto listo, y de uno cuyo usuario no existe | bien, y `not_ready` |
+| `run_step`: usuario del proyecto, `workdir`, argumentos sin partir, archivo de entorno | funcionan |
+| El paso corre en su propio cgroup | `/system.slice/statussv-step-…` |
+| El paso lee la credencial del agent o las deploy keys, o escribe en `/etc` | no puede |
+| El agent lee el archivo de entorno del proyecto | no puede |
+| El agent lee la salida del paso con `journalctl`, por el nombre de la unidad | funciona |
+| Un paso que sale con código 3, y el mismo pedido repetido | `step_failed` con el código, las dos veces |
+| Un paso con 3 s de tiempo máximo | `timeout` a los 3 s |
+| Se cierra la conexión en medio de un paso | el paso se para |
+| `restart_units` | la unidad declarada cambia de proceso; la que no es del proyecto, no |
+| Proyecto sin declarar o de Docker, paso o fase que no existen | rechazados |
+| Un pedido que trae un comando, una unidad o que no es JSON | `invalid_request`, sin tocar systemd |
+| El ayudante, sin capacidades ni red, habla con systemd por su socket privado | funciona |
+
+Lo que no se probó: Ubuntu 22.04. El laboratorio corre en el runner del CI y en WSL, los dos con
+Ubuntu 24.04; el ayudante no usa polkit ni el bus del sistema, que es lo que cambia entre las dos.
 
 ## Alternativas consideradas
 

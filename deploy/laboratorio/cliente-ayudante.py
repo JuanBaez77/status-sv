@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Cliente del ayudante para el laboratorio de systemd (ADR-019).
 
-Manda un pedido (un renglón) por el socket unix y muestra la respuesta. Con
+Manda un pedido (un renglón de JSON) por el socket unix y muestra la respuesta. Con
 --cortar N cierra la conexión a los N segundos sin esperar la respuesta, que es
 lo que pasa si el agent muere en medio de un paso.
 
-    cliente-ayudante.py /run/status-sv/unit-helper.sock "restart_units lab"
+    cliente-ayudante.py /run/status-sv/unit-helper.sock '{"op":"restart_units","project":"lab"}'
 """
 
 import socket
@@ -53,7 +53,7 @@ def main() -> int:
         s.close()
     respuesta = datos.decode(errors="replace").strip()
     print(respuesta)
-    return 0 if respuesta.startswith("ok") else 1
+    return 0 if '"ok":true' in respuesta else 1
 
 
 if __name__ == "__main__":

@@ -87,17 +87,19 @@ Un proyecto systemd no tiene contenedor: instalar dependencias o migrar es ejecu
 repositorio en el servidor, y reiniciar su servicio necesita root. El agent no hace ninguna de las
 dos cosas: se las pide a un ayudante root con operaciones fijas
 ([ADR-019](../../docs/adr/ADR-019-deploy-de-proyectos-systemd.md)). Este laboratorio prueba ese
-reparto antes de programarlo. Necesita systemd y `python3`; no necesita Docker.
+reparto con el ayudante de verdad. Necesita systemd, `python3` y el binario del agent para Linux;
+no necesita Docker.
 
 ```bash
-sudo ./systemd.sh   # prepara, corre la sonda y limpia al salir
+sudo AGENT_BIN=/tmp/statussv-agent ./systemd.sh   # prepara, corre la sonda y limpia al salir
 ```
 
 Arma un proyecto con su usuario (`labapp`), un servicio (`lab-gunicorn.service`), otro que no es
-suyo (`lab-otra.service`) y un archivo de entorno que solo lee root. El ayudante de verdad todavía
-no existe: lo reemplaza `ayudante-falso.sh`, con el socket (`root:statussv 0660`) y el
-endurecimiento que va a tener (root sin capacidades, sin red, sistema de archivos en solo lectura).
-Lo que corre sale de un archivo de root, no del pedido.
+suyo (`lab-otra.service`) y un archivo de entorno que solo lee root, y lo declara en
+`/etc/status-sv/projects.d` como lo haría una persona. Instala el ayudante
+(`statussv-agent unit-helper`) con sus unidades de [`../systemd/`](../systemd/) tal cual: el socket
+`root:statussv 0660` y el servicio sin capacidades, sin red y con el sistema de archivos en solo
+lectura. Lo que corre sale del `project.yaml`, no del pedido.
 
 `sonda-systemd.sh` corre adentro de la unidad real del agent y comprueba:
 
@@ -112,14 +114,18 @@ Lo que corre sale de un archivo de root, no del pedido.
 | Un paso que falla informa su código; uno que se pasa de tiempo se corta | El resultado del paso |
 | Si la conexión se cierra, el paso se para | Un paso no queda corriendo sin un deploy que lo espere |
 | `restart_units`: la unidad declarada cambia de proceso y la otra no | El reinicio |
-| Proyecto, paso, fase u operación que no existen; parámetros de más | **Tienen que rechazarse** |
+| `check`: un proyecto listo, y uno cuyo usuario no existe | El chequeo previo del deploy |
+| Proyecto sin declarar o de Docker; paso, fase u operación que no existen | **Tienen que rechazarse** |
+| Un pedido que trae un comando o una unidad, o que no es JSON | **Tiene que rechazarse** sin tocar systemd |
 
-Afuera de la unidad comprueba que otro usuario del servidor no llega al socket.
+Afuera de la unidad comprueba que un usuario que no es del grupo no llega al socket, que uno del
+grupo que no es el agent recibe `forbidden`, y que el ayudante no usa un `project.yaml` que el grupo
+puede escribir.
 
 Al final **mide, sin comprobar**, la alternativa descartada: una regla de polkit que nombra la
 unidad y el verbo. Con polkit 124 funciona (permite esa unidad y rechaza otra y las transitorias);
 Ubuntu 22.04 trae polkit 0.105, que no entiende esas reglas.
 
-Resultado del 2026-10-02 (systemd 255, polkit 124): las 25 comprobaciones de la sonda y la del socket dan lo esperado. El pico
-de memoria de la unidad del agent durante la sonda fue de 7,5 MiB: los pasos no cuentan en su
-cgroup.
+Resultado del 2026-10-02 (systemd 255, polkit 124): las 34 comprobaciones de la sonda y las 3 de
+afuera dan lo esperado. Los pasos corren en su propio cgroup, así que no cuentan contra la memoria
+del agent.
