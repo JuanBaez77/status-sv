@@ -59,6 +59,15 @@ roadmap de [DISENO.md](DISENO.md).
 
 ## Lo que deja afuera el deploy del Sprint 4
 
+- **El deploy roto a propósito en un servidor real.** Era parte del cierre del Sprint 4 y se
+  pospuso: la vuelta atrás sola se prueba en cada PR del CI, pero no se ensayó en producción. Con
+  un repo de prueba declarado como `staging` en `sv-gcg`: un deploy bueno, un commit que rompa el
+  healthcheck, y mirar que vuelva solo y que el sitio siga respondiendo. **Antes** de prender el
+  deploy en un proyecto que importe.
+- **Un interruptor de deploy por proyecto.** Hoy se prende por servidor, y todos los proyectos
+  declarados figuran como desplegables en el panel aunque no tengan llave ni permisos. Fallan en
+  el chequeo previo sin tocar nada, pero el panel no lo anticipa.
+
 - **Registros privados de imágenes.** El agent no tiene credenciales de ningún registro: los
   proyectos compilan en el servidor y bajan imágenes públicas (ver
   [adr/ADR-015-motor-de-deploy-docker.md](adr/ADR-015-motor-de-deploy-docker.md)).
