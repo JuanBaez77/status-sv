@@ -570,7 +570,11 @@ sudo ./install-agent.sh --disable-deploy /usr/local/bin/statussv-agent
 
 **Cómo se despliega:** desde la vista del proyecto en el panel. Hay que escribir el nombre del
 proyecto y, en producción, un código nuevo de la app de autenticación
-([ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md)). Todo queda en `audit_log`:
+([ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md)). Todo queda en la auditoría, que se
+lee en el panel: la sección **Auditoría**, o el enlace "auditoría de este proyecto" debajo de la
+historia de deploys, que la abre ya filtrada. Ahí están también los logins, el segundo factor, el
+enrolamiento de agents y los subcomandos del servidor. Si el panel no anda, la misma tabla se lee
+por SQL:
 
 ```bash
 cd /opt/status-sv/deploy

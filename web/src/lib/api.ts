@@ -484,3 +484,28 @@ export const deploys = {
   rollback: (projectID: string, req: DeployRequest) =>
     api.post<DeployDetail>(`/v1/projects/${encodeURIComponent(projectID)}/rollback`, req),
 }
+
+/** AuditEntry es un renglón de la auditoría: quién hizo qué, sobre qué y cómo salió (ADR-020). */
+export type AuditEntry = {
+  id: string
+  at: string
+  actor: string
+  actor_type: 'user' | 'llm' | 'agent' | 'system'
+  action: string
+  target_type: string
+  target_id: string
+  result: string
+  ip?: string
+  detail?: Record<string, unknown>
+}
+
+export type AuditPage = {
+  entries: AuditEntry[]
+  /** next_cursor falta cuando no hay más renglones. */
+  next_cursor?: string
+}
+
+export const audit = {
+  /** list trae una página; query son los parámetros ya armados (lib/audit). */
+  list: (query: string) => api.get<AuditPage>(query === '' ? '/v1/audit' : `/v1/audit?${query}`),
+}
