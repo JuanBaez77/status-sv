@@ -142,8 +142,9 @@ plane y del agent. Es el mismo script que corre el CI.
 ### Deploy de punta a punta
 
 Dos pruebas piden deploys por la API, como los pide el panel, y miran que el sitio de muestra quede
-como tiene que quedar: un deploy bueno, uno roto que vuelve atrás solo, un rollback manual y el
-agent reiniciado en medio de un deploy.
+como tiene que quedar: un deploy bueno, uno roto que vuelve atrás solo, un rollback manual, el
+agent reiniciado en medio de un deploy y el primer deploy de un proyecto que todavía no corría
+(uno que no queda bien y baja lo que levantó, y uno que queda).
 
 ```bash
 # Proyecto Docker Compose, con el Docker de la máquina.

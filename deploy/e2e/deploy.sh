@@ -293,24 +293,35 @@ SESION="$(curl -sS -D - -o /dev/null -H 'Content-Type: application/json' \
   --data "{\"username\":\"${USUARIO}\",\"password\":\"${CLAVE}\"}" "${URL}/v1/auth/login" | cookie_de)"
 [ -n "${SESION}" ] || falla "el login no devolvió la cookie"
 SECRETO="$(curl -sS -X POST -H "Cookie: ${SESION}" "${URL}/v1/auth/totp/enroll" | jq -r .secret)"
-CODIGO="$(totp_code "${SECRETO}" $(($(date +%s) / 30)))"
+PASO_USADO=$(($(date +%s) / 30))
+CODIGO="$(totp_code "${SECRETO}" "${PASO_USADO}")"
 SESION="$(curl -sS -D - -o /dev/null -H "Cookie: ${SESION}" -H 'Content-Type: application/json' \
   --data "{\"code\":\"${CODIGO}\"}" "${URL}/v1/auth/totp/confirm" | cookie_de)"
 [ -n "${SESION}" ] || falla "el alta del segundo factor no devolvió la sesión completa"
 verde "ok: sesión completa"
 
+# codigo_nuevo deja en CODIGO un código que todavía no se usó: el control
+# plane no acepta el mismo dos veces, así que espera al paso de 30 s que
+# sigue, como haría una persona con la app.
+codigo_nuevo() {
+  while [ $(($(date +%s) / 30)) -le "${PASO_USADO}" ]; do sleep 1; done
+  PASO_USADO=$(($(date +%s) / 30))
+  CODIGO="$(totp_code "${SECRETO}" "${PASO_USADO}")"
+}
+
 api() { curl -sS -H "Cookie: ${SESION}" -H 'Content-Type: application/json' "$@"; }
 
-proyecto_id() { api "${URL}/v1/projects" | jq -r ".projects[] | select(.name == \"${PROYECTO}\") | .id"; }
-declarado() { [ -n "$(proyecto_id)" ]; }
+proyecto_id() { api "${URL}/v1/projects" | jq -r ".projects[] | select(.name == \"${1:-${PROYECTO}}\") | .id"; }
+declarado() { [ -n "$(proyecto_id "$@")" ]; }
 esperar "el agent declaró el proyecto" 60 declarado
 ID_PROYECTO="$(proyecto_id)"
 
-# pedir pide un deploy o un rollback y deja el cuerpo de la respuesta en
-# ${TRABAJO}/respuesta.json. Devuelve el código HTTP.
+# pedir pide un deploy, un rollback o un primer deploy y deja el cuerpo de la
+# respuesta en ${TRABAJO}/respuesta.json. Devuelve el código HTTP. El tercer
+# argumento es el proyecto; sin él, el de muestra.
 pedir() {
-  local tipo="$1" cuerpo="$2"
-  api -o "${TRABAJO}/respuesta.json" -w '%{http_code}' --data "${cuerpo}" "${URL}/v1/projects/${ID_PROYECTO}/${tipo}"
+  local tipo="$1" cuerpo="$2" proyecto="${3:-${ID_PROYECTO}}"
+  api -o "${TRABAJO}/respuesta.json" -w '%{http_code}' --data "${cuerpo}" "${URL}/v1/projects/${proyecto}/${tipo}"
 }
 
 estado() { api "${URL}/v1/deploys/$1" | jq -r .status; }
@@ -409,21 +420,107 @@ sirve v1 || falla "el sitio no sirve v1 después del reinicio"
 git -C "${WD}" rev-parse HEAD | grep -qx "${V1}" || falla "el workdir no volvió a v1"
 verde "ok: al arrancar volvió atrás el deploy cortado (${V4:0:8} no quedó)"
 
-# --- 5. Auditoría ---
+# --- 5. Primer deploy ---
 
-paso "5. auditoría"
+paso "5. primer deploy de un proyecto que todavía no corre"
+esperar "el agent declaró el proyecto nuevo" 60 declarado "${NUEVO}"
+ID_NUEVO="$(proyecto_id "${NUEVO}")"
+resumen() { jq -c '{kind,status,code,message}' <<<"$1"; }
+pasos() { jq -r '[.steps[] | .name + ":" + .status] | join(" ")' <<<"$1"; }
+sirve_nuevo() { [ "$(curl -fsS "http://${HEALTH_HOST}:${PUERTO_NUEVO}/version" 2>/dev/null)" = "$1" ]; }
+contenedores_nuevo() { docker ps -aq --filter "label=com.docker.compose.project=${NUEVO_COMPOSE}"; }
+
+# Un deploy común no alcanza: el workdir todavía no tiene el código.
+codigo="$(pedir deploys "{\"confirm\":\"${NUEVO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el pedido devolvió ${codigo}"
+SIN_CLONAR="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el deploy común del proyecto sin clonar" 60 termino "${SIN_CLONAR}"
+DETALLE="$(detalle "${SIN_CLONAR}")"
+[ "$(jq -r .code <<<"${DETALLE}")" = preflight_failed ] || falla "el deploy sin clonar terminó $(resumen "${DETALLE}")"
+jq -e '.message | test("primer deploy")' <<<"${DETALLE}" >/dev/null || falla "el mensaje no dice qué hacer: $(jq -r .message <<<"${DETALLE}")"
+[ ! -e "${WD_NUEVO}/.git" ] || falla "un deploy común inició el repositorio"
+verde "ok: un deploy común dice que lo que va es un primer deploy, sin tocar nada"
+
+# El primer deploy pide el código de la app siempre, también en staging.
+codigo="$(pedir bootstrap "{\"confirm\":\"${NUEVO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 403 ] || falla "el primer deploy sin código devolvió ${codigo} y no 403"
+jq -e '.error == "invalid_code"' "${TRABAJO}/respuesta.json" >/dev/null || falla "el primer deploy sin código no dijo invalid_code"
+verde "ok: sin un código nuevo de la app no se pide"
+
+# El primer intento no queda bien (n1 no tiene /health): baja lo que levantó.
+codigo_nuevo
+codigo="$(pedir bootstrap "{\"confirm\":\"${NUEVO}\",\"totp_code\":\"${CODIGO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el primer deploy devolvió ${codigo}: $(cat "${TRABAJO}/respuesta.json")"
+INTENTO="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el primer deploy que no queda bien" 300 termino "${INTENTO}"
+DETALLE="$(detalle "${INTENTO}")"
+[ "$(jq -r '.kind + " " + .status + " " + .code' <<<"${DETALLE}")" = "bootstrap rolled_back unhealthy" ] || falla "el primer intento terminó $(resumen "${DETALLE}")"
+[ "$(pasos "${DETALLE}")" = "preflight:ok fetch:ok checkout:ok build:ok up:ok healthcheck:failed rollback:ok" ] || falla "pasos: $(pasos "${DETALLE}")"
+[ "$(jq -r '.previous_commit // ""' <<<"${DETALLE}")" = "" ] || falla "un primer deploy no tiene commit anterior"
+[ -z "$(contenedores_nuevo)" ] || falla "quedaron contenedores después de bajar lo que levantó"
+git -C "${WD_NUEVO}" rev-parse HEAD | grep -qx "${N1}" || falla "el código clonado no quedó en el workdir"
+[ "$(cat "${WD_NUEVO}/.env")" = 'SALUDO=hola' ] || falla "el primer deploy pisó el .env del workdir"
+verde "ok: no quedó bien, bajó lo que levantó y dejó el código clonado y el .env como estaban"
+
+# Con una versión que anda, queda: el intento anterior no lo traba.
+N2="$(version_nuevo n2)"
+codigo_nuevo
+codigo="$(pedir bootstrap "{\"confirm\":\"${NUEVO}\",\"totp_code\":\"${CODIGO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el segundo primer deploy devolvió ${codigo}: $(cat "${TRABAJO}/respuesta.json")"
+PRIMERO="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el primer deploy" 180 termino "${PRIMERO}"
+DETALLE="$(detalle "${PRIMERO}")"
+[ "$(jq -r '.kind + " " + .status' <<<"${DETALLE}")" = "bootstrap succeeded" ] || falla "el primer deploy terminó $(resumen "${DETALLE}")"
+[ "$(jq -r .commit <<<"${DETALLE}")" = "${N2}" ] || falla "el primer deploy no es de la punta de la rama"
+[ "$(pasos "${DETALLE}")" = "preflight:ok fetch:ok checkout:ok build:ok up:ok healthcheck:ok" ] || falla "pasos: $(pasos "${DETALLE}")"
+jq -e '.steps[0].detail | test("intento anterior")' <<<"${DETALLE}" >/dev/null || falla "el chequeo previo no reconoció el clon del intento anterior"
+sirve_nuevo n2 || falla "el proyecto nuevo no sirve n2"
+# El .env que dejó una persona en el workdir llegó al contenedor.
+[ "$(compose_nuevo exec -T web sh -c 'echo "${SALUDO}"')" = hola ] || falla "el contenedor no recibió el .env del workdir"
+verde "ok: el proyecto quedó levantado en n2, con el .env del workdir"
+
+# Ya corre: otro primer deploy termina sin tocar nada.
+codigo_nuevo
+codigo="$(pedir bootstrap "{\"confirm\":\"${NUEVO}\",\"totp_code\":\"${CODIGO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el pedido devolvió ${codigo}"
+REPETIDO="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el primer deploy repetido" 60 termino "${REPETIDO}"
+DETALLE="$(detalle "${REPETIDO}")"
+[ "$(jq -r '.status + " " + .code' <<<"${DETALLE}")" = "failed already_deployed" ] || falla "el primer deploy repetido terminó $(resumen "${DETALLE}")"
+sirve_nuevo n2 || falla "el primer deploy repetido tocó lo que corría"
+verde "ok: un proyecto que ya corre no acepta otro primer deploy"
+
+# Y lo que sigue son deploys, con su foto de lo anterior.
+N3="$(version_nuevo n3)"
+codigo="$(pedir deploys "{\"confirm\":\"${NUEVO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el pedido devolvió ${codigo}"
+SIGUIENTE="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el deploy que sigue al primero" 180 termino "${SIGUIENTE}"
+DETALLE="$(detalle "${SIGUIENTE}")"
+[ "$(jq -r .status <<<"${DETALLE}")" = succeeded ] || falla "el deploy que sigue terminó $(resumen "${DETALLE}")"
+[ "$(jq -r '.commit + " " + .previous_commit' <<<"${DETALLE}")" = "${N3} ${N2}" ] || falla "el deploy que sigue no partió del primer deploy"
+sirve_nuevo n3 || falla "el proyecto nuevo no sirve n3"
+verde "ok: después del primer deploy, un deploy común anda"
+
+# --- 6. Auditoría ---
+
+paso "6. auditoría"
 contar() { psql "${DATABASE_URL}" -tAc "$1" | tr -d '[:space:]'; }
 PEDIDOS="$(contar "SELECT count(*) FROM audit_log WHERE action IN ('deploy.request','rollback.request') AND actor = '${USUARIO}' AND actor_type = 'user'")"
+PRIMEROS="$(contar "SELECT count(*) FROM audit_log WHERE action = 'bootstrap.request' AND actor = '${USUARIO}' AND actor_type = 'user'")"
 FINALES="$(contar "SELECT count(*) FROM audit_log WHERE action = 'deploy.finish' AND actor = '${SERVER_NAME}' AND actor_type = 'agent'")"
-RECHAZOS="$(contar "SELECT count(*) FROM audit_log WHERE action = 'deploy.request' AND result = 'rejected'")"
-# Cuatro pedidos aceptados y uno rechazado; cuatro finales.
-[ "${PEDIDOS}" = 5 ] || falla "hay ${PEDIDOS} pedidos en la auditoría y se esperaban 5"
-[ "${FINALES}" = 4 ] || falla "hay ${FINALES} finales en la auditoría y se esperaban 4"
-[ "${RECHAZOS}" = 1 ] || falla "hay ${RECHAZOS} rechazos en la auditoría y se esperaba 1"
+RECHAZOS="$(contar "SELECT count(*) FROM audit_log WHERE action IN ('deploy.request','bootstrap.request') AND result = 'rejected'")"
+# Del proyecto de muestra, cuatro pedidos aceptados y uno rechazado; del nuevo,
+# dos deploys, y cuatro primeros deploys con uno rechazado por no traer código.
+# Nueve finales: todos los que el agent llegó a empezar.
+[ "${PEDIDOS}" = 7 ] || falla "hay ${PEDIDOS} pedidos en la auditoría y se esperaban 7"
+[ "${PRIMEROS}" = 4 ] || falla "hay ${PRIMEROS} pedidos de primer deploy en la auditoría y se esperaban 4"
+[ "${FINALES}" = 9 ] || falla "hay ${FINALES} finales en la auditoría y se esperaban 9"
+[ "${RECHAZOS}" = 2 ] || falla "hay ${RECHAZOS} rechazos en la auditoría y se esperaban 2"
 if psql "${DATABASE_URL}" -tAc "DELETE FROM audit_log" >/dev/null 2>&1; then
   falla "se pudo borrar audit_log"
 fi
-verde "ok: ${PEDIDOS} pedidos, ${FINALES} finales y ${RECHAZOS} rechazo en audit_log, que no se puede borrar"
+verde "ok: ${PEDIDOS} pedidos, ${PRIMEROS} primeros deploys, ${FINALES} finales y ${RECHAZOS} rechazos en audit_log, que no se puede borrar"
 
 paso "listo"
 verde "el deploy de punta a punta anduvo (inicio en ${INICIO_DEPLOY} ms)"

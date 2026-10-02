@@ -14,7 +14,10 @@
 #   4. Un rollback manual al estado bueno anterior.
 #   5. El agent se reinicia a mitad de un paso: el paso se para y, al arrancar,
 #      el agent vuelve atrás.
-#   6. Todo quedó en audit_log.
+#   6. El primer deploy de un proyecto que todavía no corre (ADR-021): el agent
+#      clona en un workdir sin clonar, los pasos corren con el usuario del
+#      proyecto y, si el servicio no queda bien, el ayudante para la unidad.
+#   7. Todo quedó en audit_log.
 #
 # Se corre como root en una máquina descartable con systemd como PID 1: el
 # runner del CI o WSL. Instala y saca lo suyo (el agent, el ayudante, usuarios
@@ -50,10 +53,17 @@ UNIDAD="e2e-tienda.service"
 APP_USER="e2eapp"
 ORIGEN=/srv/e2e-systemd-origen.git
 WD=/srv/e2e-systemd
+# El proyecto que todavía no corre: se levanta con un primer deploy.
+NUEVO="turnos-systemd"
+UNIDAD_NUEVA="e2e-turnos.service"
+PUERTO_NUEVO="${PUERTO_NUEVO:-18094}"
+ORIGEN_NUEVO=/srv/e2e-systemd-nuevo-origen.git
+WD_NUEVO=/srv/e2e-systemd-nuevo
 DROPIN_DIR=/etc/systemd/system/statussv-agent.service.d
 
 TRABAJO="$(mktemp -d)"
 FUENTE="${TRABAJO}/fuente"
+FUENTE_NUEVO="${TRABAJO}/fuente-nuevo"
 SERVER_PID=""
 MARCA_USUARIO="${TRABAJO}/creo-statussv"
 
@@ -80,16 +90,19 @@ limpiar() {
     journalctl -u statussv-agent -n 40 --no-pager -o cat 2>/dev/null
     journalctl -u 'statussv-unit-helper@*' -n 20 --no-pager -o cat 2>/dev/null
     journalctl -u "${UNIDAD}" -n 15 --no-pager -o cat 2>/dev/null
+    journalctl -u "${UNIDAD_NUEVA}" -n 15 --no-pager -o cat 2>/dev/null
   fi
   [ -n "${SERVER_PID}" ] && kill "${SERVER_PID}" 2>/dev/null
   wait 2>/dev/null
-  systemctl disable --now statussv-agent statussv-unit-helper.socket "${UNIDAD}" >/dev/null 2>&1
+  systemctl disable --now statussv-agent statussv-unit-helper.socket "${UNIDAD}" "${UNIDAD_NUEVA}" >/dev/null 2>&1
   systemctl stop 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
-  systemctl reset-failed statussv-agent "${UNIDAD}" 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
+  systemctl reset-failed statussv-agent "${UNIDAD}" "${UNIDAD_NUEVA}" 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
   rm -rf /etc/systemd/system/statussv-agent.service "${DROPIN_DIR}" "/etc/systemd/system/${UNIDAD}" \
+    "/etc/systemd/system/${UNIDAD_NUEVA}" \
     /etc/systemd/system/statussv-unit-helper.socket /etc/systemd/system/statussv-unit-helper@.service
   systemctl daemon-reload
-  rm -rf "${WD}" "${ORIGEN}" /etc/status-sv /var/lib/status-sv /run/status-sv /usr/local/bin/statussv-agent
+  rm -rf "${WD}" "${ORIGEN}" "${WD_NUEVO}" "${ORIGEN_NUEVO}" \
+    /etc/status-sv /var/lib/status-sv /run/status-sv /usr/local/bin/statussv-agent
   userdel "${APP_USER}" 2>/dev/null
   [ -f "${MARCA_USUARIO}" ] && userdel statussv 2>/dev/null
   rm -rf "${TRABAJO}"
@@ -123,7 +136,7 @@ falla() {
 # confianza, y eso lo lee quien recibe el push: tiene que venir de un archivo
 # de configuración, no de un -c. Va en uno propio de la prueba, sin tocar el
 # de root.
-printf '[safe]\n\tdirectory = %s\n' "${ORIGEN}" >"${TRABAJO}/gitconfig"
+printf '[safe]\n\tdirectory = %s\n\tdirectory = %s\n' "${ORIGEN}" "${ORIGEN_NUEVO}" >"${TRABAJO}/gitconfig"
 G=(env "GIT_CONFIG_GLOBAL=${TRABAJO}/gitconfig" git -c user.name=e2e -c user.email=e2e@status-sv.invalid -c init.defaultBranch=main)
 
 # version escribe una versión del sitio y la commitea. Las marcas cambian cómo
@@ -259,6 +272,74 @@ EOF
 chown root:statussv "/etc/status-sv/projects.d/${PROYECTO}.yaml"
 chmod 0640 "/etc/status-sv/projects.d/${PROYECTO}.yaml"
 
+# --- El proyecto que todavía no corre ---
+#
+# Declarado y preparado por una persona, como dice el runbook, pero sin clonar
+# y con su unidad instalada y parada. El workdir es del usuario del proyecto,
+# que escribe ahí lo que prepara, y del grupo del agent, que trae el código.
+"${G[@]}" init -q --bare "${ORIGEN_NUEVO}"
+"${G[@]}" init -q "${FUENTE_NUEVO}"
+"${G[@]}" -C "${FUENTE_NUEVO}" remote add origin "${ORIGEN_NUEVO}"
+sed "s/${PUERTO_WEB}/${PUERTO_NUEVO}/" "${FUENTE}/app.py" >"${FUENTE_NUEVO}/app.py"
+cat >"${FUENTE_NUEVO}/build.sh" <<'EOF'
+#!/bin/sh
+echo "preparando $(cat version) como $(id -un)"
+mkdir -p var
+echo "$(cat version) $(id -un)" > var/construido.txt
+EOF
+chmod 0755 "${FUENTE_NUEVO}/build.sh"
+# version_nuevo commitea una versión del proyecto nuevo; con "roto", el
+# servicio se cae al arrancar.
+version_nuevo() {
+  local nombre="$1" marca="${2:-}"
+  rm -f "${FUENTE_NUEVO}/roto"
+  echo "${nombre}" >"${FUENTE_NUEVO}/version"
+  [ -n "${marca}" ] && echo si >"${FUENTE_NUEVO}/${marca}"
+  "${G[@]}" -C "${FUENTE_NUEVO}" add -A
+  "${G[@]}" -C "${FUENTE_NUEVO}" commit -qm "${nombre}"
+  "${G[@]}" -C "${FUENTE_NUEVO}" push -q origin main
+  "${G[@]}" -C "${ORIGEN_NUEVO}" rev-parse refs/heads/main
+}
+N1="$(version_nuevo n1 roto)"
+chown -R statussv "${ORIGEN_NUEVO}"
+install -d -o "${APP_USER}" -g statussv -m 2775 "${WD_NUEVO}"
+
+cat >"/etc/systemd/system/${UNIDAD_NUEVA}" <<EOF
+[Unit]
+Description=Proyecto de la prueba de primer deploy de systemd
+
+[Service]
+User=${APP_USER}
+WorkingDirectory=${WD_NUEVO}
+ExecStart=/usr/bin/python3 ${WD_NUEVO}/app.py
+Restart=always
+RestartSec=1
+EOF
+systemctl daemon-reload
+
+cat >"/etc/status-sv/projects.d/${NUEVO}.yaml" <<EOF
+name: ${NUEVO}
+environment: staging
+repo: file://${ORIGEN_NUEVO}
+branch: main
+runtime: systemd
+workdir: ${WD_NUEVO}
+units:
+  - ${UNIDAD_NUEVA}
+run_as: ${APP_USER}
+healthcheck:
+  url: http://127.0.0.1:${PUERTO_NUEVO}/health
+  expect_status: 200
+  timeout_seconds: 2
+deploy:
+  build:
+    - command: ["./build.sh"]
+      timeout_seconds: 120
+rollback: previous_commit
+EOF
+chown root:statussv "/etc/status-sv/projects.d/${NUEVO}.yaml"
+chmod 0640 "/etc/status-sv/projects.d/${NUEVO}.yaml"
+
 # --- Control plane ---
 
 paso "levantando el control plane"
@@ -293,6 +374,14 @@ grep -q "${PROYECTO} se puede desplegar" <<<"${INSTALADOR}" || {
 }
 systemctl is-active --quiet statussv-unit-helper.socket || falla "el instalador no dejó el ayudante"
 verde "ok: agent instalado, ayudante activo y deploy-check aprobó el proyecto"
+# El proyecto sin clonar no está roto: deploy-check dice que le toca un primer
+# deploy, después de probar la escritura en el workdir y que el repo conteste.
+grep -q "${NUEVO} todavía no se desplegó: está listo para su primer deploy" <<<"${INSTALADOR}" || {
+  printf '%s\n' "${INSTALADOR}" | sed -n '/revisando el deploy/,$p'
+  falla "deploy-check no reconoció el proyecto que espera su primer deploy"
+}
+[ ! -e "${WD_NUEVO}/.git" ] || falla "deploy-check dejó un repositorio en el workdir del proyecto nuevo"
+verde "ok: deploy-check dice que el proyecto nuevo está listo para su primer deploy"
 
 # --- Sesión del panel, con el segundo factor ---
 
@@ -315,22 +404,34 @@ SESION="$(curl -sS -D - -o /dev/null -H 'Content-Type: application/json' \
   --data "{\"username\":\"${USUARIO}\",\"password\":\"${CLAVE}\"}" "${URL}/v1/auth/login" | cookie_de)"
 [ -n "${SESION}" ] || falla "el login no devolvió la cookie"
 SECRETO="$(curl -sS -X POST -H "Cookie: ${SESION}" "${URL}/v1/auth/totp/enroll" | jq -r .secret)"
-CODIGO="$(totp_code "${SECRETO}" $(($(date +%s) / 30)))"
+PASO_USADO=$(($(date +%s) / 30))
+CODIGO="$(totp_code "${SECRETO}" "${PASO_USADO}")"
 SESION="$(curl -sS -D - -o /dev/null -H "Cookie: ${SESION}" -H 'Content-Type: application/json' \
   --data "{\"code\":\"${CODIGO}\"}" "${URL}/v1/auth/totp/confirm" | cookie_de)"
 [ -n "${SESION}" ] || falla "el alta del segundo factor no devolvió la sesión completa"
 verde "ok: sesión completa"
 
+# codigo_nuevo deja en CODIGO un código que todavía no se usó: el control
+# plane no acepta el mismo dos veces, así que espera al paso de 30 s que
+# sigue, como haría una persona con la app.
+codigo_nuevo() {
+  while [ $(($(date +%s) / 30)) -le "${PASO_USADO}" ]; do sleep 1; done
+  PASO_USADO=$(($(date +%s) / 30))
+  CODIGO="$(totp_code "${SECRETO}" "${PASO_USADO}")"
+}
+
 api() { curl -sS -H "Cookie: ${SESION}" -H 'Content-Type: application/json' "$@"; }
 
-proyecto_id() { api "${URL}/v1/projects" | jq -r ".projects[] | select(.name == \"${PROYECTO}\") | .id"; }
-declarado() { [ -n "$(proyecto_id)" ]; }
+proyecto_id() { api "${URL}/v1/projects" | jq -r ".projects[] | select(.name == \"${1:-${PROYECTO}}\") | .id"; }
+declarado() { [ -n "$(proyecto_id "$@")" ]; }
 esperar "el agent declaró el proyecto" 90 declarado
 ID_PROYECTO="$(proyecto_id)"
 
+# pedir deja la respuesta en ${TRABAJO}/respuesta.json y devuelve el código
+# HTTP. El tercer argumento es el proyecto; sin él, el de muestra.
 pedir() {
-  local tipo="$1" cuerpo="$2"
-  api -o "${TRABAJO}/respuesta.json" -w '%{http_code}' --data "${cuerpo}" "${URL}/v1/projects/${ID_PROYECTO}/${tipo}"
+  local tipo="$1" cuerpo="$2" proyecto="${3:-${ID_PROYECTO}}"
+  api -o "${TRABAJO}/respuesta.json" -w '%{http_code}' --data "${cuerpo}" "${URL}/v1/projects/${proyecto}/${tipo}"
 }
 estado() { api "${URL}/v1/deploys/$1" | jq -r .status; }
 termino() { case "$(estado "$1")" in succeeded | failed | rolled_back) return 0 ;; *) return 1 ;; esac }
@@ -444,22 +545,71 @@ sirve v1 || falla "el sitio no sirve v1 después del reinicio"
 [ "$(en_workdir)" = "${V1}" ] || falla "el workdir no volvió a v1"
 verde "ok: al arrancar volvió atrás el deploy cortado (${V5:0:8} no quedó)"
 
-# --- 6. Auditoría ---
+# --- 6. Primer deploy ---
 
-paso "6. auditoría"
+paso "6. primer deploy de un proyecto que todavía no corre"
+esperar "el agent declaró el proyecto nuevo" 90 declarado "${NUEVO}"
+ID_NUEVO="$(proyecto_id "${NUEVO}")"
+estado_unidad() { systemctl show -p ActiveState --value "${UNIDAD_NUEVA}"; }
+sirve_nuevo() { [ "$(curl -fsS "http://127.0.0.1:${PUERTO_NUEVO}/$1" 2>/dev/null)" = "$2" ]; }
+en_nuevo() { git -c "safe.directory=${WD_NUEVO}" -C "${WD_NUEVO}" rev-parse HEAD; }
+[ "$(estado_unidad)" = inactive ] || falla "la unidad del proyecto nuevo ya estaba $(estado_unidad)"
+
+# El primer intento no queda bien (n1 se cae al arrancar): el ayudante para
+# la unidad, y el código clonado queda.
+codigo_nuevo
+codigo="$(pedir bootstrap "{\"confirm\":\"${NUEVO}\",\"totp_code\":\"${CODIGO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el primer deploy devolvió ${codigo}: $(cat "${TRABAJO}/respuesta.json")"
+INTENTO="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el primer deploy que no queda bien" 300 termino "${INTENTO}"
+DETALLE="$(detalle "${INTENTO}")"
+[ "$(jq -r '.kind + " " + .status + " " + .code' <<<"${DETALLE}")" = "bootstrap rolled_back unhealthy" ] || falla "el primer intento terminó $(resumen "${DETALLE}")"
+[ "$(pasos "${DETALLE}")" = "preflight:ok fetch:ok checkout:ok build:ok restart:ok healthcheck:failed rollback:ok" ] || falla "pasos: $(pasos "${DETALLE}")"
+case "$(estado_unidad)" in
+  inactive | failed) ;;
+  *) falla "la unidad quedó $(estado_unidad) después de un primer deploy que no quedó bien" ;;
+esac
+[ "$(en_nuevo)" = "${N1}" ] || falla "el código clonado no quedó en el workdir"
+verde "ok: no quedó bien, el ayudante paró la unidad y el código quedó clonado"
+
+# Con una versión que anda, queda.
+N2="$(version_nuevo n2)"
+codigo_nuevo
+codigo="$(pedir bootstrap "{\"confirm\":\"${NUEVO}\",\"totp_code\":\"${CODIGO}\"}" "${ID_NUEVO}")"
+[ "${codigo}" = 201 ] || falla "el segundo primer deploy devolvió ${codigo}: $(cat "${TRABAJO}/respuesta.json")"
+PRIMERO="$(jq -r .id "${TRABAJO}/respuesta.json")"
+esperar "terminó el primer deploy" 180 termino "${PRIMERO}"
+DETALLE="$(detalle "${PRIMERO}")"
+[ "$(jq -r '.kind + " " + .status' <<<"${DETALLE}")" = "bootstrap succeeded" ] || falla "el primer deploy terminó $(resumen "${DETALLE}")"
+[ "$(jq -r .commit <<<"${DETALLE}")" = "${N2}" ] || falla "el primer deploy no es de la punta de la rama"
+[ "$(pasos "${DETALLE}")" = "preflight:ok fetch:ok checkout:ok build:ok restart:ok healthcheck:ok" ] || falla "pasos: $(pasos "${DETALLE}")"
+[ "$(estado_unidad)" = active ] || falla "la unidad quedó $(estado_unidad)"
+sirve_nuevo version n2 || falla "el proyecto nuevo no sirve n2"
+# El código lo trajo el agent; lo que preparó el paso build es del usuario del
+# proyecto.
+sirve_nuevo construido "n2 ${APP_USER}" || falla "el paso build no corrió con el usuario del proyecto"
+[ "$(stat -c %U "${WD_NUEVO}/.git")" = statussv ] || falla "el repositorio no es del agent"
+[ "$(stat -c %U "${WD_NUEVO}/var/construido.txt")" = "${APP_USER}" ] || falla "lo que preparó el paso no es del usuario del proyecto"
+verde "ok: el agent clonó, el paso build corrió como ${APP_USER} y el servicio quedó andando en n2"
+
+# --- 7. Auditoría ---
+
+paso "7. auditoría"
 contar() { psql "${DATABASE_URL}" -tAc "$1" | tr -d '[:space:]'; }
 PEDIDOS="$(contar "SELECT count(*) FROM audit_log WHERE action IN ('deploy.request','rollback.request') AND actor = '${USUARIO}' AND result = 'accepted'")"
+PRIMEROS="$(contar "SELECT count(*) FROM audit_log WHERE action = 'bootstrap.request' AND actor = '${USUARIO}' AND result = 'accepted'")"
 FINALES="$(contar "SELECT count(*) FROM audit_log WHERE action = 'deploy.finish' AND actor = '${SERVER_NAME}' AND actor_type = 'agent'")"
 ENROLADO="$(contar "SELECT count(*) FROM audit_log WHERE action = 'agent.enroll' AND actor = '${SERVER_NAME}' AND result = 'ok'")"
 [ "${PEDIDOS}" = 5 ] || falla "hay ${PEDIDOS} pedidos en la auditoría y se esperaban 5"
-[ "${FINALES}" = 5 ] || falla "hay ${FINALES} finales en la auditoría y se esperaban 5"
+[ "${PRIMEROS}" = 2 ] || falla "hay ${PRIMEROS} pedidos de primer deploy en la auditoría y se esperaban 2"
+[ "${FINALES}" = 7 ] || falla "hay ${FINALES} finales en la auditoría y se esperaban 7"
 [ "${ENROLADO}" = 1 ] || falla "el enrolamiento del agent no quedó en la auditoría"
-verde "ok: ${PEDIDOS} pedidos y ${FINALES} finales en audit_log, y el enrolamiento del agent"
+verde "ok: ${PEDIDOS} pedidos, ${PRIMEROS} primeros deploys y ${FINALES} finales en audit_log, y el enrolamiento del agent"
 
 # --- El agent, después de todo eso ---
 
 MEMORIA="$(systemctl show -p MemoryCurrent --value statussv-agent)"
-verde "ok: el agent ocupa $((MEMORIA / 1024 / 1024)) MiB después de cinco deploys"
+verde "ok: el agent ocupa $((MEMORIA / 1024 / 1024)) MiB después de siete deploys"
 
 paso "listo"
 verde "el deploy de systemd de punta a punta anduvo"

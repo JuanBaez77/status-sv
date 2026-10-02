@@ -76,6 +76,11 @@ en la mano ([ADR-017](ADR-017-deploy-desde-el-panel-y-auditoria.md)). Por MCP va
 `kind` suma `bootstrap` en el contrato y en la tabla `deploys` (migración 00010), y comparte el
 historial, el avance en vivo, el bloqueo de simultáneos y `audit_log` (`bootstrap.request`).
 
+Se pide con `POST /v1/projects/{id}/bootstrap`. El panel ofrece el botón **Primer deploy** cuando
+nada del proyecto corre (sin contenedores suyos, o con sus unidades paradas) y ningún deploy de su
+historia terminó bien. Es una ayuda para no ofrecerlo donde no va: el que decide es el agent, que
+lo rechaza con `already_deployed` si el proyecto ya corre.
+
 **4. Lo que necesita root lo sigue haciendo una persona por SSH, con una lista en el runbook.**
 
 Declarar el proyecto, generar la deploy key, crear el `workdir` con sus permisos, escribir el

@@ -29,7 +29,10 @@ solo se lee por SSH no la mira nadie. La decisión la tomó Juan el 2026-10-02.
 | `enrollment_token.create` | `cli` (sistema) | `ok` |
 
 Las que ya estaban (`deploy.request`, `rollback.request`, `deploy.finish`, `logs.request`) no
-cambian.
+cambian. Con el primer deploy
+([ADR-021](ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)) se sumó `bootstrap.request`,
+con los mismos resultados que `deploy.request`; su final es un `deploy.finish` más, con
+`tipo: bootstrap` en el detalle.
 
 **2. Un login fallido no guarda lo que se escribió.**
 
