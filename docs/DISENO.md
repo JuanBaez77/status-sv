@@ -390,7 +390,7 @@ El MVP útil llega al final de la Fase 3, con unas 17 semanas de trabajo. Las es
 | --- | --- | --- | --- |
 | Sprint 0 | Fundaciones: repo, CI, PostgreSQL, un agent mínimo que se conecta y envía un latido. | 1 semana | Un agent real aparece como online en la base. |
 | Fase 1 | Observabilidad: métricas y estado de Docker y systemd de varios servidores en el panel. | Sprints 1 a 3 | Dos VPS visibles en vivo, con las metas de rendimiento cumplidas. |
-| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 a 6 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos (se cumple en el Sprint 5; el Sprint 6 completa el deploy desde cero). |
+| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 a 6 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos (cumplido el 2026-10-05, en el Sprint 5; el Sprint 6 completa el deploy desde cero). |
 | Fase 3 | MCP remoto con tokens, scopes y aprobaciones, conectado a Claude Code. | Sprints 7 y 8 | El flujo completo (PR, merge, deploy aprobado, verificación) corre desde Claude Code. |
 | Fase 4 | Smoke tests, alertas, chequeos de seguridad, mTLS y OAuth para claude.ai. | Sprints 9 en adelante | claude.ai usa el MCP con OAuth y hay alertas activas. |
 
@@ -711,7 +711,8 @@ cada PR del CI, con Docker de verdad, pero no se ensayó en producción: Juan de
 para no romper la rama de un proyecto de cliente. Hay que hacerla con un repo de prueba declarado
 en `sv-gcg`, **antes** de prender el deploy en un proyecto que importe. La mudanza de este mismo
 sprint mostró por qué: un servidor real falla en cosas que el CI no tiene. La CPU en reposo
-tampoco se midió en producción esta vez.
+tampoco se midió en producción esta vez. *(Las dos cosas se hicieron en el Sprint 5, con un repo
+de demostración en `sv-gcg`: ver su cierre.)*
 
 Después del último PR aparecieron dos defectos, ya corregidos y desplegados:
 
@@ -758,51 +759,51 @@ pasa al Sprint 6).
 
 Medir antes de programar
 
-- [ ] Laboratorio: la unidad real del agent hablando con el ayudante por su socket; un paso que
+- [x] Laboratorio: la unidad real del agent hablando con el ayudante por su socket; un paso que
       corre con otro usuario, con su archivo de entorno y su tiempo máximo; el reinicio de una
       unidad declarada y el rechazo de una que no lo está; el paso que se para si se corta la
       conexión; y la regla de polkit, que queda medida y descartada.
 
 Auditoría
 
-- [ ] Acciones de acceso en `audit_log`: logins, segundo factor, enrolamiento de agents y los
+- [x] Acciones de acceso en `audit_log`: logins, segundo factor, enrolamiento de agents y los
       subcomandos de CLI, sin guardar lo que se escribió en un login fallido.
-- [ ] `GET /v1/audit` con cursor y filtros.
-- [ ] Página de auditoría en el panel, con un enlace desde la historia de deploys de un proyecto.
+- [x] `GET /v1/audit` con cursor y filtros.
+- [x] Página de auditoría en el panel, con un enlace desde la historia de deploys de un proyecto.
 
 Contrato
 
-- [ ] El paso `restart`, `build` repetible y el código `restart_failed`.
+- [x] El paso `restart`, `build` repetible y el código `restart_failed`.
 
 Agent
 
-- [ ] `project.yaml` de systemd: `run_as`, `env_file`, `deploy.build` y pasos sin `service`
+- [x] `project.yaml` de systemd: `run_as`, `env_file`, `deploy.build` y pasos sin `service`
       (ADR-019).
-- [ ] Ayudante root (`statussv-agent unit-helper`): `run_step`, `stop_step` y `restart_units` sobre
+- [x] Ayudante root (`statussv-agent unit-helper`): `run_step`, `stop_step` y `restart_units` sobre
       proyectos declarados, por un socket unix, y el cliente del agent.
-- [ ] El instalador instala el ayudante con `--enable-deploy`, y `deploy-check` revisa un proyecto
+- [x] El instalador instala el ayudante con `--enable-deploy`, y `deploy-check` revisa un proyecto
       systemd.
-- [ ] Motor: una interfaz de runtime con Docker detrás, sin cambiar el comportamiento.
-- [ ] Motor: el runtime systemd, con su verificación, su rollback y la recuperación si el agent se
+- [x] Motor: una interfaz de runtime con Docker detrás, sin cambiar el comportamiento.
+- [x] Motor: el runtime systemd, con su verificación, su rollback y la recuperación si el agent se
       reinicia en el medio.
 
 Servidor y panel
 
-- [ ] Aceptar el deploy y el rollback de proyectos systemd, con los pasos nuevos y sus avisos.
+- [x] Aceptar el deploy y el rollback de proyectos systemd, con los pasos nuevos y sus avisos.
 
 Primer deploy (línea de corte)
 
-- [ ] La operación `bootstrap` en el contrato y en el motor, para Docker y systemd (ADR-021).
-- [ ] `POST /v1/projects/{id}/bootstrap` con TOTP siempre, la migración 00010 y el botón en el panel.
+- [x] La operación `bootstrap` en el contrato y en el motor, para Docker y systemd (ADR-021).
+- [x] `POST /v1/projects/{id}/bootstrap` con TOTP siempre, la migración 00010 y el botón en el panel.
 
 Calidad y despliegue
 
-- [ ] Prueba de punta a punta del deploy systemd en CI, con systemd de verdad y un servicio de
+- [x] Prueba de punta a punta del deploy systemd en CI, con systemd de verdad y un servicio de
       muestra: deploy bueno, deploy roto que vuelve atrás solo, un paso que falla y el agent
       reiniciado a mitad de un deploy.
-- [ ] Runbook: preparar y prender el deploy de un proyecto systemd, y la lista de lo que hace una
+- [x] Runbook: preparar y prender el deploy de un proyecto systemd, y la lista de lo que hace una
       persona antes de un primer deploy.
-- [ ] Desplegar el sprint y probar un deploy real de un proyecto gunicorn, bueno y roto a propósito.
+- [x] Desplegar el sprint y probar un deploy real de un proyecto gunicorn, bueno y roto a propósito.
       Incluye el pendiente del Sprint 4: el deploy roto de un proyecto Docker en un servidor real.
 
 Terminado cuando un proyecto gunicorn real se despliega desde el panel; un deploy roto a propósito
@@ -812,6 +813,60 @@ e2e del deploy systemd.
 
 Si el sprint se estira, la línea de corte es el primer deploy, que pasa entero al Sprint 6 con el
 resto del deploy desde cero.
+
+**Cerrado el 2026-10-05** (commit `db081cd`). Se entregó en quince PR (#78 a #92), sin usar la
+línea de corte: el primer deploy entró. Después, #93 corrigió tres textos que aparecieron en la
+prueba real. El control plane de `srv936263` pasó a `db081cd` con la migración 00010, con un
+respaldo antes; los dos agents reconectaron 4 segundos después del reinicio y quedaron en la misma
+versión. El ayudante root está instalado solo en `sv-gcg`, el único servidor con un proyecto
+systemd declarado.
+
+La prueba real fue en `sv-gcg` (Ubuntu 22.04, systemd 249), con un repo de demostración público,
+`JuanBaez77/status-sv-demo`: una app WSGI con gunicorn que no arranca si existe el archivo `ROTO`.
+Está declarado dos veces, como proyecto systemd y como proyecto Docker, los dos en `staging`:
+
+| Proyecto | Deploy | Resultado | Duración |
+| --- | --- | --- | --- |
+| `status-sv-demo` (systemd) | Primer deploy (v1) | Desplegado | 18 s |
+| | v2 | Desplegado | 18 s |
+| | v3, rota | Volvió atrás solo a v2 | 2 min 33 s |
+| | v4 | Desplegado | 20 s |
+| `status-sv-demo-docker` (Docker) | Primer deploy | Falló al compilar: Docker Hub contestó 429 | 10 s |
+| | Primer deploy, otra vez | Desplegado, reusando el clon del intento anterior | 48 s |
+| | v5, rota | Volvió atrás solo a la imagen anterior | 2 min 32 s |
+| | v6 | Desplegado | 38 s |
+
+- **Las dos vueltas atrás dejaron el sitio contestando la versión anterior**, verificado por SSH:
+  el código en el commit anterior, sin cambios a mano ni el archivo `ROTO`, sin unidades de pasos
+  colgadas y, en Docker, el contenedor sobre la misma imagen que la etiqueta
+  `statussv-rollback/status-sv-demo-docker/web:<commit>`. Con esto se cumple el criterio de salida
+  de la Fase 2, y se cierra el pendiente del Sprint 4.
+- **El primer deploy que falló no tocó nada**: terminó `failed` antes de levantar, dejó el clon y
+  el intento siguiente lo aceptó, como dice ADR-021.
+- **La página de auditoría muestra los deploys de los dos proyectos**: cada pedido de la persona,
+  con su IP, y el cierre del agent con su resultado (Desplegado, Volvió atrás o Falló). **Y los
+  logins**, pero recién después de volver a ingresar: la auditoría de accesos llegó con esta
+  versión, y una sesión abierta desde antes de actualizar (dura hasta 7 días) no deja ningún
+  renglón. Al salir y volver a ingresar apareció `auth.login`, con la IP y la etapa.
+- **El agent**, con la versión del sprint: 8,4 MB y 0,13% de un núcleo en reposo en
+  `cristales-baez-prod`, medido durante dos minutos; entre 10 y 12 MB en `sv-gcg` después de los
+  deploys.
+- **Los dos proyectos de demostración quedan en `sv-gcg`**, para probar el Sprint 6. Escuchan solo
+  en `127.0.0.1` (puertos 18095 y 18096).
+
+Quedan abiertos, fuera del sprint:
+
+- **Docker Hub en `sv-gcg`.** La /64 de IPv6 del servidor se comparte con otros clientes del
+  proveedor y se queda sin cupo de descargas sin cuenta. Le puede pasar al próximo deploy de
+  `gcg-alertas-nbcargo`, que arma su imagen desde Docker Hub; hay que decidir cómo antes de ese
+  deploy (runbook, sección 8). La demo ya toma su imagen base de ECR Public.
+- **`gcg-alertas` sigue sin pasar `deploy-check`** en `sv-gcg`, como desde el Sprint 4: el agent no
+  puede escribir en su `workdir` y el repo, privado, se trae por HTTPS sin llave.
+- **#93 todavía no está desplegado**: viaja con la próxima actualización.
+
+Las lecciones del despliegue están en el runbook, sección 8. Las dos que más tiempo ahorran: mirar
+el cupo de Docker Hub de un servidor antes de confiar en un build, y recargar el panel después de
+actualizar el control plane.
 
 **Sprints siguientes (resumen)**
 

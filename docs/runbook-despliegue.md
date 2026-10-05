@@ -1103,3 +1103,44 @@ revertirlo, con diez minutos de corte; el segundo tardó dos:
   copia vieja de un proyecto con mil pedidos en tres días. Eran robots: otro sitio de nginx del
   mismo servidor seguía mandando su tráfico a ese puerto. Se respaldó, se apagó, se verificó y
   recién después se borró.
+
+Salieron al desplegar el Sprint 5 (2026-10-05), con los dos proyectos de demostración de `sv-gcg`
+(`status-sv-demo`, de systemd, y `status-sv-demo-docker`):
+
+- **Docker Hub limita las descargas sin cuenta por IP, y en IPv6 cuenta la /64 entera.** `sv-gcg`
+  sale por IPv6 y comparte la /64 con otros clientes del proveedor: tenía 100 descargas por hora y
+  le quedaban 0. El primer deploy de Docker falló al compilar, en el `FROM`, con
+  `429 Too Many Requests`; terminó `failed` sin levantar nada. El cupo de un servidor se mira así
+  (solo consulta; `docker-ratelimit-source` dice qué IP o qué /64 cuenta Docker Hub):
+
+  ```bash
+  T=$(curl -fsS 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:ratelimitpreview/test:pull' \
+    | sed -e 's/.*"access_token":"//' -e 's/".*//')
+  curl -sS --head -H "Authorization: Bearer $T" \
+    https://registry-1.docker.io/v2/ratelimitpreview/test/manifests/latest | grep -i -e ^HTTP -e ratelimit
+  ```
+
+  Las salidas: tomar la imagen base de una copia sin ese límite (`public.ecr.aws/docker/library/…`
+  o `mirror.gcr.io/library/…`), que es un commit en el repo del proyecto; un espejo en el
+  `daemon.json` del servidor, que obliga a reiniciar Docker; o `docker login`, que deja una
+  credencial en el servidor para el usuario del agent.
+- **Después de actualizar el control plane, recargar el panel.** El panel se carga entero al abrir
+  la página: una pestaña abierta desde antes sigue con la versión vieja, aunque el servidor ya
+  sirva la nueva. Mostró "El deploy de proyectos de systemd llega en el Sprint 5" con el deploy de
+  systemd ya desplegado.
+- **La unidad de un proyecto nuevo se habilita después del primer deploy, no antes.** Habilitada y
+  sin código, intentaría arrancar si el servidor se reinicia. Mientras tanto el panel avisa que el
+  agent no ve el servicio: el agent lista un servicio parado solo si está habilitado.
+- **En un proyecto gunicorn, lo que cuenta es el healthcheck HTTP.** Una app que se cae al
+  importarse con una excepción hace salir a gunicorn ("Worker failed to boot", código 3) y systemd
+  lo relanza cada pocos segundos. Si se cae con `SystemExit`, en cambio, gunicorn relanza los
+  workers para siempre y la unidad sigue `active`: solo el healthcheck HTTP lo ve.
+- **Un deploy roto tarda lo que la ventana de verificación.** El roto de systemd tardó 2 min 33 s
+  y el de Docker 2 min 32 s, de los que 2 minutos son esperar que quede sano: systemd y Docker
+  relanzan el servicio caído, y el agent no corta antes.
+- **El `pg_dump` nuevo (17.6 en adelante) no termina con "dump complete".** La última línea del
+  volcado es `\unrestrict <token>`. Para revisar un respaldo, buscar la línea con
+  `zcat <respaldo> | grep -c 'dump complete'`, no mirar la última.
+- **Desde PowerShell 5.1, el comando de `ssh` va entre comillas simples y sin comillas dobles
+  adentro.** PowerShell rompe las comillas dobles al pasárselas a `ssh`, y el comando llega cortado
+  al servidor. Un punto en vez de un espacio sirve para `grep` (`grep -e agent.conectado`).
