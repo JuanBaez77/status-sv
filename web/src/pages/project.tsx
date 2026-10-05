@@ -9,7 +9,7 @@ import { useProject } from '@/hooks/use-projects'
 import type { ProjectDetail } from '@/lib/api'
 import { containerStatus, serviceStatus, byAttention, sourceNotice } from '@/lib/runtime'
 import { since } from '@/lib/format'
-import { environmentLabel, healthText, unitsText } from '@/lib/projects'
+import { environmentLabel, healthText, missingUnitsText, unitsText } from '@/lib/projects'
 
 /** ProjectPage muestra un proyecto: lo declarado y lo que corre de él. */
 export function ProjectPage({ id }: { id: string }) {
@@ -126,8 +126,7 @@ function Units({ project: p }: { project: ProjectDetail }) {
         )}
         {p.missing_units.length > 0 && (
           <p role="alert" className="mb-2 text-xs text-destructive">
-            El agent no ve {p.missing_units.length === 1 ? 'el servicio' : 'los servicios'}{' '}
-            {p.missing_units.join(', ')}: puede no existir o estar excluido.
+            {missingUnitsText(p.missing_units)}
           </p>
         )}
         {containers.length === 0 && services.length === 0 ? (

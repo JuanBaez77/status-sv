@@ -281,6 +281,13 @@ func TestCheck(t *testing.T) {
 	}
 
 	api := newFakeAPI()
+	api.containers = api.containers[:1]
+	api.inspect = map[string]docker.Inspection{"c1": running("")}
+	if status, _ := p.Check(context.Background(), api); !status.Ready || status.Detail != "1 contenedor bien" {
+		t.Errorf("con un contenedor: %+v", status)
+	}
+
+	api = newFakeAPI()
 	api.containers = nil
 	if status, _ := p.Check(context.Background(), api); status.Ready {
 		t.Error("un proyecto sin contenedores quedó listo")

@@ -228,7 +228,7 @@ func (c *fakeCompose) Check(context.Context, compose.ImageAPI) (compose.Status, 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ready(c.running) {
-		return compose.Status{Ready: true, Detail: "1 contenedores bien"}, nil
+		return compose.Status{Ready: true, Detail: "1 contenedor bien"}, nil
 	}
 	return compose.Status{Detail: "tienda-web-1: reiniciándose"}, nil
 }
@@ -744,5 +744,14 @@ func TestRejectsWithoutGitOrDocker(t *testing.T) {
 	h.engine.cfg.Docker = ""
 	if _, ack := h.start(proto.OpDeploy, ""); ack.Code != proto.CommandUnavailable {
 		t.Fatalf("acuse = %+v", ack)
+	}
+}
+
+func TestDockerRuntimeDescribe(t *testing.T) {
+	images := []compose.ServiceImage{{Service: "web"}, {Service: "worker"}}
+	for n, want := range map[int]string{0: "0 imágenes anotadas", 1: "1 imagen anotada", 2: "2 imágenes anotadas"} {
+		if got := (dockerRuntime{}).Describe(images[:n]); got != want {
+			t.Errorf("con %d: %q, se esperaba %q", n, got, want)
+		}
 	}
 }
