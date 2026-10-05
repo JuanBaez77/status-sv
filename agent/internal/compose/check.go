@@ -40,6 +40,9 @@ func (p *Project) Check(ctx context.Context, api ImageAPI) (Status, error) {
 		}
 		ready++
 	}
+	if ready == 1 {
+		return Status{Ready: true, Detail: "1 contenedor bien"}, nil
+	}
 	return Status{Ready: true, Detail: fmt.Sprintf("%d contenedores bien", ready)}, nil
 }
 

@@ -133,7 +133,7 @@ func (d dockerRuntime) Snapshot(ctx context.Context) ([]compose.ServiceImage, er
 }
 
 func (d dockerRuntime) Describe(images []compose.ServiceImage) string {
-	return fmt.Sprintf("%d imágenes anotadas", len(images))
+	return count(len(images), "imagen anotada", "imágenes anotadas")
 }
 
 func (d dockerRuntime) Retain(ctx context.Context, commit string, images []compose.ServiceImage) error {

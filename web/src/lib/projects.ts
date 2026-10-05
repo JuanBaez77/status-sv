@@ -21,6 +21,16 @@ export function unitsText(p: ProjectSummary): string {
   return `${p.units.healthy} de ${p.units.total} ${noun} bien`
 }
 
+/**
+ * missingUnitsText avisa de los servicios declarados que el agent no ve. El
+ * agent lista un servicio parado solo si está habilitado, así que uno que
+ * espera su primer deploy (ADR-021) también cae acá.
+ */
+export function missingUnitsText(units: string[]): string {
+  const noun = units.length === 1 ? 'el servicio' : 'los servicios'
+  return `El agent no ve ${noun} ${units.join(', ')}: puede no existir, estar excluido o estar parado y sin habilitar, como uno que espera su primer deploy.`
+}
+
 export function healthText(h: ProjectHealth | null, now: Date = new Date()): string {
   if (h === null) return 'Sin healthcheck declarado'
   if (!h.state || !h.checked_at) return 'Healthcheck todavía sin probar'

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ProjectSummary } from '@/lib/api'
-import { healthText, unitsText } from '@/lib/projects'
+import { healthText, missingUnitsText, unitsText } from '@/lib/projects'
 
 const base: ProjectSummary = {
   id: 'p1',
@@ -24,6 +24,15 @@ describe('textos de proyectos', () => {
     expect(unitsText(base)).toBe('1 de 2 contenedores bien')
     expect(unitsText({ ...base, runtime: 'systemd', units: { total: 0, healthy: 0 } })).toBe(
       'Sin servicios corriendo',
+    )
+  })
+
+  it('explica por qué el agent puede no ver un servicio declarado', () => {
+    expect(missingUnitsText(['demo.service'])).toBe(
+      'El agent no ve el servicio demo.service: puede no existir, estar excluido o estar parado y sin habilitar, como uno que espera su primer deploy.',
+    )
+    expect(missingUnitsText(['a.service', 'b.service'])).toMatch(
+      /^El agent no ve los servicios a\.service, b\.service: /,
     )
   })
 
