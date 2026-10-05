@@ -844,7 +844,10 @@ Está declarado dos veces, como proyecto systemd y como proyecto Docker, los dos
 - **El primer deploy que falló no tocó nada**: terminó `failed` antes de levantar, dejó el clon y
   el intento siguiente lo aceptó, como dice ADR-021.
 - **La página de auditoría muestra los deploys de los dos proyectos**: cada pedido de la persona,
-  con su IP, y el cierre del agent con su resultado (Desplegado, Volvió atrás o Falló).
+  con su IP, y el cierre del agent con su resultado (Desplegado, Volvió atrás o Falló). **Y los
+  logins**, pero recién después de volver a ingresar: la auditoría de accesos llegó con esta
+  versión, y una sesión abierta desde antes de actualizar (dura hasta 7 días) no deja ningún
+  renglón. Al salir y volver a ingresar apareció `auth.login`, con la IP y la etapa.
 - **El agent**, con la versión del sprint: 8,4 MB y 0,13% de un núcleo en reposo en
   `cristales-baez-prod`, medido durante dos minutos; entre 10 y 12 MB en `sv-gcg` después de los
   deploys.
