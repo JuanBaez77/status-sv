@@ -119,6 +119,7 @@ func runAgent(ctx context.Context, args []string) error {
 			return !errors.Is(err, projects.ErrNotDeclared)
 		})
 		declared.SetProposals(store.List)
+		declared.SetDetails(projects.NewDetails(cfg.ProjectsDir, cfg.DeployKeysDir, unithelper.NewClient(cfg.UnitHelperSocket)))
 		client.SetProposals(store, declared.Refresh)
 		wg.Go(func() { declared.Run(ctx) })
 	}

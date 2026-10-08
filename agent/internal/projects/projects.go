@@ -224,6 +224,11 @@ type Runner struct {
 	// llega o se retira una.
 	proposals func() ([]proto.PendingProposal, error)
 	wake      chan struct{}
+	// details completa cada proyecto con lo que suma el alta: si están sus
+	// variables requeridas y su llave pública. Es opcional.
+	details interface {
+		Fill(ctx context.Context, p *proto.Project)
+	}
 
 	mu sync.Mutex
 	// read es la última lectura del directorio, sin healthchecks; current es
@@ -263,6 +268,12 @@ func NewRunner(dir string, o *Outbox, checker HealthChecker, log *slog.Logger) *
 // viajan en la misma foto. Se llama antes de Run.
 func (r *Runner) SetProposals(list func() ([]proto.PendingProposal, error)) {
 	r.proposals = list
+}
+
+// SetDetails le da al Runner con qué completar cada proyecto (ADR-022). Se
+// llama antes de Run.
+func (r *Runner) SetDetails(d *Details) {
+	r.details = d
 }
 
 // Refresh pide una lectura ya, sin esperar el próximo refresco: llegó o se
@@ -309,6 +320,11 @@ func (r *Runner) Current() []proto.Project {
 
 func (r *Runner) take(ctx context.Context) {
 	state := Read(r.dir, r.now())
+	if r.details != nil {
+		for i := range state.Projects {
+			r.details.Fill(ctx, &state.Projects[i])
+		}
+	}
 	if r.proposals != nil {
 		pending, err := r.proposals()
 		if err != nil {

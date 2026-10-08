@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/JuanBaez77/status-sv/internal/envfile"
 	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -170,26 +172,60 @@ func (h *Helper) handle(ctx context.Context, req Request) Response {
 	}
 }
 
-// check revisa lo que solo root puede ver, sin cambiar nada.
+// check revisa lo que solo root puede ver, sin cambiar nada. De las variables
+// requeridas (ADR-022) dice cuáles faltan en el archivo de entorno, que es de
+// root y el agent no lee: solo los nombres, nunca un valor.
 func (h *Helper) check(ctx context.Context, spec projectspec.Spec) Response {
+	missing, checked := envStatus(spec)
+	withEnv := func(r Response) Response {
+		r.Missing, r.EnvChecked = missing, checked
+		return r
+	}
 	if spec.RunAs != "" && !h.UserExists(spec.RunAs) {
-		return Response{Code: CodeNotReady, Message: "el usuario de run_as no existe en este servidor"}
+		return withEnv(Response{Code: CodeNotReady, Message: "el usuario de run_as no existe en este servidor"})
 	}
 	if spec.EnvFile != "" {
 		if info, err := os.Stat(spec.EnvFile); err != nil || !info.Mode().IsRegular() {
-			return Response{Code: CodeNotReady, Message: "el archivo de env_file no existe o no es un archivo"}
+			return withEnv(Response{Code: CodeNotReady, Message: "el archivo de env_file no existe o no es un archivo"})
 		}
 	}
 	for _, unit := range spec.Project.Units {
 		loaded, err := h.Systemd.Loaded(ctx, unit)
 		if err != nil {
-			return internal("consultar "+unit, err)
+			return withEnv(internal("consultar "+unit, err))
 		}
 		if !loaded {
-			return Response{Code: CodeNotReady, Unit: unit, Message: "systemd no conoce la unidad " + unit}
+			return withEnv(Response{Code: CodeNotReady, Unit: unit, Message: "systemd no conoce la unidad " + unit})
 		}
 	}
-	return Response{OK: true}
+	if len(missing) > 0 {
+		return withEnv(Response{Code: CodeNotReady, Message: "faltan variables requeridas en el archivo de entorno: " + strings.Join(missing, ", ")})
+	}
+	return withEnv(Response{OK: true})
+}
+
+// maxEnvFileBytes acota lo que se lee del archivo de entorno.
+const maxEnvFileBytes = 1 << 20
+
+// envStatus dice qué variables requeridas faltan en el archivo de entorno.
+// checked es falso si el proyecto no declara ninguna.
+func envStatus(spec projectspec.Spec) (missing []string, checked bool) {
+	if len(spec.RequiredEnv) == 0 {
+		return nil, false
+	}
+	if spec.EnvFile == "" {
+		return spec.RequiredEnv, true
+	}
+	f, err := os.Open(spec.EnvFile)
+	if err != nil {
+		return spec.RequiredEnv, true
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxEnvFileBytes))
+	if err != nil {
+		return spec.RequiredEnv, true
+	}
+	return envfile.Missing(spec.RequiredEnv, data), true
 }
 
 func (h *Helper) runStep(ctx context.Context, req Request, spec projectspec.Spec) Response {

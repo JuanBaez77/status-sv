@@ -67,6 +67,9 @@ type System interface {
 	// home en el directorio que se le dé, sin crearlo.
 	CreateUser(name, home string) error
 	Chown(path, user, group string) error
+	// Owner devuelve los números de un usuario y un grupo, para cambiar el
+	// dueño de un archivo abierto sin volver a buscarlo por su ruta.
+	Owner(user, group string) (uid, gid int, err error)
 	// Keygen genera una llave ed25519 sin contraseña en path (y path.pub).
 	Keygen(path, comment string) error
 	Hostname() string
@@ -84,6 +87,9 @@ type Options struct {
 	// NoDeployKey no genera la deploy key: el repo es público y se trae por
 	// HTTPS.
 	NoDeployKey bool
+	// EnvFile es un archivo con los valores de las variables, en vez de
+	// pedirlos por la terminal. Es para la prueba de punta a punta del CI.
+	EnvFile string
 }
 
 // Accepter acepta propuestas.
@@ -93,6 +99,12 @@ type Accepter struct {
 	In    io.Reader
 	Out   io.Writer
 	Now   func() time.Time
+	// ReadSecret pide un valor sin mostrarlo. Si es nil, se lee de la
+	// terminal sin eco o, si In no es una terminal, un renglón de In.
+	ReadSecret func(prompt string) (string, error)
+	// LoadSpec lee la declaración de un proyecto ya declarado (project env).
+	// En el servidor es la del ayudante, que exige que el archivo sea de root.
+	LoadSpec func(dir, name string) (projectspec.Spec, error)
 
 	// in lee de In: uno solo para todas las preguntas, así no se pierde
 	// lo que ya leyó otro.
@@ -268,6 +280,10 @@ func (a *Accepter) plan(acc *acceptance) ([]action, error) {
 		plan = append(plan, step)
 	}
 
+	if step, ok := a.secretsStep(acc); ok {
+		plan = append(plan, step)
+	}
+
 	declare := action{
 		what: fmt.Sprintf("declarar el proyecto en %s", filepath.Join(a.Paths.Projects, acc.name+".yaml")),
 		done: acc.declared,
@@ -384,24 +400,38 @@ func (a *Accepter) makeKey(key, name string) error {
 	return os.Chmod(key+".pub", 0o644) //nolint:gosec // es la llave pública
 }
 
-// writeRootFile escribe un archivo de root entero o nada.
+// writeRootFile escribe un archivo de root entero o nada. El dueño y los
+// permisos se cambian sobre el archivo abierto, no por su ruta: el .env de un
+// proyecto Docker vive en un directorio donde el grupo del agent escribe, y
+// entre escribir y cambiar los permisos podría reemplazar la ruta por un
+// enlace a otro archivo.
 func (a *Accepter) writeRootFile(path string, data []byte, mode os.FileMode, group string) error {
+	uid, gid, err := a.Sys.Owner("root", group)
+	if err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".statussv-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := fchown(tmp, uid, gid); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := a.Sys.Chown(tmp.Name(), "root", group); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), mode); err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)

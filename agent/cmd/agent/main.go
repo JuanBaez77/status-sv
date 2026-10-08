@@ -11,6 +11,7 @@
 //	agent deploy-paths               lista los proyectos que se pueden desplegar, para el instalador
 //	agent deploy-dropin              imprime el drop-in 20-deploy.conf, para el instalador
 //	agent project accept PROYECTO    acepta la propuesta de un proyecto nuevo (ADR-022)
+//	agent project env PROYECTO       carga los valores de sus variables requeridas
 //	agent unit-helper                atiende un pedido del agent como root (lo arranca systemd)
 //	agent version                    imprime la versión
 package main
@@ -97,6 +98,8 @@ Uso:
   agent deploy-paths                lista los proyectos que se pueden desplegar, con su
                                     workdir y su runtime; lo usa el instalador
   agent project accept PROYECTO     acepta la propuesta de un proyecto nuevo y lo declara;
+                                    se corre como root (ADR-022)
+  agent project env PROYECTO        carga o cambia los valores de sus variables requeridas;
                                     se corre como root (ADR-022)
   agent unit-helper                 atiende un pedido del agent como root; no se corre a
                                     mano: lo arranca systemd desde su socket (ADR-019)

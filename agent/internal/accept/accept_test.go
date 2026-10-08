@@ -89,6 +89,10 @@ func (f *fakeSystem) Keygen(path, comment string) error {
 
 func (f *fakeSystem) Hostname() string { return "vps-prueba" }
 
+// Owner devuelve el usuario que corre la prueba: cambiarle el dueño a un
+// archivo propio no necesita root.
+func (f *fakeSystem) Owner(string, string) (int, int, error) { return os.Getuid(), os.Getgid(), nil }
+
 func (f *fakeSystem) RestartAgent(context.Context) error {
 	f.restarts++
 	if f.restartErr != nil {

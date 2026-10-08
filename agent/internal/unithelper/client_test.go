@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 )
 
 // listen levanta un ayudante de prueba en un socket unix y devuelve su ruta.
@@ -200,5 +202,26 @@ func TestStepProperties(t *testing.T) {
 	}
 	if !found {
 		t.Error("falta EnvironmentFiles con el archivo declarado")
+	}
+}
+
+// CheckEnv devuelve los nombres que faltan aunque el chequeo dé not_ready.
+func TestClientCheckEnv(t *testing.T) {
+	h := newHelper(t, &fakeSystemd{})
+	load := h.Load
+	h.Load = func(dir, name string) (projectspec.Spec, error) {
+		spec, err := load(dir, name)
+		spec.RequiredEnv = []string{"CLAVE", "SECRET_KEY"}
+		return spec, err
+	}
+	client := NewClient(listen(t, h))
+	missing, checked, err := client.CheckEnv(t.Context(), "facturas")
+	if err != nil || !checked || len(missing) != 1 || missing[0] != "SECRET_KEY" {
+		t.Errorf("CheckEnv = %v, %v, %v", missing, checked, err)
+	}
+	// Check, en cambio, lo da por no listo, con los nombres en el error.
+	var helperErr *Error
+	if err := client.Check(t.Context(), "facturas"); !errors.As(err, &helperErr) || len(helperErr.Missing) != 1 {
+		t.Errorf("Check = %v", err)
 	}
 }
