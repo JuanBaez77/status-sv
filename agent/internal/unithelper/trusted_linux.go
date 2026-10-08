@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 )
 
 // LoadTrusted lee la declaración de un proyecto como projects.ReadSpec, pero

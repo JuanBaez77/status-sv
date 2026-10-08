@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 )
 
 const deployID = "0199a1b2-0000-7000-8000-00000000000a"

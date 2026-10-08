@@ -12,10 +12,10 @@ import (
 
 	"github.com/JuanBaez77/status-sv/agent/internal/compose"
 	journald "github.com/JuanBaez77/status-sv/agent/internal/journal"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
 	sd "github.com/JuanBaez77/status-sv/agent/internal/systemd"
 	"github.com/JuanBaez77/status-sv/agent/internal/unithelper"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 

@@ -11,8 +11,8 @@ import (
 	"strconv"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/agent/internal/unithelper"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 )
 
 // runUnitHelper atiende un pedido del agent como root (ADR-019): correr un

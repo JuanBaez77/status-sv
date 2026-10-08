@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/compose"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 
