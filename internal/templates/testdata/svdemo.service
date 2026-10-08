@@ -1,0 +1,28 @@
+# Unidad del proyecto svdemo, generada por status-sv (ADR-023).
+#
+# La escribió `statussv-agent project accept`. No se edita a mano: se cambia la
+# plantilla (en el repo de status-sv, o como root en
+# /etc/status-sv/templates/service.tmpl) y se genera de nuevo.
+
+[Unit]
+Description=svdemo (status-sv)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=svdemo
+WorkingDirectory=/srv/svdemo
+EnvironmentFile=/etc/status-sv/env/svdemo.env
+ExecStart="/srv/svdemo/.venv/bin/gunicorn" "app:app" "--bind" "127.0.0.1:18097" "--workers" "2"
+Restart=on-failure
+RestartSec=5
+
+# El proyecto escribe donde le dejan los permisos de su usuario (su workdir);
+# el sistema y /tmp de los demás, no.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
