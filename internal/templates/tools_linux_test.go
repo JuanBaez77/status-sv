@@ -106,6 +106,10 @@ func TestSiteValidatesWithNginx(t *testing.T) {
 			t.Fatal(err)
 		}
 		for name, data := range map[string][]byte{"svdemo.conf": site, "otro.conf": second} {
+			// nginx -t abre los puertos de verdad, y sin root no puede abrir
+			// el 80 ni el 443: en la prueba escuchan en puertos altos. El
+			// resto del sitio queda tal cual se genera.
+			data = []byte(highPorts.Replace(string(data)))
 			if err := os.WriteFile(filepath.Join(sites, name), data, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -136,6 +140,15 @@ http {
 		}
 	}
 }
+
+// highPorts cambia los listen del sitio generado por puertos que un usuario
+// sin root puede abrir.
+var highPorts = strings.NewReplacer(
+	"listen 80;", "listen 127.0.0.1:18080;",
+	"listen [::]:80;", "listen [::1]:18080;",
+	"listen 443 ssl http2;", "listen 127.0.0.1:18443 ssl http2;",
+	"listen [::]:443 ssl http2;", "listen [::1]:18443 ssl http2;",
+)
 
 // writeSelfSigned deja en dir un certificado autofirmado con los nombres que
 // usa certbot.
