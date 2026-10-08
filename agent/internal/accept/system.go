@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -138,4 +139,49 @@ func (OS) Owner(owner, group string) (int, int, error) {
 		return 0, 0, err
 	}
 	return uid, gid, nil
+}
+
+// DaemonReload implementa System.
+func (o OS) DaemonReload(ctx context.Context) error {
+	return o.run(ctx, "systemctl", "daemon-reload")
+}
+
+// VerifyUnit implementa System. systemd-analyze verify sale con 0 aunque la
+// unidad tenga problemas: lo que importa es lo que dice.
+func (OS) VerifyUnit(ctx context.Context, path string) (string, error) {
+	out, err := exec.CommandContext(ctx, "systemd-analyze", "verify", "--man=no", path).CombinedOutput() //nolint:gosec // ruta armada con un nombre validado
+	var exit *exec.ExitError
+	if err != nil && !errors.As(err, &exit) {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// Has implementa System.
+func (OS) Has(program string) bool {
+	_, err := exec.LookPath(program)
+	return err == nil
+}
+
+// Resolves implementa System.
+func (OS) Resolves(domain string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupHost(ctx, domain)
+	return err == nil && len(addrs) > 0
+}
+
+// NginxTest implementa System.
+func (o OS) NginxTest(ctx context.Context) error {
+	return o.run(ctx, "nginx", "-t")
+}
+
+// NginxReload implementa System.
+func (o OS) NginxReload(ctx context.Context) error {
+	return o.run(ctx, "systemctl", "reload", "nginx")
+}
+
+// Certbot implementa System.
+func (o OS) Certbot(ctx context.Context, args []string) error {
+	return o.run(ctx, "certbot", args...)
 }

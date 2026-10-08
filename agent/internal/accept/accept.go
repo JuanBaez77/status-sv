@@ -30,6 +30,7 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/agent/internal/proposals"
 	"github.com/JuanBaez77/status-sv/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/templates"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 
@@ -78,6 +79,23 @@ type System interface {
 	// DeployCheck corre deploy-check del proyecto como el usuario del agent,
 	// mostrando lo que dice.
 	DeployCheck(ctx context.Context, project string) error
+
+	// Lo que sigue es para la unidad y el sitio (ADR-023).
+
+	// DaemonReload le pide a systemd que relea las unidades.
+	DaemonReload(ctx context.Context) error
+	// VerifyUnit devuelve lo que dice systemd-analyze verify de una unidad.
+	VerifyUnit(ctx context.Context, path string) (string, error)
+	// Has dice si un programa está instalado.
+	Has(program string) bool
+	// Resolves dice si un dominio resuelve.
+	Resolves(domain string) bool
+	// NginxTest corre nginx -t, mostrando lo que dice si falla.
+	NginxTest(ctx context.Context) error
+	// NginxReload recarga nginx.
+	NginxReload(ctx context.Context) error
+	// Certbot corre certbot con esos argumentos.
+	Certbot(ctx context.Context, args []string) error
 }
 
 // Options son las banderas del comando.
@@ -90,6 +108,9 @@ type Options struct {
 	// EnvFile es un archivo con los valores de las variables, en vez de
 	// pedirlos por la terminal. Es para la prueba de punta a punta del CI.
 	EnvFile string
+	// Email es el correo para la cuenta de Let's Encrypt, si el servidor
+	// todavía no tiene una.
+	Email string
 }
 
 // Accepter acepta propuestas.
@@ -105,6 +126,9 @@ type Accepter struct {
 	// LoadSpec lee la declaración de un proyecto ya declarado (project env).
 	// En el servidor es la del ayudante, que exige que el archivo sea de root.
 	LoadSpec func(dir, name string) (projectspec.Spec, error)
+	// Templates devuelve las plantillas de la unidad y del sitio. Si es nil,
+	// las de fábrica.
+	Templates func() (*templates.Set, error)
 
 	// in lee de In: uno solo para todas las preguntas, así no se pierde
 	// lo que ya leyó otro.
@@ -135,6 +159,10 @@ type acceptance struct {
 	// keyCreated es que la deploy key se generó en esta corrida: hay que
 	// cargarla en GitHub antes de deploy-check.
 	keyCreated bool
+	// set son las plantillas; unit y site, lo que generan para el proyecto.
+	set  *templates.Set
+	unit []byte
+	site []byte
 }
 
 // Accept acepta la propuesta del proyecto name.
@@ -237,6 +265,24 @@ func (a *Accepter) plan(acc *acceptance) ([]action, error) {
 	project := acc.spec.Project
 	systemd := project.Runtime == proto.RuntimeSystemd
 
+	// Las plantillas se cargan y se llenan antes de tocar nada: una plantilla
+	// del servidor que no anda frena el alta antes de empezar.
+	set, err := a.templateSet()
+	if err != nil {
+		return nil, err
+	}
+	acc.set = set
+	if acc.spec.Service != nil {
+		if acc.unit, err = set.Service(acc.spec); err != nil {
+			return nil, err
+		}
+	}
+	if acc.spec.Site != nil {
+		if acc.site, err = set.Site(acc.spec, templates.SiteTLS); err != nil {
+			return nil, err
+		}
+	}
+
 	if systemd {
 		exists, err := a.Sys.UserExists(acc.spec.RunAs)
 		if err != nil {
@@ -283,6 +329,11 @@ func (a *Accepter) plan(acc *acceptance) ([]action, error) {
 	if step, ok := a.secretsStep(acc); ok {
 		plan = append(plan, step)
 	}
+	if step, ok, err := a.unitStep(acc); err != nil {
+		return nil, err
+	} else if ok {
+		plan = append(plan, step)
+	}
 
 	declare := action{
 		what: fmt.Sprintf("declarar el proyecto en %s", filepath.Join(a.Paths.Projects, acc.name+".yaml")),
@@ -295,6 +346,9 @@ func (a *Accepter) plan(acc *acceptance) ([]action, error) {
 		declare.what = "el proyecto ya está declarado igual a la propuesta"
 	}
 	plan = append(plan, declare)
+	if step, ok := a.siteStep(acc); ok {
+		plan = append(plan, step)
+	}
 
 	plan = append(plan, action{
 		what:  fmt.Sprintf("sumar %s al drop-in del deploy y reiniciar el agent", project.Workdir),
@@ -330,6 +384,12 @@ func (a *Accepter) show(acc *acceptance, plan []action) {
 			a.printf("  %s\n", s)
 		}
 		a.printf("\n")
+	}
+	if acc.unit != nil {
+		a.printf("--- %s: la unidad, con la plantilla %s ---\n%s---\n\n", templates.ServiceUnitFile(acc.name), acc.set.ServiceOrigin, acc.unit)
+	}
+	if acc.site != nil {
+		a.printf("--- %s: el sitio, con la plantilla %s ---\n%s---\n\n", templates.SiteFileName(acc.name), acc.set.SiteOrigin, acc.site)
 	}
 	a.printf("Pasos:\n")
 	for i, step := range plan {
