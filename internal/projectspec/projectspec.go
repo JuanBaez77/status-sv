@@ -78,6 +78,21 @@ type file struct {
 	Healthcheck    *healthcheck `yaml:"healthcheck"`
 	Deploy         *deploySteps `yaml:"deploy"`
 	Rollback       string       `yaml:"rollback"`
+	RequiredEnv    []string     `yaml:"required_env"`
+	Service        *service     `yaml:"service"`
+	Site           *site        `yaml:"site"`
+}
+
+// service es el servicio de un proyecto systemd cuya unidad se genera desde la
+// plantilla (ADR-023).
+type service struct {
+	Command []string `yaml:"command"`
+}
+
+// site es el sitio de nginx de un proyecto (ADR-023).
+type site struct {
+	Domain string `yaml:"domain"`
+	Port   int    `yaml:"port"`
 }
 
 type healthcheck struct {
@@ -112,6 +127,26 @@ const (
 	maxEnvFileLen       = 256
 )
 
+// Límites del alta (ADR-022 y ADR-023).
+const (
+	// MaxRequiredEnv es lo más que un proyecto puede declarar en required_env.
+	MaxRequiredEnv = 50
+	// MinSitePort y MaxSitePort acotan el puerto local al que apunta el sitio:
+	// nunca uno de los reservados.
+	MinSitePort = 1024
+	MaxSitePort = 65535
+
+	maxEnvNameLen = 64
+	maxDomainLen  = 253
+)
+
+// Lo que una propuesta no elige (ADR-022): el workdir y el archivo de entorno
+// salen del nombre del proyecto.
+const (
+	ProposalBaseDir = "/srv"
+	ProposalEnvDir  = "/etc/status-sv/env"
+)
+
 // Spec es un proyecto declarado con lo que solo usa quien despliega. Project
 // es lo que viaja al control plane; lo demás no, porque un comando o una ruta
 // podrían traer algo que no tiene por qué salir del servidor.
@@ -127,6 +162,30 @@ type Spec struct {
 	// EnvFile es el archivo de entorno de esos pasos, si se declaró. Lo lee
 	// systemd; el agent no lo abre.
 	EnvFile string
+	// RequiredEnv son los nombres de las variables de entorno que el proyecto
+	// necesita para arrancar (ADR-022). Solo los nombres: los valores se
+	// cargan en el servidor y no salen de él.
+	RequiredEnv []string
+	// Service es el servicio de un proyecto systemd cuya unidad se genera
+	// desde la plantilla (ADR-023). Con él, Units es [<nombre>.service].
+	Service *Service
+	// Site es el sitio de nginx del proyecto, si tiene uno (ADR-023).
+	Site *Site
+}
+
+// Service es el servicio que corre un proyecto systemd con la unidad generada.
+type Service struct {
+	// Command es el comando tal como se escribió, para mostrarlo.
+	Command []string
+	// Exec es Command[0] resuelto a una ruta absoluta, como en un paso.
+	Exec string
+}
+
+// Site es el sitio de nginx de un proyecto: su dominio y el puerto de
+// 127.0.0.1 al que pasa los pedidos.
+type Site struct {
+	Domain string
+	Port   int
 }
 
 // Step es un paso declarado. En un proyecto Docker corre con docker compose
@@ -147,6 +206,14 @@ var serviceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // userName es el formato de un usuario del sistema, el que acepta useradd.
 var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// envName es el formato del nombre de una variable de entorno que se puede
+// declarar como requerida: mayúsculas, números y _, sin empezar con número.
+var envName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+// domainLabel es una etiqueta de un nombre de host en minúsculas: letras,
+// números y guiones, sin guion en las puntas.
+var domainLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // NameFromFile devuelve el nombre de proyecto que corresponde a un archivo, o
 // ErrNotProjectFile si no es un archivo de proyecto.
@@ -219,6 +286,11 @@ func ParseSpec(filename string, data []byte) (Spec, error) {
 	if project.Runtime == proto.RuntimeDocker && project.ComposeProject == "" {
 		project.ComposeProject = DefaultComposeProject(project.Workdir)
 	}
+	// Con la unidad generada, el proyecto tiene esa unidad y ninguna otra:
+	// declararla es opcional.
+	if project.Runtime == proto.RuntimeSystemd && f.Service != nil && len(project.Units) == 0 {
+		project.Units = []string{ServiceUnit(f.Name)}
+	}
 	if f.Healthcheck != nil {
 		spec := proto.HealthcheckSpec{
 			URL:            f.Healthcheck.URL,
@@ -241,15 +313,34 @@ func ParseSpec(filename string, data []byte) (Spec, error) {
 	spec := Spec{Project: project}
 	systemd := project.Runtime == proto.RuntimeSystemd
 	if systemd {
-		// Sin pasos no hace falta un usuario: desplegar es traer el código y
-		// reiniciar. Así un proyecto que ya estaba declarado sigue valiendo.
+		// Sin pasos ni unidad generada no hace falta un usuario: desplegar es
+		// traer el código y reiniciar. Así un proyecto que ya estaba declarado
+		// sigue valiendo.
 		steps := f.Deploy != nil && len(f.Deploy.Build)+len(f.Deploy.Pre)+len(f.Deploy.Post) > 0
-		if err := checkRun(f.RunAs, f.EnvFile, steps); err != nil {
+		if err := checkRun(f.RunAs, f.EnvFile, steps || f.Service != nil); err != nil {
 			return Spec{}, err
 		}
 		spec.RunAs, spec.EnvFile = f.RunAs, f.EnvFile
 	} else if f.RunAs != "" || f.EnvFile != "" {
 		return Spec{}, errors.New("run_as y env_file: son solo para proyectos de systemd")
+	}
+	if err := checkRequiredEnv(f.RequiredEnv); err != nil {
+		return Spec{}, err
+	}
+	if systemd && len(f.RequiredEnv) > 0 && f.EnvFile == "" {
+		return Spec{}, errors.New("required_env: con systemd necesita env_file, el archivo donde quedan los valores")
+	}
+	spec.RequiredEnv = f.RequiredEnv
+	if f.Service != nil {
+		if spec.Service, err = parseService(f.Service, project); err != nil {
+			return Spec{}, err
+		}
+	}
+	if f.Site != nil {
+		if err := checkSite(f.Site); err != nil {
+			return Spec{}, err
+		}
+		spec.Site = &Site{Domain: f.Site.Domain, Port: f.Site.Port}
 	}
 	if f.Deploy != nil {
 		if len(f.Deploy.Build) > 0 && !systemd {
@@ -284,11 +375,12 @@ func checkRollback(rollback, runtime string) error {
 }
 
 // checkRun valida con qué usuario y con qué archivo de entorno corren los
-// pasos de un proyecto systemd (ADR-019). El usuario hace falta si hay pasos.
-func checkRun(runAs, envFile string, steps bool) error {
+// pasos de un proyecto systemd (ADR-019) y su servicio, si la unidad se genera
+// (ADR-023). El usuario hace falta si hay alguno de los dos.
+func checkRun(runAs, envFile string, needsUser bool) error {
 	switch {
-	case runAs == "" && steps:
-		return errors.New("run_as: falta; es el usuario con el que corren los pasos del proyecto")
+	case runAs == "" && needsUser:
+		return errors.New("run_as: falta; es el usuario con el que corren los pasos y el servicio del proyecto")
 	case runAs == "" && envFile != "":
 		return errors.New("env_file: necesita run_as; es el entorno de los pasos del proyecto")
 	case runAs == "":
@@ -328,19 +420,11 @@ func parseSteps(field string, raw []step, project proto.Project) ([]Step, error)
 			return nil, fmt.Errorf("%s.service: falta", where)
 		case !systemd && (len(s.Service) > maxStepServiceChars || !serviceName.MatchString(s.Service)):
 			return nil, fmt.Errorf("%s.service: tiene que ser un nombre de servicio de Compose (letras, números, _ . -)", where)
-		case len(s.Command) == 0:
-			return nil, fmt.Errorf("%s.command: falta; es una lista de argumentos, como [\"python\", \"manage.py\", \"migrate\"]", where)
-		case len(s.Command) > MaxStepArgs:
-			return nil, fmt.Errorf("%s.command: trae %d argumentos y el máximo es %d", where, len(s.Command), MaxStepArgs)
-		case strings.HasPrefix(s.Command[0], "-"):
-			return nil, fmt.Errorf("%s.command: el primer argumento no puede empezar con -", where)
 		case s.TimeoutSeconds < 0 || s.TimeoutSeconds > maxStepTimeoutSecs:
 			return nil, fmt.Errorf("%s.timeout_seconds: tiene que estar entre 1 y %d", where, maxStepTimeoutSecs)
 		}
-		for j, arg := range s.Command {
-			if arg == "" || len(arg) > MaxStepArgLen || !printable(arg) {
-				return nil, fmt.Errorf("%s.command[%d]: vacío, de más de %d bytes o con caracteres de control", where, j, MaxStepArgLen)
-			}
+		if err := checkCommand(where, s.Command); err != nil {
+			return nil, err
 		}
 		timeout := DefaultStepTimeout
 		if s.TimeoutSeconds > 0 {
@@ -355,6 +439,137 @@ func parseSteps(field string, raw []step, project proto.Project) ([]Step, error)
 		steps = append(steps, parsed)
 	}
 	return steps, nil
+}
+
+// checkCommand valida un comando declarado como lista de argumentos: el de un
+// paso o el del servicio. where es el campo, para el error.
+func checkCommand(where string, command []string) error {
+	switch {
+	case len(command) == 0:
+		return fmt.Errorf("%s.command: falta; es una lista de argumentos, como [\"python\", \"manage.py\", \"migrate\"]", where)
+	case len(command) > MaxStepArgs:
+		return fmt.Errorf("%s.command: trae %d argumentos y el máximo es %d", where, len(command), MaxStepArgs)
+	case strings.HasPrefix(command[0], "-"):
+		return fmt.Errorf("%s.command: el primer argumento no puede empezar con -", where)
+	}
+	for j, arg := range command {
+		if arg == "" || len(arg) > MaxStepArgLen || !printable(arg) {
+			return fmt.Errorf("%s.command[%d]: vacío, de más de %d bytes o con caracteres de control", where, j, MaxStepArgLen)
+		}
+	}
+	return nil
+}
+
+// parseService valida el servicio de la unidad generada (ADR-023): solo con
+// systemd, con la unidad que lleva el nombre del proyecto y con un programa
+// que, como el de un paso, es una ruta absoluta o relativa al workdir.
+func parseService(raw *service, project proto.Project) (*Service, error) {
+	unit := ServiceUnit(project.Name)
+	switch {
+	case project.Runtime != proto.RuntimeSystemd:
+		return nil, errors.New("service: es solo para proyectos de systemd; con Docker los servicios los levanta docker compose")
+	case len(project.Units) != 1 || project.Units[0] != unit:
+		return nil, errors.New("units: con service es solo la unidad que se genera, <nombre>.service")
+	}
+	if err := checkCommand("service", raw.Command); err != nil {
+		return nil, err
+	}
+	exec := execPath(project.Workdir, raw.Command[0])
+	if exec == "" {
+		return nil, errors.New("service.command[0]: tiene que ser la ruta del programa, absoluta o relativa al workdir y sin salir de él")
+	}
+	return &Service{Command: raw.Command, Exec: exec}, nil
+}
+
+// ServiceUnit es el nombre de la unidad que se genera para un proyecto.
+func ServiceUnit(project string) string {
+	return project + ".service"
+}
+
+// checkRequiredEnv valida los nombres de required_env.
+func checkRequiredEnv(names []string) error {
+	if len(names) > MaxRequiredEnv {
+		return fmt.Errorf("required_env: trae %d nombres y el máximo es %d", len(names), MaxRequiredEnv)
+	}
+	seen := make(map[string]bool, len(names))
+	for i, name := range names {
+		switch {
+		case len(name) > maxEnvNameLen || !envName.MatchString(name):
+			return fmt.Errorf("required_env[%d]: tiene que ser un nombre de variable (mayúsculas, números y _, de hasta %d caracteres)", i, maxEnvNameLen)
+		case seen[name]:
+			return fmt.Errorf("required_env[%d]: está repetido", i)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// checkSite valida el sitio de nginx (ADR-023).
+func checkSite(s *site) error {
+	switch {
+	case !ValidDomain(s.Domain):
+		return fmt.Errorf("site.domain: tiene que ser un nombre de host en minúsculas, con al menos un punto, sin comodines y de hasta %d caracteres", maxDomainLen)
+	case s.Port < MinSitePort || s.Port > MaxSitePort:
+		return fmt.Errorf("site.port: tiene que estar entre %d y %d", MinSitePort, MaxSitePort)
+	}
+	return nil
+}
+
+// ValidDomain dice si un dominio se puede usar en el sitio generado: un nombre
+// de host en minúsculas, con al menos dos etiquetas y sin comodines. Es lo
+// único del dominio que llega a la plantilla de nginx.
+func ValidDomain(domain string) bool {
+	if domain == "" || len(domain) > maxDomainLen {
+		return false
+	}
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if !domainLabel.MatchString(label) {
+			return false
+		}
+	}
+	// La última etiqueta no es solo números: eso es una dirección IP.
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
+}
+
+// ProposalWorkdir es el workdir de un proyecto propuesto, que no se elige.
+func ProposalWorkdir(project string) string {
+	return ProposalBaseDir + "/" + project
+}
+
+// ProposalEnvFile es el archivo de entorno de un proyecto systemd propuesto.
+func ProposalEnvFile(project string) string {
+	return ProposalEnvDir + "/" + project + ".env"
+}
+
+// CheckProposal revisa lo que una propuesta no elige (ADR-022): el workdir, y
+// en un proyecto systemd el usuario, el archivo de entorno y la unidad, que
+// salen del nombre del proyecto. Se aplica además de ParseSpec, sobre lo que
+// ya pasó el parser: una propuesta es un project.yaml con menos libertad.
+//
+// Como los del parser, los errores nombran el campo y la regla, no el valor.
+func CheckProposal(spec Spec) error {
+	project := spec.Project
+	if project.Workdir != ProposalWorkdir(project.Name) {
+		return errors.New("workdir: en una propuesta es siempre /srv/<nombre>")
+	}
+	if project.Runtime != proto.RuntimeSystemd {
+		return nil
+	}
+	switch {
+	case !userName.MatchString(project.Name):
+		return errors.New("name: un proyecto systemd propuesto corre con un usuario de su mismo nombre, así que empieza con letra y tiene hasta 32 caracteres")
+	case spec.Service == nil:
+		return errors.New("service: falta; un proyecto systemd propuesto genera su unidad desde la plantilla")
+	case spec.RunAs != project.Name:
+		return errors.New("run_as: en una propuesta es siempre el nombre del proyecto")
+	case spec.EnvFile != ProposalEnvFile(project.Name):
+		return errors.New("env_file: en una propuesta es siempre /etc/status-sv/env/<nombre>.env")
+	}
+	return nil
 }
 
 // execPath resuelve el programa de un paso de systemd a una ruta absoluta: tal
@@ -415,7 +630,12 @@ func yamlError(err error) error {
 	msg := backticked.ReplaceAllString(err.Error(), "(valor)")
 	msg = unknownField.ReplaceAllString(msg, "el campo $1 no existe")
 	// Los pasos se leen en un tipo de Go; el error lo nombra por cómo se escribe.
-	msg = strings.NewReplacer("[]projectspec.step", "una lista de pasos", "projectspec.step", "un paso {service, command, timeout_seconds}").Replace(msg)
+	msg = strings.NewReplacer(
+		"[]projectspec.step", "una lista de pasos",
+		"projectspec.step", "un paso {service, command, timeout_seconds}",
+		"projectspec.service", "un servicio {command}",
+		"projectspec.site", "un sitio {domain, port}",
+	).Replace(msg)
 	msg = strings.TrimPrefix(msg, "yaml: ")
 	if len(msg) > proto.MaxProjectErrorLen-16 {
 		msg = strings.ToValidUTF8(msg[:proto.MaxProjectErrorLen-16], "")
