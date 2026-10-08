@@ -15,6 +15,7 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/compose"
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
 	"github.com/JuanBaez77/status-sv/agent/internal/docker"
+	"github.com/JuanBaez77/status-sv/agent/internal/dropin"
 	"github.com/JuanBaez77/status-sv/agent/internal/gitops"
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
@@ -22,10 +23,6 @@ import (
 	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
-
-// hiddenPrefixes son los directorios que ProtectHome=true esconde del agent:
-// un workdir ahí no se puede desplegar (ADR-015).
-var hiddenPrefixes = []string{"/home/", "/root/", "/run/user/"}
 
 // runDeployPaths imprime, por cada proyecto declarado y válido, su nombre, su
 // workdir y su runtime, separados por un espacio. Lo usa el instalador para
@@ -52,7 +49,7 @@ func printDeployPaths(out, warn io.Writer, state proto.ProjectsState) error {
 		return fmt.Errorf("no se pudo leer el directorio de proyectos: %s", state.Source.Detail)
 	}
 	for _, p := range state.Projects {
-		if hidden(p.Workdir) {
+		if dropin.Hidden(p.Workdir) {
 			_, _ = fmt.Fprintf(warn, "aviso: %s está en %s, que la unidad esconde (ProtectHome); no se va a poder desplegar\n", p.Name, p.Workdir)
 			continue
 		}
@@ -62,15 +59,6 @@ func printDeployPaths(out, warn io.Writer, state proto.ProjectsState) error {
 		_, _ = fmt.Fprintf(warn, "aviso: %s es inválido y queda afuera: %s\n", invalid.File, invalid.Error)
 	}
 	return nil
-}
-
-func hidden(workdir string) bool {
-	for _, prefix := range hiddenPrefixes {
-		if strings.HasPrefix(workdir+"/", prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // runDeployCheck revisa, sin tocar lo que corre, que un proyecto se pueda
@@ -146,7 +134,7 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 	}
 	p := spec.Project
 	c.ok("declaración: %s, rama %s, %s (%s)", p.Repo, p.Branch, p.Workdir, p.Runtime)
-	if hidden(p.Workdir) {
+	if dropin.Hidden(p.Workdir) {
 		c.fail("el workdir %s está en un directorio que la unidad esconde (ProtectHome)", p.Workdir)
 		return
 	}
@@ -365,4 +353,28 @@ func writable(dir string) error {
 	name := f.Name()
 	_ = f.Close()
 	return os.Remove(name)
+}
+
+// runDeployDropin imprime el drop-in 20-deploy.conf con los workdir de los
+// proyectos declarados. Lo usa el instalador, que lo escribe en su lugar: así
+// queda igual que el que deja `project accept` (ADR-022).
+func runDeployDropin(_ context.Context, args []string) error {
+	flags := flag.NewFlagSet("deploy-dropin", flag.ContinueOnError)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	state := projects.Read(cfg.ProjectsDir, time.Now())
+	if state.Source.Status == proto.SourceError {
+		return fmt.Errorf("no se pudo leer el directorio de proyectos: %s", state.Source.Detail)
+	}
+	content, warnings := dropin.Render(state)
+	for _, w := range warnings {
+		_, _ = fmt.Fprintln(os.Stderr, "aviso: "+w)
+	}
+	_, err = fmt.Fprint(os.Stdout, content)
+	return err
 }

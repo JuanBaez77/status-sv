@@ -211,18 +211,10 @@ elif [ "${DEPLOY}" = enable ] || [ -f "${DROPIN_DEPLOY}" ]; then
 
   install -d -o root -g root -m 0755 "${DROPIN_DIR}"
   install -o root -g root -m 0644 /dev/null "${DROPIN_DEPLOY}"
-  {
-    echo "# Lo escribe deploy/install-agent.sh --enable-deploy; no editar a mano."
-    echo "# El porqué de cada renglón está en docs/adr/ADR-015-motor-de-deploy-docker.md."
-    echo "[Service]"
-    echo "Environment=STATUSSV_DEPLOY_ENABLED=true"
-    echo "UMask=0002"
-    echo "MemoryMax=512M"
-    echo "TasksMax=256"
-    while read -r _ workdir _; do
-      [ -n "${workdir}" ] && echo "ReadWritePaths=-${workdir}"
-    done <<<"${PATHS}"
-  } >"${DROPIN_DEPLOY}"
+  # Lo arma el binario, igual que cuando se acepta un proyecto nuevo con
+  # `statussv-agent project accept` (ADR-022): los dos escriben lo mismo.
+  STATUSSV_PROJECTS_DIR="${PROJECTS_DIR}" "${BINARY_DEST}" deploy-dropin 2>/dev/null >"${DROPIN_DEPLOY}" \
+    || error "no se pudo armar ${DROPIN_DEPLOY}"
   DEPLOY_ON=true
   echo "prendido; proyectos que se pueden desplegar:"
   if [ -z "${PATHS}" ]; then

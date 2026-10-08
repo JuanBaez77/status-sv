@@ -271,3 +271,24 @@ func writeJSON(path string, v any) error {
 	}
 	return nil
 }
+
+// Active devuelve los proyectos con un deploy sin terminar según los diarios
+// que el motor guarda en stateDir. Lo usa `project accept` (ADR-022), que
+// reinicia el agent: un reinicio a mitad de un deploy lo vuelve atrás.
+func Active(stateDir string) ([]string, error) {
+	s := &store{dir: filepath.Join(stateDir, "deploys")}
+	all, err := s.journals()
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var active []string
+	for _, j := range all {
+		if !j.Event.Status.Final() {
+			active = append(active, j.Event.Project)
+		}
+	}
+	return active, nil
+}
