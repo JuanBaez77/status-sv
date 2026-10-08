@@ -25,7 +25,7 @@ import (
 	"unicode"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/outbox"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 

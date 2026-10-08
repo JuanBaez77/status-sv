@@ -308,7 +308,7 @@ status-sv/
 │   ├── cmd/server/
 │   ├── internal/     # api, auth, config, enrollment, metrics, panel, store; después mcp, approvals
 │   └── migrations/   # SQL versionado
-├── internal/         # Go: código compartido por agent y server (buildinfo)
+├── internal/         # Go: código compartido por agent y server (buildinfo, projectspec)
 ├── web/              # React + Vite + TypeScript
 ├── proto/            # contratos agent ↔ server
 ├── worker-smoke/     # Playwright, a demanda

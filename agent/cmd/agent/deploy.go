@@ -17,9 +17,9 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/docker"
 	"github.com/JuanBaez77/status-sv/agent/internal/gitops"
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
 	"github.com/JuanBaez77/status-sv/agent/internal/unithelper"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 

@@ -10,7 +10,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 

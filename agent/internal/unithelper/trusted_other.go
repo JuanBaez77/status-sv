@@ -5,7 +5,7 @@ package unithelper
 import (
 	"errors"
 
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 )
 
 // LoadTrusted solo existe en Linux, que es donde corre el ayudante.

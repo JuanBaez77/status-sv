@@ -12,7 +12,7 @@ import (
 
 	"github.com/JuanBaez77/status-sv/agent/internal/config"
 	"github.com/JuanBaez77/status-sv/agent/internal/gitops"
-	"github.com/JuanBaez77/status-sv/agent/internal/projectspec"
+	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
 

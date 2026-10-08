@@ -12,6 +12,9 @@
 // usa quien despliega y no viaja al control plane: los pasos declarados del
 // deploy (ADR-016) y, en un proyecto systemd, con qué usuario y con qué archivo
 // de entorno corren (ADR-019).
+//
+// Lo usan el agent, el ayudante root y, para validar una propuesta de un
+// proyecto nuevo, el control plane (ADR-022): las mismas reglas en los tres.
 package projectspec
 
 import (
