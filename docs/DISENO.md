@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-10-02
+Última actualización: 2026-10-08
 
 ## Visión y alcance
 
@@ -26,7 +26,7 @@ status-sv es una plataforma propia para observar y operar servidores VPS: un pan
 - Multiusuario u organizaciones, facturación y roles finos.
 - Agents para Windows o macOS.
 - Orquestación tipo Kubernetes y autoscaling.
-- Edición libre de archivos de configuración desde el panel; solo las plantillas del proxy son editables.
+- Edición de archivos de configuración desde el panel, incluidas las plantillas de la unidad y del sitio, que el panel solo muestra ([ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md)).
 - OAuth para claude.ai (Fase 4).
 
 ## Principios de diseño
@@ -99,7 +99,7 @@ Tu stack fuerte hoy es Python, así que las primeras semanas van a ser de curva.
 
 ## Modelo de datos
 
-Catorce entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
+Quince entidades cubren el MVP. Las métricas crudas y agregadas viven particionadas por tiempo para que borrar datos viejos sea soltar una partición, no un DELETE masivo, y sus discos e interfaces van en tablas aparte ([ADR-008](adr/ADR-008-tablas-de-metricas.md)).
 
 | Tabla | Contenido | Notas |
 | --- | --- | --- |
@@ -107,6 +107,7 @@ Catorce entidades cubren el MVP. Las métricas crudas y agregadas viven particio
 | `agent_credentials` | Hash de credencial por agent, fecha de emisión y revocación. | Se guarda solo el hash. |
 | `enrollment_tokens` | Token de un solo uso, expiración y servidor resultante. | Vence en 15 minutos. |
 | `projects` | Servidor, nombre, tipo de runtime (docker o systemd), URL de healthcheck, entorno, y el último resultado del healthcheck. | Nace del `project.yaml` que el agent lee en su servidor; el control plane no lo puede crear ni cambiar ([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)). |
+| `project_proposals` | Servidor, nombre, la declaración propuesta y su hash, estado (pendiente, entregada, aceptada, retirada o vencida), quién la propuso y cuándo. | La propuesta de un proyecto nuevo, armada en el panel o por MCP. No declara nada: lo declara una persona al aceptarla en el servidor ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md)). Entra en el Sprint 6. |
 | `deploys` | Proyecto, tipo (deploy o rollback), commit pedido y desplegado, commit anterior, estado, quién lo pidió, tiempos y la foto de sus pasos con los últimos renglones de cada uno. | Estados: pending, running, succeeded, failed, rolled_back (approved llega con las aprobaciones de la Fase 3). Un solo deploy activo por proyecto ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md), [ADR-017](adr/ADR-017-deploy-desde-el-panel-y-auditoria.md)). |
 | `runtime_units` | Último estado conocido de cada contenedor, servicio y proceso no gestionado de un servidor: nombre, estado, consumo y cuándo se lo vio. `runtime_sources` guarda si cada fuente (Docker, systemd, procesos) se pudo leer, y `servers.runtime_taken_at` la marca de la última foto. | Se reemplaza con cada `runtime_state`; no guarda historia. |
 | `metrics_raw` | Servidor, instante, CPU (uso, iowait, steal), RAM, swap y carga. Los discos van en `metrics_raw_disks` y las interfaces en `metrics_raw_networks`, una fila por cada uno y por muestra. | Partición diaria, retención 48 horas. |
@@ -158,6 +159,7 @@ El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Desp
 | Agent → servidor | `heartbeat` | Vivo y versión. | Cada 15 s |
 | Servidor → agent | `command` | Operación predefinida con parámetros validados. | A demanda |
 | Servidor → agent | `config_update` | Nuevos intervalos o proyectos declarados. | A demanda |
+| Servidor → agent | `project_proposal` | La propuesta de un proyecto nuevo, que el agent guarda sin ejecutar nada hasta que una persona la acepta ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md)). | Al proponer, y al reconectar si falta |
 
 **Comandos permitidos**
 
@@ -222,29 +224,32 @@ Claude Code hace el trabajo de git y PR con `git` y `gh` locales. El MCP se ocup
 
 ## Deploy desde cero
 
-Además de actualizar proyectos existentes, status-sv levanta un proyecto completo en un servidor a partir de su repositorio. Es una operación distinta del `deploy` común porque crea cosas nuevas (directorio, servicio, proxy, certificado), así que siempre pide aprobación humana, también en staging.
+Además de actualizar proyectos existentes, status-sv levanta un proyecto completo en un servidor a partir de su repositorio. Es una operación distinta del `deploy` común porque crea cosas nuevas (usuario, directorio, servicio, sitio, certificado), así que siempre pide aprobación humana, también en staging.
 
-Se construye en dos partes ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)). El Sprint 5 trae el primer deploy: clonar, compilar, levantar y verificar un proyecto que una persona ya declaró y preparó por SSH. Lo que sigue describe el destino; los pasos que necesitan root, los secretos y `register_project` son del Sprint 6, con tres decisiones todavía abiertas (ver Riesgos y decisiones abiertas).
+Se construyó en dos partes ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)). El Sprint 5 trajo el primer deploy: clonar, compilar, levantar y verificar un proyecto ya declarado. El Sprint 6 trae el alta: **el control plane propone el proyecto y una persona lo acepta en el servidor**, que es donde se crea lo que necesita root y donde se cargan los secretos ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), [ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md)).
 
 | Herramienta | Qué hace |
 | --- | --- |
-| `register_project` | Declara el proyecto nuevo: repo, servidor, runtime, entorno, dominio, healthcheck y variables requeridas. |
-| `bootstrap_project` | Ejecuta el primer deploy completo de un proyecto ya declarado. |
+| `register_project` | Propone el proyecto nuevo: repo, servidor, runtime, entorno, dominio, puerto, healthcheck, pasos declarados y los nombres de las variables requeridas. No declara nada. |
+| `bootstrap_project` | Ejecuta el primer deploy de un proyecto ya declarado. |
 
-**Pasos del bootstrap**
+Las dos llegan al MCP en el Sprint 8; en el Sprint 6 se usan desde el panel.
 
-1. **Clonar:** el agent crea el directorio de trabajo y clona el repo con una deploy key de solo lectura, una por proyecto.
-2. **Secretos:** el agent revisa las variables que el proyecto declara como requeridas. Los valores los cargás vos en el panel; el LLM nunca los ve. Si falta alguna, el bootstrap queda bloqueado y lo informa.
-3. **Build y arranque:** con Docker, `compose build` y `up -d`. Con gunicorn, crea el entorno virtual, instala dependencias y genera la unidad systemd desde una plantilla.
-4. **Entrada web:** genera el bloque de nginx o Caddy desde una plantilla con dominio y puerto validados, prueba la configuración, recarga y pide el certificado. La plantilla se edita desde el panel, con vista previa y validación antes de aplicar.
-5. **Pasos declarados:** migraciones o carga inicial, solo si están listadas en el `project.yaml` aprobado.
-6. **Verificación:** healthcheck y `smoke_test`. Si algo falla, el agent deshace lo que creó (detiene el servicio, quita el bloque de proxy) y deja el error en el historial.
+**El alta, paso a paso**
+
+1. **Proponer:** desde el panel (o con `register_project`), con vista previa de la declaración, la unidad y el sitio que se van a generar. La propuesta viaja al agent del servidor, que la guarda sin ejecutar nada.
+2. **Aceptar en el servidor:** una persona corre `sudo statussv-agent project accept <nombre>`, que muestra la declaración y todo lo que va a crear, y pide confirmarlo. Crea el usuario (systemd), el `workdir`, la deploy key, el archivo de secretos, la unidad desde su plantilla y el sitio de nginx con su certificado; escribe el `project.yaml`, suma el `workdir` al drop-in del deploy, reinicia el agent y corre `deploy-check`.
+3. **Secretos:** el mismo comando pide el valor de cada variable requerida, sin mostrarlo. Los valores no salen del servidor; al control plane llegan solo los nombres que faltan.
+4. **Cargar la llave en GitHub:** el comando muestra la llave pública y el comando `gh` para cargarla como deploy key de solo lectura.
+5. **Primer deploy:** desde el panel, con el código TOTP. Clona, compila (con Docker, `compose build`; con systemd, los pasos de `deploy.build`), corre los pasos declarados, levanta, verifica el healthcheck y, si queda bien, habilita las unidades. Si algo falla, baja lo que levantó; el sitio queda, contestando 502.
 
 **Límites de seguridad**
 
-- Las plantillas de systemd y del proxy reciben parámetros validados, nunca texto libre del LLM. Las plantillas solo las edita una persona desde el panel, y cada cambio queda auditado.
-- Los comandos previos y posteriores son solo los que declaraste al registrar el proyecto y aprobaste.
-- La deploy key de cada proyecto se guarda cifrada en el servidor y se puede revocar desde el panel.
+- El control plane no puede declarar un proyecto: solo proponerlo. Lo declara una persona con root, que ve exactamente lo que se escribe ([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)).
+- En una propuesta no se eligen el `workdir`, el usuario del proyecto ni el archivo de secretos: son fijos por nombre.
+- Las plantillas de systemd y del proxy reciben parámetros validados, nunca texto libre del LLM. Solo una persona las cambia: por PR en el repo, o como root en el servidor. El panel las muestra con vista previa ([ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md)).
+- Los pasos declarados son solo los de la declaración que una persona aceptó.
+- La deploy key de cada proyecto es de solo lectura y vive en el servidor; se revoca sacándola de GitHub y borrando el archivo.
 
 ## Seguridad
 
@@ -380,6 +385,23 @@ rollback: previous_commit
 Para desplegar, el agent trae el código de `repo` con la deploy key del proyecto, si tiene una, en
 `/etc/status-sv/keys/<nombre>` ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
 
+Para el alta (Sprint 6, [ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md) y
+[ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md)) hay tres campos opcionales más. Valen
+también en un archivo escrito a mano:
+
+```yaml
+required_env: [SECRET_KEY, DATABASE_URL]   # solo los nombres; los valores, en el servidor
+service:                                   # solo systemd: la unidad se genera desde la plantilla
+  command: [".venv/bin/gunicorn", "app:app", "--bind", "127.0.0.1:8001"]
+site:                                      # el sitio de nginx y su certificado
+  domain: ypf-aca.example.com
+  port: 8001                               # siempre en 127.0.0.1
+```
+
+Con `service`, `units` es `[<nombre>.service]`. En una propuesta, además, el `workdir` es
+`/srv/<nombre>`, `run_as` es el nombre del proyecto y `env_file` es
+`/etc/status-sv/env/<nombre>.env`: no se eligen.
+
 El ejemplo usa datos ilustrativos; los valores reales los definís vos por proyecto.
 
 ## Fases y roadmap
@@ -401,15 +423,15 @@ El MVP útil llega al final de la Fase 3, con unas 17 semanas de trabajo. Las es
 - **Fase 3:** herramientas MCP de lectura y escritura, tokens con scopes, aprobaciones en el panel, límites de frecuencia, auditoría con actor LLM.
 - **Fase 4:** worker Playwright, alertas (correo o Telegram), chequeos de seguridad del servidor, actualización del agent desde el panel, OAuth 2.1.
 
-El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, sobre el deploy Docker y el de systemd, y se expone por MCP en el Sprint 8. El Sprint 4 mostró que el alcance no entraba en un sprint, así que se partió ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)): el Sprint 5 trae el primer deploy (clonar y levantar un proyecto ya declarado y preparado por una persona), y el Sprint 6 lo que necesita root (la unidad, el proxy y el certificado desde plantillas), los secretos y `register_project`.
+El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, sobre el deploy Docker y el de systemd, y se expone por MCP en el Sprint 8. El Sprint 4 mostró que el alcance no entraba en un sprint, así que se partió ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)): el Sprint 5 trae el primer deploy (clonar y levantar un proyecto ya declarado y preparado por una persona), y el Sprint 6 el alta: el control plane propone el proyecto y una persona lo acepta en el servidor con un comando, que crea lo que necesita root (la unidad y el sitio desde plantillas, el certificado) y carga los secretos ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), [ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md)).
 
 **Ideas para más adelante**
 
 Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
 
-## Sprints 0 a 5
+## Sprints 0 a 6
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, y el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy, y el Sprint 6 cierra la Fase 2 con el alta de proyectos nuevos.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -868,6 +890,80 @@ Las lecciones del despliegue están en el runbook, sección 8. Las dos que más 
 el cupo de Docker Hub de un servidor antes de confiar en un build, y recargar el panel después de
 actualizar el control plane.
 
+**Sprint 6 (2 semanas): deploy desde cero**
+
+Objetivo: dar de alta un proyecto nuevo desde el panel y dejarlo respondiendo por HTTPS en su
+dominio, con lo que necesita root hecho por una persona en un solo comando en el servidor. Las
+cinco decisiones que lo abrían las tomó Juan el 2026-10-08, aceptando las recomendaciones del plan:
+[ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md) (el control plane propone, una
+persona acepta en el servidor, y los secretos se cargan ahí) y
+[ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md) (las plantillas viven en el repo; nginx y
+certbot desde el comando de aceptación).
+
+- **El control plane sigue sin poder declarar un proyecto** ([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)),
+  y los valores de los secretos no pasan por él.
+- **La regla 7 cambia:** las plantillas no se editan desde el panel, que solo las muestra. Se
+  cambian por PR, o como root en un servidor.
+- **La prueba real** es un tercer proyecto de demostración en `sv-gcg` (staging), con el dominio
+  `svdemo.extendsystem.com`. El relevamiento del 2026-10-08 mostró que ahí hay nginx 1.18.0 y
+  certbot 1.21.0.
+
+Compartido
+
+- [ ] El parser de `project.yaml` pasa a `internal/projectspec`, para que el control plane valide
+      una propuesta con las mismas reglas que el agent.
+- [ ] `project.yaml`: `required_env`, `service` y `site`, y los campos que una propuesta no elige.
+
+Contrato
+
+- [ ] `project_proposal` y `project_proposal_ack`. `projects_state` suma las propuestas
+      pendientes, el hash de cada declaración, los nombres de las variables que faltan y la llave
+      pública del proyecto.
+
+Plantillas
+
+- [ ] La unidad de servicio y el sitio de nginx, embebidos, con el reemplazo de root en
+      `/etc/status-sv/templates/`; archivos golden, `systemd-analyze verify` y `nginx -t` en el CI.
+
+Agent
+
+- [ ] Recibe las propuestas, las valida y las guarda en su directorio de estado, con un tope.
+- [ ] `project accept`: muestra y confirma; usuario, `workdir`, deploy key y `project.yaml`;
+      `20-deploy.conf` desde el binario (`deploy-dropin`, que usa también el instalador); reinicio
+      del agent, salvo con un deploy en curso; `deploy-check`.
+- [ ] Secretos: los pide sin mostrarlos, `project env` para cambiarlos, y solo viajan los nombres
+      que faltan (el ayudante los informa para systemd).
+- [ ] La unidad desde su plantilla, y el sitio con su certificado (`project site`), sin dejar nunca
+      a nginx con una configuración que no pasa `nginx -t`.
+- [ ] El primer deploy se frena si faltan variables y, con systemd, habilita las unidades al
+      terminar bien (`enable_units`).
+
+Servidor y panel
+
+- [ ] Migración 00011 con `project_proposals`; crear, listar, retirar y la vista previa; la entrega
+      al agent y su reenvío; `project.propose`, `project.withdraw` y `project.accept` en `audit_log`.
+- [ ] **Nuevo proyecto** en el panel: el formulario con validación, la vista previa, el comando
+      para el servidor y el estado de la propuesta; en el proyecto, las variables que faltan y la
+      llave pública.
+
+Calidad y despliegue
+
+- [ ] Prueba de punta a punta del alta en el CI, para systemd y Docker: proponer, aceptar sin
+      preguntas, primer deploy y respuesta a través de nginx. Los valores de los secretos no
+      aparecen ni en la base ni en los logs del control plane.
+- [ ] Runbook: "Dar de alta un proyecto" reemplaza la lista de siete pasos.
+- [ ] Desplegar el sprint y dar de alta `svdemo` en `sv-gcg`, con su dominio y su certificado.
+
+Terminado cuando un proyecto nuevo se propone desde el panel, se acepta en el servidor con un
+solo comando (que pide sus secretos y crea la deploy key, la unidad y el sitio con su certificado),
+y el primer deploy lo deja respondiendo por HTTPS en su dominio; los valores de los secretos no
+están en la base, en los logs ni en el panel del control plane; la auditoría muestra la propuesta,
+la aceptación y el primer deploy; el agent sigue por debajo de 30 MB de RAM y 1% de CPU en reposo;
+y el CI está verde, con el e2e del alta.
+
+Si el sprint se estira, la línea de corte es el sitio y el certificado: los sigue haciendo una
+persona a mano, como hoy, y la unidad generada queda.
+
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |
@@ -875,7 +971,7 @@ actualizar el control plane.
 | 3 | Proyectos y cierre de la Fase 1 | Lectura de `project.yaml`, vista de proyectos, agregado por hora, TOTP y segundo servidor en vivo. |
 | 4 | Deploy Docker | `deploy` con `git fetch`, build, healthcheck y rollback automático; `audit_log` mínimo. |
 | 5 | Deploy systemd y auditoría | Deploy de gunicorn, vista de auditoría en el panel y el primer deploy de un proyecto declarado. |
-| 6 | Deploy desde cero | La unidad, el proxy y el certificado desde plantillas, los secretos y `register_project`. |
+| 6 | Deploy desde cero | El alta de un proyecto: propuesta desde el panel y aceptación en el servidor, con la unidad y el sitio desde plantillas, el certificado y los secretos. |
 | 7 | MCP de lectura y tokens | Herramientas de lectura, tokens con scopes, conexión con Claude Code. |
 | 8 | MCP de escritura y aprobaciones | `deploy`, `rollback` y `restart` con aprobación humana en el panel. |
 
@@ -891,6 +987,7 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 | Un deploy automático rompe producción | Alto | Healthcheck, rollback automático, aprobación humana, bloqueo de deploys simultáneos y un interruptor por servidor que viene apagado. |
 | Proyectos gunicorn fuera de systemd | Medio | Pasarlos a systemd durante la Fase 2; hasta entonces quedan en solo lectura. |
 | Un proceso root propio en cada servidor con deploy (el ayudante de ADR-019) | Alto | Tres operaciones que solo reciben identificadores, lo que corre sale del archivo que escribió root, sin red ni capacidades, y solo existe donde una persona prendió el deploy. |
+| El comando de aceptación del alta corre como root y lee una propuesta que escribió el agent (ADR-022) | Alto | Lo corre una persona, que ve todo lo que se va a escribir; la propuesta se valida de nuevo con el parser estricto y se escribe exactamente lo que se mostró; `workdir`, usuario y archivo de secretos no se eligen; nginx nunca queda con una configuración que no pasa `nginx -t`. |
 | Prompt injection sobre el LLM | Alto | Herramientas acotadas, aprobaciones y auditoría (ver Seguridad). |
 | El volumen de métricas crece más de lo previsto | Bajo | Particionado y retención escalonada; TimescaleDB si hiciera falta. |
 
@@ -906,6 +1003,6 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 - [ ] ¿Alertas por correo, Telegram o ambos? Se decide en la Fase 4, al construirlas.
 - [ ] ¿Las aprobaciones de producción se hacen solo desde el panel o también por un enlace firmado en el celular? Se decide en el Sprint 8.
 - [ ] ¿Se mantiene la aprobación humana también en staging, o solo en producción? Se decide en el Sprint 8.
-- [ ] ¿Dónde se cargan los valores de los secretos de un proyecto nuevo? "Deploy desde cero" dice en el panel; la regla de que no salen del servidor dice que no. Se decide en el Sprint 6 ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)).
-- [ ] ¿Puede el control plane declarar un proyecto (`register_project`)? [ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md) dice que no. Se decide en el Sprint 6.
-- [ ] ¿Las plantillas de systemd y del proxy viven en el control plane o en cada servidor? Se decide en el Sprint 6.
+- [x] ¿Dónde se cargan los valores de los secretos de un proyecto nuevo? **En el servidor**, en el comando que acepta el alta; al control plane llegan solo los nombres que faltan ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), 2026-10-08).
+- [x] ¿Puede el control plane declarar un proyecto (`register_project`)? **No: lo propone**, y una persona lo acepta en el servidor ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), 2026-10-08).
+- [x] ¿Las plantillas de systemd y del proxy viven en el control plane o en cada servidor? **En el repo**, con un reemplazo de root en cada servidor; el panel solo las muestra. Cambia la regla 7 ([ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md), 2026-10-08).
