@@ -150,7 +150,14 @@ func readOne(path string, entry fs.DirEntry) (proto.Project, error) {
 	if err != nil {
 		return proto.Project{}, err
 	}
-	return projectspec.Parse(filepath.Base(path), data)
+	project, err := projectspec.Parse(filepath.Base(path), data)
+	if err != nil {
+		return proto.Project{}, err
+	}
+	// El hash del archivo dice si un proyecto propuesto se declaró tal cual
+	// (ADR-022): es el mismo que el de la propuesta si nadie lo cambió.
+	project.SpecHash = proto.SpecHash(data)
+	return project, nil
 }
 
 // readRegular lee un archivo regular del directorio de proyectos, con el tope
@@ -212,6 +219,12 @@ type Runner struct {
 
 	refresh, resend, healthEvery time.Duration
 
+	// proposals lista las propuestas de proyectos nuevos que esperan una
+	// persona (ADR-022). Es opcional. wake adelanta la próxima lectura cuando
+	// llega o se retira una.
+	proposals func() ([]proto.PendingProposal, error)
+	wake      chan struct{}
+
 	mu sync.Mutex
 	// read es la última lectura del directorio, sin healthchecks; current es
 	// la última foto armada, con el resultado de cada uno.
@@ -242,6 +255,22 @@ func NewRunner(dir string, o *Outbox, checker HealthChecker, log *slog.Logger) *
 		resend:      DefaultResend,
 		healthEvery: DefaultHealthInterval,
 		health:      make(map[string]healthEntry),
+		wake:        make(chan struct{}, 1),
+	}
+}
+
+// SetProposals le da al Runner de dónde sacar las propuestas guardadas, que
+// viajan en la misma foto. Se llama antes de Run.
+func (r *Runner) SetProposals(list func() ([]proto.PendingProposal, error)) {
+	r.proposals = list
+}
+
+// Refresh pide una lectura ya, sin esperar el próximo refresco: llegó o se
+// retiró una propuesta, y el control plane tiene que saberlo.
+func (r *Runner) Refresh() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -265,6 +294,8 @@ func (r *Runner) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			r.take(ctx)
+		case <-r.wake:
+			r.take(ctx)
 		}
 	}
 }
@@ -278,6 +309,13 @@ func (r *Runner) Current() []proto.Project {
 
 func (r *Runner) take(ctx context.Context) {
 	state := Read(r.dir, r.now())
+	if r.proposals != nil {
+		pending, err := r.proposals()
+		if err != nil {
+			r.log.WarnContext(ctx, "no se pudieron leer las propuestas de proyectos", "error", err)
+		}
+		state.Proposals = pending
+	}
 	r.mu.Lock()
 	r.read = state
 	r.mu.Unlock()
@@ -308,6 +346,7 @@ func (r *Runner) publish(ctx context.Context) {
 		"fuente", state.Source.Status,
 		"validos", len(state.Projects),
 		"invalidos", len(state.Invalid),
+		"propuestas", len(state.Proposals),
 	)
 	for _, invalid := range state.Invalid {
 		r.log.WarnContext(ctx, "archivo de proyecto inválido", "archivo", invalid.File, "error", invalid.Error)

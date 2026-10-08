@@ -320,6 +320,8 @@ func ParseSpec(filename string, data []byte) (Spec, error) {
 			return Spec{}, err
 		}
 		spec.Site = &Site{Domain: f.Site.Domain, Port: f.Site.Port}
+		// El sitio es público: viaja al control plane con el proyecto.
+		spec.Project.Site = &proto.SiteSpec{Domain: f.Site.Domain, Port: f.Site.Port}
 	}
 	if f.Deploy != nil {
 		if len(f.Deploy.Build) > 0 && !systemd {
