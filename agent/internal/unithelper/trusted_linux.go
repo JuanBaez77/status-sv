@@ -49,3 +49,10 @@ func rootOnly(path string) error {
 	}
 	return nil
 }
+
+// RootOnly dice si path es de root y solo root lo puede escribir. Lo usan
+// también las plantillas del servidor (ADR-023): una que otro puede escribir
+// no se usa.
+func RootOnly(path string) error {
+	return rootOnly(path)
+}

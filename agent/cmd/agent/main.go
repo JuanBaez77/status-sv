@@ -12,6 +12,7 @@
 //	agent deploy-dropin              imprime el drop-in 20-deploy.conf, para el instalador
 //	agent project accept PROYECTO    acepta la propuesta de un proyecto nuevo (ADR-022)
 //	agent project env PROYECTO       carga los valores de sus variables requeridas
+//	agent project site PROYECTO      arma el sitio de nginx y pide el certificado (ADR-023)
 //	agent unit-helper                atiende un pedido del agent como root (lo arranca systemd)
 //	agent version                    imprime la versión
 package main
@@ -101,6 +102,8 @@ Uso:
                                     se corre como root (ADR-022)
   agent project env PROYECTO        carga o cambia los valores de sus variables requeridas;
                                     se corre como root (ADR-022)
+  agent project site PROYECTO       arma el sitio de nginx y pide el certificado;
+                                    se corre como root (ADR-023)
   agent unit-helper                 atiende un pedido del agent como root; no se corre a
                                     mano: lo arranca systemd desde su socket (ADR-019)
   agent version                     imprime la versión

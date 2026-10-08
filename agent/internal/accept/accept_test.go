@@ -60,6 +60,19 @@ type fakeSystem struct {
 	checkErr   error
 	restartErr error
 	onRestart  func()
+
+	// La unidad y el sitio.
+	missing       map[string]bool // programas que no están
+	unresolved    bool
+	verifyOut     string
+	nginxErrs     []error // lo que contesta cada nginx -t, en orden
+	nginxTests    int
+	reloads       int
+	daemonReloads int
+	certbot       [][]string
+	certbotErr    error
+	// live es dónde certbot de mentira deja el certificado.
+	live string
 }
 
 func newFakeSystem() *fakeSystem {
@@ -128,7 +141,7 @@ func newEnv(t *testing.T) *env {
 		HelperSocket: filepath.Join(base, "etc", "systemd", "statussv-unit-helper.socket"),
 		Root:         filepath.Join(base, "root"),
 	}
-	for _, dir := range []string{paths.State, paths.Projects, paths.Keys, filepath.Dir(paths.Dropin)} {
+	for _, dir := range []string{paths.State, paths.Projects, paths.Keys, filepath.Dir(paths.Dropin), filepath.Join(paths.Root, "etc", "systemd", "system")} {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
@@ -423,4 +436,46 @@ func TestGithubRepo(t *testing.T) {
 			t.Errorf("githubRepo(%q) = %q", repo, got)
 		}
 	}
+}
+
+func (f *fakeSystem) DaemonReload(context.Context) error { f.daemonReloads++; return nil }
+
+func (f *fakeSystem) VerifyUnit(context.Context, string) (string, error) { return f.verifyOut, nil }
+
+func (f *fakeSystem) Has(program string) bool { return !f.missing[program] }
+
+func (f *fakeSystem) Resolves(string) bool { return !f.unresolved }
+
+func (f *fakeSystem) NginxTest(context.Context) error {
+	f.nginxTests++
+	if len(f.nginxErrs) == 0 {
+		return nil
+	}
+	err := f.nginxErrs[0]
+	f.nginxErrs = f.nginxErrs[1:]
+	return err
+}
+
+func (f *fakeSystem) NginxReload(context.Context) error { f.reloads++; return nil }
+
+// Certbot anota los argumentos y, si no es de prueba, deja el certificado
+// donde lo dejaría el de verdad.
+func (f *fakeSystem) Certbot(_ context.Context, args []string) error {
+	f.certbot = append(f.certbot, args)
+	if f.certbotErr != nil {
+		return f.certbotErr
+	}
+	for i, arg := range args {
+		if arg == "--dry-run" {
+			return nil
+		}
+		if arg == "--cert-name" && f.live != "" {
+			dir := filepath.Join(f.live, args[i+1])
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, "fullchain.pem"), []byte("certificado"), 0o600)
+		}
+	}
+	return nil
 }
