@@ -37,11 +37,23 @@ jobs:
       - name: Análisis con go vet
         run: make vet
 
+      # Las plantillas del alta (ADR-023) se prueban con systemd-analyze verify
+      # y nginx -t de verdad. systemd viene en el runner; nginx, por las dudas.
+      - name: nginx para probar las plantillas
+        run: |
+          if ! command -v nginx >/dev/null; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q --no-install-recommends nginx
+          fi
+          nginx -v
+
       # STATUSSV_TEST_DOCKER prende las pruebas que usan el Docker del runner
-      # (el motor de deploy compila y levanta un proyecto de juguete).
+      # (el motor de deploy compila y levanta un proyecto de juguete), y
+      # STATUSSV_TEST_TOOLS las de las plantillas con systemd-analyze y nginx.
       - name: Tests con detector de carreras
         env:
           STATUSSV_TEST_DOCKER: "1"
+          STATUSSV_TEST_TOOLS: "1"
         run: make test-race
 
       - name: golangci-lint
