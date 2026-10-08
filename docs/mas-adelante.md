@@ -9,7 +9,7 @@ roadmap de [DISENO.md](DISENO.md).
 - Multiusuario, organizaciones, roles finos y facturación (ver [adr/ADR-005-alcance-single-tenant.md](adr/ADR-005-alcance-single-tenant.md)).
 - Agents para Windows o macOS.
 - Orquestación tipo Kubernetes y autoscaling.
-- Edición libre de archivos de configuración desde el panel (solo las plantillas del proxy son editables).
+- Edición de archivos de configuración desde el panel, incluidas las plantillas de la unidad y del sitio, que el panel solo muestra (ver [adr/ADR-023-plantillas-sitio-y-certificado.md](adr/ADR-023-plantillas-sitio-y-certificado.md)).
 
 ## Planificado para la Fase 4
 
@@ -56,6 +56,20 @@ roadmap de [DISENO.md](DISENO.md).
 - **Un ensayo de la mudanza en CI.** El volcado, la restauración y el arranque sobre datos
   restaurados solo se probaron a mano, el día de la mudanza. Un job que lo haga con la base de la
   prueba de punta a punta lo cubriría.
+
+## Lo que deja afuera el alta del Sprint 6
+
+- **Plantillas editables desde el panel**, con cada versión aceptada en el servidor por su hash.
+  Hoy se cambian por PR o como root en el servidor (ver
+  [adr/ADR-023-plantillas-sitio-y-certificado.md](adr/ADR-023-plantillas-sitio-y-certificado.md)).
+- **Caddy** como alternativa a nginx en el sitio generado.
+- **Cargar la deploy key en GitHub sola**, y revocarla desde el panel. Necesita un token de GitHub
+  en el control plane; hoy la carga y la saca una persona.
+- **El registro DNS del dominio**, por la API de Cloudflare. Hoy lo crea una persona antes del alta.
+- **Dar de baja un proyecto:** su usuario, su `workdir`, su unidad, su sitio y su certificado. Hoy
+  lo hace una persona; el agent no borra.
+- **Quitar el sitio cuando el primer deploy falla.** Hoy queda contestando 502 hasta el próximo
+  intento.
 
 ## Lo que deja afuera el deploy systemd del Sprint 5
 
