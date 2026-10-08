@@ -25,13 +25,14 @@ type MessageType string
 
 // Mensajes del agent hacia el control plane.
 const (
-	TypeEnroll        MessageType = "enroll"
-	TypeHeartbeat     MessageType = "heartbeat"
-	TypeMetrics       MessageType = "metrics"
-	TypeRuntimeState  MessageType = "runtime_state"
-	TypeProjectsState MessageType = "projects_state"
-	TypeCommandAck    MessageType = "command_ack"
-	TypeDeployEvent   MessageType = "deploy_event"
+	TypeEnroll             MessageType = "enroll"
+	TypeHeartbeat          MessageType = "heartbeat"
+	TypeMetrics            MessageType = "metrics"
+	TypeRuntimeState       MessageType = "runtime_state"
+	TypeProjectsState      MessageType = "projects_state"
+	TypeCommandAck         MessageType = "command_ack"
+	TypeDeployEvent        MessageType = "deploy_event"
+	TypeProjectProposalAck MessageType = "project_proposal_ack"
 )
 
 // Mensajes del control plane hacia el agent.
@@ -43,6 +44,7 @@ const (
 	TypeProjectsStateAck MessageType = "projects_state_ack"
 	TypeCommand          MessageType = "command"
 	TypeDeployEventAck   MessageType = "deploy_event_ack"
+	TypeProjectProposal  MessageType = "project_proposal"
 	TypeError            MessageType = "error"
 )
 
@@ -57,21 +59,23 @@ var (
 // knownTypes es la lista cerrada de tipos que este código entiende. Un tipo que
 // no esté acá se rechaza con un error explícito, en vez de ignorarse en silencio.
 var knownTypes = map[MessageType]bool{
-	TypeEnroll:           true,
-	TypeHeartbeat:        true,
-	TypeMetrics:          true,
-	TypeEnrollAck:        true,
-	TypeHeartbeatAck:     true,
-	TypeMetricsAck:       true,
-	TypeRuntimeState:     true,
-	TypeRuntimeStateAck:  true,
-	TypeProjectsState:    true,
-	TypeProjectsStateAck: true,
-	TypeCommand:          true,
-	TypeCommandAck:       true,
-	TypeDeployEvent:      true,
-	TypeDeployEventAck:   true,
-	TypeError:            true,
+	TypeEnroll:             true,
+	TypeHeartbeat:          true,
+	TypeMetrics:            true,
+	TypeEnrollAck:          true,
+	TypeHeartbeatAck:       true,
+	TypeMetricsAck:         true,
+	TypeRuntimeState:       true,
+	TypeRuntimeStateAck:    true,
+	TypeProjectsState:      true,
+	TypeProjectsStateAck:   true,
+	TypeCommand:            true,
+	TypeCommandAck:         true,
+	TypeDeployEvent:        true,
+	TypeDeployEventAck:     true,
+	TypeProjectProposal:    true,
+	TypeProjectProposalAck: true,
+	TypeError:              true,
 }
 
 // Message es lo que sabe hacer todo mensaje del protocolo: decir de qué tipo es

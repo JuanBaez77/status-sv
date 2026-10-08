@@ -40,12 +40,42 @@
         "units": [
           "gunicorn@facturas.service"
         ]
+      },
+      {
+        "name": "svdemo",
+        "environment": "staging",
+        "repo": "github.com/JuanBaez77/status-sv-demo",
+        "branch": "main",
+        "runtime": "systemd",
+        "workdir": "/srv/svdemo",
+        "units": [
+          "svdemo.service"
+        ],
+        "spec_hash": "2309899cb891a359636287b5b9b5529c445f466971d9d61544591e2c606e5a8d",
+        "site": {
+          "domain": "svdemo.extendsystem.com",
+          "port": 18097
+        },
+        "env": {
+          "required": 2,
+          "missing": [
+            "DATABASE_URL"
+          ]
+        },
+        "deploy_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
       }
     ],
     "invalid": [
       {
         "file": "cotizador.yaml",
         "error": "healthcheck.url: la URL tiene que ser http o https"
+      }
+    ],
+    "proposals": [
+      {
+        "proposal_id": "01924f9c-0000-7000-8000-0000000000bb",
+        "name": "turnos",
+        "hash": "f7ab031238487899c2806e79adb4d2eead0fa6cc212a8eeb18a63e73a3feee73"
       }
     ]
   }

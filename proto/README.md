@@ -44,6 +44,8 @@ El formato es JSON con un envelope versionado; el porqué está en
 | `command_ack` | Agent → servidor | Respuesta al anterior | Cómo terminó el comando y su resultado |
 | `deploy_event` | Agent → servidor | Al cambiar de paso un deploy, y hasta que se confirma el final | La foto completa del deploy (ver abajo) |
 | `deploy_event_ack` | Servidor → agent | Respuesta al anterior | El deploy y la secuencia que se guardaron |
+| `project_proposal` | Servidor → agent | Al proponer un proyecto, y al reconectar si falta | La propuesta de un proyecto nuevo: guardarla o retirarla (ADR-022) |
+| `project_proposal_ack` | Agent → servidor | Respuesta al anterior | Si la guardó, la retiró o la rechazó, y por qué |
 | `error` | Servidor → agent | Ante un rechazo | Código de una lista cerrada, texto para el log y el ID del mensaje rechazado |
 
 La credencial de `enroll_ack` viaja **una sola vez**: el control plane guarda solo su hash y el
@@ -189,6 +191,30 @@ un estado anterior. Sus pasos son `preflight`, `fetch` (que además inicia el re
 algo, el paso `rollback` es bajarlo, y el deploy termina `rolled_back`; el código queda clonado. Si
 el proyecto ya tiene un estado bueno anotado o algo suyo corriendo, termina `failed` con el código
 `already_deployed`, sin tocar nada.
+
+## Alta de proyectos: una propuesta no es un comando
+
+El alta de un proyecto nuevo (ADR-022) empieza en el control plane, pero **el control plane no
+declara proyectos**: los propone. `project_proposal` no es una operación de `command` y el agent no
+ejecuta nada con ella:
+
+| Tipo | Dirección | Contenido |
+| --- | --- | --- |
+| `project_proposal` | Servidor → agent | `proposal_id`, `name` y `action`: `put` con la declaración (`yaml`, el formato de un `project.yaml`, hasta 32 KiB) y su vencimiento, o `withdraw` |
+| `project_proposal_ack` | Agent → servidor | `result`: `stored`, `withdrawn` o `rejected`, con el porqué en `error` (el campo y la regla, nunca el valor) |
+
+El agent valida la declaración con el parser estricto y la guarda en su directorio de estado, hasta
+10 a la vez. La declara una persona en el servidor con `statussv-agent project accept`, que la
+vuelve a validar. Las que tiene guardadas viajan en `projects_state.proposals` (ID, nombre y el
+hash de la declaración), así el control plane reenvía lo que falte al reconectar.
+
+Cada proyecto de `projects_state` suma, desde el Sprint 6 y todos opcionales: `spec_hash` (el
+SHA-256 del `project.yaml`, igual al de la propuesta si se aceptó tal cual), `site` (dominio y
+puerto), `env` (cuántas variables requeridas declara y **los nombres** de las que faltan, nunca un
+valor) y `deploy_key` (la llave pública, para cargarla en GitHub).
+
+Un agent anterior no conoce `project_proposal`: lo descarta y sigue. La propuesta queda pendiente
+en el control plane hasta que el agent se actualiza.
 
 ## Reglas de versionado
 

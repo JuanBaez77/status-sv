@@ -127,7 +127,7 @@ func TestParseAltaRejects(t *testing.T) {
 		{name: "variable que empieza con número", yaml: replace("SECRET_KEY,", "1KEY,"), wantErr: "required_env[0]"},
 		{name: "variable con =", yaml: replace("SECRET_KEY,", "\"A=B\","), wantErr: "required_env[0]"},
 		{name: "variable repetida", yaml: replace("DATABASE_URL]", "SECRET_KEY]"), wantErr: "required_env[1]: está repetido"},
-		{name: "demasiadas variables", yaml: replace("[SECRET_KEY, DATABASE_URL]", "["+strings.Repeat("A, ", MaxRequiredEnv)+"B]"), wantErr: "nombres y el máximo"},
+		{name: "demasiadas variables", yaml: replace("[SECRET_KEY, DATABASE_URL]", "["+strings.Repeat("A, ", proto.MaxRequiredEnv)+"B]"), wantErr: "nombres y el máximo"},
 		{name: "variables de systemd sin archivo", yaml: replace("env_file: /etc/status-sv/env/svdemo.env\n", ""), wantErr: "required_env: con systemd necesita env_file"},
 		{name: "dominio en mayúsculas", yaml: replace("svdemo.extendsystem.com", "SvDemo.extendsystem.com"), wantErr: "site.domain"},
 		{name: "dominio comodín", yaml: replace("svdemo.extendsystem.com", "\"*.extendsystem.com\""), wantErr: "site.domain"},
@@ -195,23 +195,6 @@ func TestCheckProposalRejects(t *testing.T) {
 				t.Errorf("error = %q, se esperaba que dijera %q", err, tt.wantErr)
 			}
 		})
-	}
-}
-
-func TestValidDomain(t *testing.T) {
-	for _, domain := range []string{"svdemo.extendsystem.com", "a.b", "xn--and-6ma2c.com.ar", "a-1.b-2.c3", "api.v2.example.io"} {
-		if !ValidDomain(domain) {
-			t.Errorf("ValidDomain(%q) = false", domain)
-		}
-	}
-	for _, domain := range []string{
-		"", "com", "a..b", ".a.b", "a.b.", "-a.b", "a-.b", "a_b.com", "A.com", "*.a.com", "a.com:80",
-		"1.2.3.4", "a.123", "a b.com", "a.com\n", strings.Repeat("a", 64) + ".com",
-		strings.Repeat(strings.Repeat("a", 60)+".", 5) + "com",
-	} {
-		if ValidDomain(domain) {
-			t.Errorf("ValidDomain(%q) = true", domain)
-		}
 	}
 }
 
