@@ -72,6 +72,9 @@ type Querier interface {
 	// recibido ninguna foto (seq 0: rechazado o sin respuesta) sí puede revivir,
 	// porque el agent pudo haberlo empezado igual.
 	ApplyDeployEvent(ctx context.Context, arg ApplyDeployEventParams) (Deploy, error)
+	// CloseProposal cierra una propuesta abierta: rechazada por el agent,
+	// retirada, vencida o aceptada.
+	CloseProposal(ctx context.Context, arg CloseProposalParams) (ProjectProposal, error)
 	// ConsumeEnrollmentToken marca el token como usado y lo ata al servidor que creó.
 	// La condición used_at IS NULL hace que el segundo intento no devuelva ninguna
 	// fila, así que un token no se puede usar dos veces ni aunque dos agents lo
@@ -88,6 +91,8 @@ type Querier interface {
 	// hay uno activo en el proyecto, el índice único lo rechaza.
 	CreateDeploy(ctx context.Context, arg CreateDeployParams) error
 	CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) (EnrollmentToken, error)
+	// CreateProposal anota una propuesta nueva.
+	CreateProposal(ctx context.Context, arg CreateProposalParams) (ProjectProposal, error)
 	CreateServer(ctx context.Context, arg CreateServerParams) (Server, error)
 	// CreateSession abre una sesión. El instante lo pone la aplicación, igual que
 	// los vencimientos, para que los plazos se midan todos con el mismo reloj.
@@ -128,6 +133,8 @@ type Querier interface {
 	// ExpirePendingDeploys cierra los deploys que siguen pendientes pasado el
 	// plazo: el agent nunca confirmó que los recibió.
 	ExpirePendingDeploys(ctx context.Context, arg ExpirePendingDeploysParams) ([]Deploy, error)
+	// ExpireProposals cierra las propuestas abiertas que vencieron.
+	ExpireProposals(ctx context.Context, now time.Time) ([]ProjectProposal, error)
 	// GetActiveCredentialByHash es la consulta de autenticación del agent: busca por
 	// hash y solo devuelve la credencial si no fue revocada.
 	GetActiveCredentialByHash(ctx context.Context, secretHash []byte) (AgentCredential, error)
@@ -143,6 +150,8 @@ type Querier interface {
 	GetEnrollmentTokenByHashForUpdate(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
 	// GetProject devuelve un proyecto con el nombre de su servidor.
 	GetProject(ctx context.Context, id uuid.UUID) (GetProjectRow, error)
+	// GetProposal devuelve una propuesta con el nombre de su servidor.
+	GetProposal(ctx context.Context, id uuid.UUID) (GetProposalRow, error)
 	GetServerByID(ctx context.Context, id uuid.UUID) (Server, error)
 	GetServerByName(ctx context.Context, name string) (Server, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -168,6 +177,9 @@ type Querier interface {
 	// Códigos de recuperación del segundo factor (ADR-013). Se guarda el SHA-256
 	// del código normalizado, y cada uno sirve una vez.
 	InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) (int64, error)
+	// KnownProposals dice, de una lista de IDs, cuáles son propuestas abiertas de
+	// ese servidor: las demás, el agent las tiene que borrar.
+	KnownProposals(ctx context.Context, arg KnownProposalsParams) ([]uuid.UUID, error)
 	// ListAudit lee la auditoría del más nuevo al más viejo (ADR-020). Cada filtro
 	// es opcional. El cursor es el instante y el ID del último renglón que ya se
 	// vio: así un renglón que entra mientras tanto no corre los que siguen.
@@ -218,12 +230,23 @@ type Querier interface {
 	// ListRuntimeUnits devuelve las unidades de un servidor, agrupadas por tipo y
 	// en orden de nombre.
 	ListRuntimeUnits(ctx context.Context, serverID uuid.UUID) ([]ListRuntimeUnitsRow, error)
+	// ListServerProposals devuelve las propuestas de un servidor, de la más nueva
+	// a la más vieja.
+	ListServerProposals(ctx context.Context, arg ListServerProposalsParams) ([]ProjectProposal, error)
 	ListServers(ctx context.Context) ([]Server, error)
 	// LockServerName toma un lock consultivo sobre el nombre del servidor, que se
 	// suelta al terminar la transacción. Sin esto, dos enrolamientos simultáneos de
 	// un servidor que todavía no existe intentan crearlo los dos y el segundo choca
 	// contra el índice único.
 	LockServerName(ctx context.Context, name string) error
+	// MarkProposalDelivered anota que el agent la guardó.
+	MarkProposalDelivered(ctx context.Context, arg MarkProposalDeliveredParams) (int64, error)
+	// OpenProposals devuelve las propuestas abiertas de un servidor, que el agent
+	// tiene que tener guardadas.
+	OpenProposals(ctx context.Context, arg OpenProposalsParams) ([]ProjectProposal, error)
+	// ProjectDeclaredOnServer dice si ese servidor ya declara un proyecto con ese
+	// nombre: entonces no se puede proponer.
+	ProjectDeclaredOnServer(ctx context.Context, arg ProjectDeclaredOnServerParams) (bool, error)
 	// RejectDeploy cierra un deploy que el agent no aceptó (o que no llegó a
 	// mandarse), mientras siga pendiente.
 	RejectDeploy(ctx context.Context, arg RejectDeployParams) (Deploy, error)
@@ -237,6 +260,10 @@ type Querier interface {
 	// SetUserPassword cambia el hash. Lo usan el cambio de contraseña y la
 	// actualización silenciosa de parámetros de argon2id al iniciar sesión.
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error)
+	// Propuestas de proyectos nuevos (ADR-022, migración 00011).
+	// SupersedeProposal cierra la propuesta abierta con ese nombre en ese
+	// servidor, si hay una: la reemplaza la nueva.
+	SupersedeProposal(ctx context.Context, arg SupersedeProposalParams) ([]uuid.UUID, error)
 	TouchCredentialLastUsed(ctx context.Context, id uuid.UUID) error
 	// TouchServer deja constancia de que el agent sigue vivo. Es lo que actualiza el
 	// latido cada 15 segundos, y de lo que se deriva el estado online u offline.

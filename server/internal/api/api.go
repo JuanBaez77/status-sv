@@ -19,6 +19,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/metrics"
 	"github.com/JuanBaez77/status-sv/server/internal/panel"
 	"github.com/JuanBaez77/status-sv/server/internal/projects"
+	"github.com/JuanBaez77/status-sv/server/internal/proposals"
 	"github.com/JuanBaez77/status-sv/server/internal/runstate"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
@@ -33,53 +34,57 @@ const readyTimeout = 2 * time.Second
 
 // Server tiene lo que necesitan los handlers.
 type Server struct {
-	cfg           config.Config
-	pool          *pgxpool.Pool
-	queries       *store.Queries
-	log           *slog.Logger
-	enrollment    *enrollment.Service
-	hub           *hub
-	enrollLimiter *ipLimiter
-	ingester      *metrics.Ingester
-	runtime       *runstate.Ingester
-	projects      *projects.Ingester
-	pending       *pendingCommands
-	users         *users.Service
-	panels        *panelHub
-	counters      *counterCache
-	loginLimiter  *ipLimiter
-	totpLimiter   *ipLimiter
-	deploys       *deploys.Service
-	audit         *audit.Recorder
-	auditReader   *audit.Reader
-	blockedNotes  *sparseNotes
-	deployLimiter *ipLimiter
+	cfg             config.Config
+	pool            *pgxpool.Pool
+	queries         *store.Queries
+	log             *slog.Logger
+	enrollment      *enrollment.Service
+	hub             *hub
+	enrollLimiter   *ipLimiter
+	ingester        *metrics.Ingester
+	runtime         *runstate.Ingester
+	projects        *projects.Ingester
+	pending         *pendingCommands
+	users           *users.Service
+	panels          *panelHub
+	counters        *counterCache
+	loginLimiter    *ipLimiter
+	totpLimiter     *ipLimiter
+	deploys         *deploys.Service
+	audit           *audit.Recorder
+	auditReader     *audit.Reader
+	blockedNotes    *sparseNotes
+	deployLimiter   *ipLimiter
+	proposals       *proposals.Service
+	proposalLimiter *ipLimiter
 }
 
 // New arma el servidor de la API.
 func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 	return &Server{
-		cfg:           cfg,
-		pool:          pool,
-		queries:       store.New(pool),
-		log:           log,
-		enrollment:    enrollment.NewService(pool, cfg.EnrollmentTTL, log),
-		hub:           newHub(),
-		enrollLimiter: newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
-		ingester:      metrics.NewIngester(pool),
-		runtime:       runstate.NewIngester(pool),
-		projects:      projects.NewIngester(pool),
-		pending:       newPendingCommands(),
-		users:         users.NewService(pool, cfg.TOTPKey, log),
-		panels:        newPanelHub(),
-		counters:      newCounterCache(),
-		loginLimiter:  newIPLimiter(loginPerMinute, loginBurst, limiterTTL),
-		totpLimiter:   newIPLimiter(totpPerMinute, totpBurst, limiterTTL),
-		deploys:       deploys.NewService(pool),
-		audit:         audit.NewRecorder(store.New(pool)),
-		auditReader:   audit.NewReader(store.New(pool)),
-		blockedNotes:  newSparseNotes(blockedNoteEvery, maxBlockedNotes),
-		deployLimiter: newIPLimiter(deployRequestsPerMinute, deployRequestsBurst, limiterTTL),
+		cfg:             cfg,
+		pool:            pool,
+		queries:         store.New(pool),
+		log:             log,
+		enrollment:      enrollment.NewService(pool, cfg.EnrollmentTTL, log),
+		hub:             newHub(),
+		enrollLimiter:   newIPLimiter(enrollPerMinute, enrollBurst, limiterTTL),
+		ingester:        metrics.NewIngester(pool),
+		runtime:         runstate.NewIngester(pool),
+		projects:        projects.NewIngester(pool),
+		pending:         newPendingCommands(),
+		users:           users.NewService(pool, cfg.TOTPKey, log),
+		panels:          newPanelHub(),
+		counters:        newCounterCache(),
+		loginLimiter:    newIPLimiter(loginPerMinute, loginBurst, limiterTTL),
+		totpLimiter:     newIPLimiter(totpPerMinute, totpBurst, limiterTTL),
+		deploys:         deploys.NewService(pool),
+		audit:           audit.NewRecorder(store.New(pool)),
+		auditReader:     audit.NewReader(store.New(pool)),
+		blockedNotes:    newSparseNotes(blockedNoteEvery, maxBlockedNotes),
+		deployLimiter:   newIPLimiter(deployRequestsPerMinute, deployRequestsBurst, limiterTTL),
+		proposals:       proposals.NewService(pool),
+		proposalLimiter: newIPLimiter(proposalRequestsPerMinute, proposalRequestsBurst, limiterTTL),
 	}
 }
 
@@ -120,6 +125,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/projects/{id}/bootstrap", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleBootstrap))))
 	mux.Handle("GET /v1/deploys/{id}", s.requireSession(http.HandlerFunc(s.handleGetDeploy)))
 	mux.Handle("GET /v1/audit", s.requireSession(http.HandlerFunc(s.handleListAudit)))
+	// El alta de proyectos (ADR-022).
+	mux.Handle("GET /v1/servers/{id}/proposals", s.requireSession(http.HandlerFunc(s.handleListProposals)))
+	mux.Handle("POST /v1/servers/{id}/proposals", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleCreateProposal))))
+	mux.Handle("POST /v1/servers/{id}/proposals/preview", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handlePreviewProposal))))
+	mux.Handle("GET /v1/proposals/{id}", s.requireSession(http.HandlerFunc(s.handleGetProposal)))
+	mux.Handle("DELETE /v1/proposals/{id}", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleWithdrawProposal))))
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si

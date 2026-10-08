@@ -38,6 +38,12 @@ const (
 	ActionDeployFinish     = "deploy.finish"
 	ActionLogsRequest      = "logs.request"
 
+	// Las del alta de proyectos (ADR-022): la propuesta, su retiro, y que se
+	// aceptó en el servidor (la informa el agent).
+	ActionProjectPropose  = "project.propose"
+	ActionProjectWithdraw = "project.withdraw"
+	ActionProjectAccept   = "project.accept"
+
 	// Las de acceso (ADR-020).
 	ActionLogin             = "auth.login"
 	ActionTOTPVerify        = "auth.totp_verify"

@@ -155,6 +155,10 @@ func (s *Server) handleAgentMessage(ctx context.Context, conn *websocket.Conn, s
 	case proto.TypeProjectsState:
 		return s.handleProjectsState(ctx, conn, server, limits.projects, envelope)
 
+	case proto.TypeProjectProposalAck:
+		s.handleProposalAck(ctx, server, envelope)
+		return nil
+
 	case proto.TypeDeployEvent:
 		return s.handleDeployEvent(ctx, conn, server, limits.deploys, envelope)
 
