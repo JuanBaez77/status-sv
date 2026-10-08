@@ -265,3 +265,25 @@ func TestLoadRejectsSymlinks(t *testing.T) {
 		t.Error("Load aceptó un nombre con ..")
 	}
 }
+
+// Una propuesta cuyo nombre ya se declaró no se informa, pero queda en el
+// disco: si el alta quedó por la mitad, project accept la necesita de nuevo.
+func TestListOmitsDeclared(t *testing.T) {
+	declared := false
+	s := NewStore(filepath.Join(t.TempDir(), DirName), func(string) bool { return declared })
+	s.now = func() time.Time { return start }
+	s.Handle(put("svdemo", svdemoYAML))
+	declared = true
+	if pending := list(t, s); len(pending) != 0 {
+		t.Errorf("List = %+v", pending)
+	}
+	if _, err := Load(s.dir, "svdemo"); err != nil {
+		t.Errorf("la propuesta se borró: %v", err)
+	}
+	if err := Remove(s.dir, "svdemo"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := Load(s.dir, "svdemo"); !os.IsNotExist(err) {
+		t.Errorf("después de Remove: %v", err)
+	}
+}

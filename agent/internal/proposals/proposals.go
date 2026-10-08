@@ -160,9 +160,25 @@ func (s *Store) List() ([]proto.PendingProposal, error) {
 	}
 	pending := make([]proto.PendingProposal, 0, len(metas))
 	for _, m := range metas {
+		// Una propuesta cuyo nombre ya está declarado se aceptó (o alguien
+		// lo declaró a mano): ya no espera a nadie. Queda en el disco hasta
+		// que project accept termine y la borre, o hasta que venza: si el
+		// alta quedó por la mitad, correrlo de nuevo la necesita.
+		if s.declared(m.Name) {
+			continue
+		}
 		pending = append(pending, proto.PendingProposal{ProposalID: m.ProposalID, Name: m.Name, Hash: m.Hash})
 	}
 	return pending, nil
+}
+
+// Remove borra una propuesta de dir. Lo usa project accept, como root, cuando
+// el alta terminó.
+func Remove(dir, name string) error {
+	if !proto.ValidProjectName(name) {
+		return errors.New("nombre de proyecto inválido")
+	}
+	return (&Store{dir: dir}).remove(name)
 }
 
 // list lee las fichas del directorio. Se llama con s.mu tomado.

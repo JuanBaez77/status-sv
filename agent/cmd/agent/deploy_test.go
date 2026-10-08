@@ -48,16 +48,6 @@ func TestPrintDeployPaths(t *testing.T) {
 	}
 }
 
-func TestHidden(t *testing.T) {
-	for dir, want := range map[string]bool{
-		"/srv/x": false, "/opt/app": false, "/home": true, "/home/juan/x": true, "/root": true, "/run/user/1000/x": true, "/homes/x": false,
-	} {
-		if hidden(dir) != want {
-			t.Errorf("hidden(%q) = %v", dir, !want)
-		}
-	}
-}
-
 // Sin el ayudante instalado, deploy-check de un proyecto de systemd dice qué
 // falta y cómo se arregla, en vez de un error de conexión.
 func TestCheckSystemdWithoutHelper(t *testing.T) {

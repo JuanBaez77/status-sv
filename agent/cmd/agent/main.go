@@ -9,6 +9,8 @@
 //	agent runtime                    imprime la foto de contenedores, servicios y procesos
 //	agent deploy-check PROYECTO      revisa que un proyecto se pueda desplegar
 //	agent deploy-paths               lista los proyectos que se pueden desplegar, para el instalador
+//	agent deploy-dropin              imprime el drop-in 20-deploy.conf, para el instalador
+//	agent project accept PROYECTO    acepta la propuesta de un proyecto nuevo (ADR-022)
 //	agent unit-helper                atiende un pedido del agent como root (lo arranca systemd)
 //	agent version                    imprime la versión
 package main
@@ -58,6 +60,10 @@ func run(ctx context.Context, args []string) error {
 		return runSample(ctx, args[1:])
 	case "deploy-check":
 		return runDeployCheck(ctx, args[1:])
+	case "project":
+		return runProject(ctx, args[1:])
+	case "deploy-dropin":
+		return runDeployDropin(ctx, args[1:])
 	case "deploy-paths":
 		return runDeployPaths(ctx, args[1:])
 	case "unit-helper":
@@ -86,8 +92,12 @@ Uso:
                                     procesos como JSON, sin conectarse
   agent deploy-check PROYECTO       revisa, sin tocar lo que corre, que el proyecto se
                                     pueda desplegar (correrlo como el usuario del agent)
+  agent deploy-dropin               imprime el drop-in 20-deploy.conf del deploy; lo usa
+                                    el instalador
   agent deploy-paths                lista los proyectos que se pueden desplegar, con su
                                     workdir y su runtime; lo usa el instalador
+  agent project accept PROYECTO     acepta la propuesta de un proyecto nuevo y lo declara;
+                                    se corre como root (ADR-022)
   agent unit-helper                 atiende un pedido del agent como root; no se corre a
                                     mano: lo arranca systemd desde su socket (ADR-019)
   agent version                     imprime la versión

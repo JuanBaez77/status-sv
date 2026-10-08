@@ -192,3 +192,29 @@ func TestAckDoesNotOverwriteANewerJournal(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// Active lee los diarios desde afuera del motor: lo usa project accept, como
+// root, antes de reiniciar el agent.
+func TestActive(t *testing.T) {
+	stateDir := t.TempDir()
+	if active, err := Active(stateDir); err != nil || len(active) != 0 {
+		t.Fatalf("sin diarios: %v, %v", active, err)
+	}
+
+	s, err := newStore(filepath.Join(stateDir, "deploys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for project, status := range map[string]proto.DeployStatus{
+		"tienda": proto.DeployRunning, "svdemo": proto.DeploySucceeded, "otro": proto.DeployRolledBack,
+	} {
+		j := &journal{Event: proto.DeployEvent{DeployID: uuid.Must(uuid.NewV7()), Seq: 1, Project: project, Status: status}}
+		if err := s.saveJournal(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active, err := Active(stateDir)
+	if err != nil || len(active) != 1 || active[0] != "tienda" {
+		t.Errorf("Active = %v, %v", active, err)
+	}
+}
