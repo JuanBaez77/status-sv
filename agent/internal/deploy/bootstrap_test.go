@@ -2,6 +2,9 @@ package deploy
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -318,7 +321,7 @@ func TestSystemdBootstrapSucceeds(t *testing.T) {
 	}
 	// El ayudante revisa el proyecto antes de clonar y otra vez con el código
 	// en el workdir; después, lo de un deploy.
-	if got := h.helper.Calls(); got != "check | check | build 0 | build 1 | pre 0 | restart | post 0" {
+	if got := h.helper.Calls(); got != "check | check | build 0 | build 1 | pre 0 | restart | post 0 | enable" {
 		t.Errorf("ayudante = %s", got)
 	}
 	if h.git.inits != 1 || h.git.head != commitNew {
@@ -383,5 +386,82 @@ func TestSystemdBootstrapUnhealthyStopsTheUnits(t *testing.T) {
 	ev = h.final(h.bootstrap())
 	if ev.Status != proto.DeployFailed || ev.Code != proto.DeployRollbackFailed || !strings.Contains(ev.Message, "no se pudo parar "+unitWorker) {
 		t.Fatalf("foto = %s %s: %s", ev.Status, ev.Code, ev.Message)
+	}
+}
+
+// Un primer deploy de systemd que quedó bien habilita las unidades para el
+// arranque, y lo dice en la salida del paso que las arrancó (ADR-022).
+func TestSystemdBootstrapEnablesTheUnits(t *testing.T) {
+	h := newFreshSystemdHarness(t)
+	ev := h.final(h.bootstrap())
+	if ev.Status != proto.DeploySucceeded {
+		t.Fatalf("foto = %s %s: %s", ev.Status, ev.Code, ev.Message)
+	}
+	if out := restartOutput(ev); !strings.Contains(out, "habilitada para el arranque: "+unitWeb) {
+		t.Errorf("salida del reinicio = %q", out)
+	}
+
+	// Si no se puede, el deploy igual quedó bien: se dice cómo hacerlo a mano.
+	h = newFreshSystemdHarness(t)
+	h.helper.enableErr = errors.New("no se pudieron habilitar las unidades del proyecto")
+	ev = h.final(h.bootstrap())
+	if ev.Status != proto.DeploySucceeded {
+		t.Fatalf("foto = %s %s: %s", ev.Status, ev.Code, ev.Message)
+	}
+	if out := restartOutput(ev); !strings.Contains(out, "systemctl enable") {
+		t.Errorf("salida del reinicio = %q", out)
+	}
+	if err := ev.Validate(); err != nil {
+		t.Errorf("la foto no entra en el contrato: %v", err)
+	}
+}
+
+// Un deploy común no habilita nada: las unidades ya estaban.
+func TestSystemdDeployDoesNotEnable(t *testing.T) {
+	h := newSystemdHarness(t, "")
+	id, _ := h.start(proto.OpDeploy)
+	ev := h.final(id)
+	if ev.Status != proto.DeploySucceeded {
+		t.Fatalf("foto = %s %s: %s", ev.Status, ev.Code, ev.Message)
+	}
+	if strings.Contains(h.helper.Calls(), "enable") {
+		t.Errorf("ayudante = %s", h.helper.Calls())
+	}
+}
+
+func restartOutput(ev proto.DeployEvent) string {
+	for _, s := range ev.Steps {
+		if s.Name == proto.StepRestart {
+			return strings.Join(s.Output, "\n")
+		}
+	}
+	return ""
+}
+
+// Con Docker, el chequeo previo mira el .env del workdir: sin las variables
+// requeridas, se frena antes de tocar nada y nombra las que faltan.
+func TestDockerChecksRequiredEnv(t *testing.T) {
+	workdir := t.TempDir()
+	rt := dockerRuntime{workdir: workdir, required: []string{"SECRET_KEY", "DATABASE_URL"}}
+	err := rt.checkEnv()
+	if code, message := codeOf(err); code != proto.DeployPreflightFailed || !strings.Contains(message, "SECRET_KEY, DATABASE_URL") {
+		t.Fatalf("sin .env = %s: %s", code, message)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".env"), []byte("SECRET_KEY='s3cr3t0'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, message := codeOf(rt.checkEnv())
+	if !strings.Contains(message, "DATABASE_URL") || strings.Contains(message, "SECRET_KEY") || strings.Contains(message, "s3cr3t0") {
+		t.Errorf("con una cargada = %s", message)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".env"), []byte("SECRET_KEY='s3cr3t0'\nDATABASE_URL='x'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.checkEnv(); err != nil {
+		t.Errorf("con todas = %v", err)
+	}
+	// Sin variables requeridas no hay nada que mirar.
+	if err := (dockerRuntime{workdir: filepath.Join(workdir, "no-existe")}).checkEnv(); err != nil {
+		t.Errorf("sin requeridas = %v", err)
 	}
 }

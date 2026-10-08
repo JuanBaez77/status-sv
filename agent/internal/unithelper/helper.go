@@ -66,6 +66,8 @@ type Manager interface {
 	Restart(ctx context.Context, unit string) error
 	// Loaded dice si systemd conoce la unidad.
 	Loaded(ctx context.Context, unit string) (bool, error)
+	// Enable habilita unidades para que arranquen con el servidor.
+	Enable(ctx context.Context, units []string) error
 }
 
 // Helper atiende los pedidos del agent.
@@ -165,6 +167,8 @@ func (h *Helper) handle(ctx context.Context, req Request) Response {
 		return Response{OK: true}
 	case OpRestartUnits:
 		return h.restart(ctx, spec)
+	case OpEnableUnits:
+		return h.enable(ctx, spec)
 	case OpStopUnits:
 		return h.stop(ctx, spec)
 	default:
@@ -328,4 +332,14 @@ func stepOf(spec projectspec.Spec, phase Phase, index int) (projectspec.Step, bo
 // queda en el registro del ayudante; al agent le llega qué se intentaba.
 func internal(what string, err error) Response {
 	return Response{Code: CodeInternal, Message: fmt.Sprintf("no se pudo %s: %v", what, err)}
+}
+
+// enable habilita las unidades declaradas para que arranquen con el
+// servidor. No las arranca: es lo último de un primer deploy que quedó bien.
+func (h *Helper) enable(ctx context.Context, spec projectspec.Spec) Response {
+	if err := h.Systemd.Enable(ctx, spec.Project.Units); err != nil {
+		h.Log.Error("no se pudieron habilitar las unidades", "proyecto", spec.Project.Name, "error", err)
+		return Response{Code: CodeEnableFailed, Message: "no se pudieron habilitar las unidades del proyecto"}
+	}
+	return Response{OK: true}
 }

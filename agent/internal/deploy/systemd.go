@@ -38,6 +38,7 @@ type (
 		RunStep(ctx context.Context, project string, phase unithelper.Phase, index int, deploy uuid.UUID) error
 		RestartUnits(ctx context.Context, project string) error
 		StopUnits(ctx context.Context, project string) error
+		EnableUnits(ctx context.Context, project string) error
 	}
 	// UnitWatcher lee el estado de una unidad, sin privilegios.
 	UnitWatcher interface {
@@ -96,6 +97,16 @@ func (s *systemdRuntime) Preflight(ctx context.Context) (string, error) {
 // del código del proyecto.
 func (s *systemdRuntime) Available(ctx context.Context) (string, error) {
 	return s.Preflight(ctx)
+}
+
+// EnableAtBoot habilita las unidades del proyecto para que arranquen con el
+// servidor (ADR-022). Lo hace el primer deploy cuando quedó bien: hasta el
+// Sprint 6 era un systemctl enable a mano.
+func (s *systemdRuntime) EnableAtBoot(ctx context.Context) (string, error) {
+	if err := s.deps.Helper.EnableUnits(ctx, s.spec.Project.Name); err != nil {
+		return "", err
+	}
+	return "habilitada para el arranque: " + strings.Join(s.spec.Project.Units, ", "), nil
 }
 
 // Running es la primera unidad del proyecto que no está parada.
