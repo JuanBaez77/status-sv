@@ -75,6 +75,15 @@ func TestGoldenEnvelopes(t *testing.T) {
 		{name: "deploy_event_systemd", msg: systemdDeployEvent()},
 		{name: "deploy_event_bootstrap", msg: bootstrapDeployEvent()},
 		{name: "deploy_event_ack", msg: proto.DeployEventAck{DeployID: goldenID, Seq: 9}},
+		{name: "project_proposal", msg: validProposal()},
+		{name: "project_proposal_withdraw", msg: proto.ProjectProposal{ProposalID: goldenProposalID, Name: "svdemo", Action: proto.ProposalWithdraw}},
+		{
+			name: "project_proposal_ack",
+			msg: proto.ProjectProposalAck{
+				ProposalID: goldenProposalID, Name: "svdemo", Result: proto.ProposalRejected,
+				Error: "ya hay un proyecto declarado con ese nombre",
+			},
+		},
 		{name: "error", msg: proto.NewError(proto.CodeInvalidToken, "el token no existe o ya se usó", goldenID)},
 	}
 

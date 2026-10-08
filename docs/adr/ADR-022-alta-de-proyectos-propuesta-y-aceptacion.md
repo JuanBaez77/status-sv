@@ -106,7 +106,9 @@ sudo statussv-agent project accept <nombre>
 
 **4. Los valores de los secretos se cargan en el servidor y no salen de él.**
 
-- El proyecto declara **solo los nombres** en `required_env` (hasta 50, `^[A-Z_][A-Z0-9_]*$`).
+- El proyecto declara **solo los nombres** en `required_env` (hasta 20, `^[A-Z_][A-Z0-9_]*$`).
+  Al construirlo, el tope bajó de 50 a 20: los nombres que faltan viajan en `projects_state`,
+  por cada proyecto del servidor, y con 50 el mensaje podía pasar de 256 KiB.
 - Los valores se piden en `project accept`, y se cambian después con
   `sudo statussv-agent project env <nombre>`.
 - Con Docker van al `.env` del `workdir`, `root:statussv 0640`, que es el que lee

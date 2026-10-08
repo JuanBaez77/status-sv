@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "project_proposal",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "proposal_id": "01924f9c-0000-7000-8000-0000000000bb",
+    "name": "svdemo",
+    "action": "put",
+    "yaml": "name: svdemo\nenvironment: staging\nrepo: github.com/JuanBaez77/status-sv-demo\nbranch: main\nruntime: systemd\nworkdir: /srv/svdemo\nrun_as: svdemo\nenv_file: /etc/status-sv/env/svdemo.env\nrequired_env: [SECRET_KEY]\nservice:\n  command: [.venv/bin/gunicorn, app:app, --bind, 127.0.0.1:18097]\nsite:\n  domain: svdemo.extendsystem.com\n  port: 18097\n",
+    "expires_at": "2026-09-27T12:00:00Z"
+  }
+}

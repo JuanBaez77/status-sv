@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "project_proposal_ack",
+  "id": "01924f9c-0000-7000-8000-000000000001",
+  "ts": "2026-09-20T12:00:00Z",
+  "data": {
+    "proposal_id": "01924f9c-0000-7000-8000-0000000000bb",
+    "name": "svdemo",
+    "result": "rejected",
+    "error": "ya hay un proyecto declarado con ese nombre"
+  }
+}

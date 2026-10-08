@@ -47,9 +47,12 @@ func validProjectsState() proto.ProjectsState {
 	return proto.ProjectsState{
 		TakenAt:  time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
 		Source:   proto.RuntimeSource{Status: proto.SourceOK},
-		Projects: []proto.Project{dockerProject(), systemdProject()},
+		Projects: []proto.Project{dockerProject(), systemdProject(), altaProject()},
 		Invalid: []proto.InvalidProject{
 			{File: "cotizador.yaml", Error: "healthcheck.url: la URL tiene que ser http o https"},
+		},
+		Proposals: []proto.PendingProposal{
+			{ProposalID: goldenProposalID, Name: "turnos", Hash: proto.SpecHash([]byte("name: turnos\n"))},
 		},
 	}
 }

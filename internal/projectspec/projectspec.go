@@ -127,19 +127,6 @@ const (
 	maxEnvFileLen       = 256
 )
 
-// Límites del alta (ADR-022 y ADR-023).
-const (
-	// MaxRequiredEnv es lo más que un proyecto puede declarar en required_env.
-	MaxRequiredEnv = 50
-	// MinSitePort y MaxSitePort acotan el puerto local al que apunta el sitio:
-	// nunca uno de los reservados.
-	MinSitePort = 1024
-	MaxSitePort = 65535
-
-	maxEnvNameLen = 64
-	maxDomainLen  = 253
-)
-
 // Lo que una propuesta no elige (ADR-022): el workdir y el archivo de entorno
 // salen del nombre del proyecto.
 const (
@@ -206,14 +193,6 @@ var serviceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // userName es el formato de un usuario del sistema, el que acepta useradd.
 var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-
-// envName es el formato del nombre de una variable de entorno que se puede
-// declarar como requerida: mayúsculas, números y _, sin empezar con número.
-var envName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-
-// domainLabel es una etiqueta de un nombre de host en minúsculas: letras,
-// números y guiones, sin guion en las puntas.
-var domainLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // NameFromFile devuelve el nombre de proyecto que corresponde a un archivo, o
 // ErrNotProjectFile si no es un archivo de proyecto.
@@ -488,14 +467,14 @@ func ServiceUnit(project string) string {
 
 // checkRequiredEnv valida los nombres de required_env.
 func checkRequiredEnv(names []string) error {
-	if len(names) > MaxRequiredEnv {
-		return fmt.Errorf("required_env: trae %d nombres y el máximo es %d", len(names), MaxRequiredEnv)
+	if len(names) > proto.MaxRequiredEnv {
+		return fmt.Errorf("required_env: trae %d nombres y el máximo es %d", len(names), proto.MaxRequiredEnv)
 	}
 	seen := make(map[string]bool, len(names))
 	for i, name := range names {
 		switch {
-		case len(name) > maxEnvNameLen || !envName.MatchString(name):
-			return fmt.Errorf("required_env[%d]: tiene que ser un nombre de variable (mayúsculas, números y _, de hasta %d caracteres)", i, maxEnvNameLen)
+		case !proto.ValidEnvName(name):
+			return fmt.Errorf("required_env[%d]: tiene que ser un nombre de variable (mayúsculas, números y _, de hasta %d caracteres)", i, proto.MaxEnvNameLen)
 		case seen[name]:
 			return fmt.Errorf("required_env[%d]: está repetido", i)
 		}
@@ -504,35 +483,13 @@ func checkRequiredEnv(names []string) error {
 	return nil
 }
 
-// checkSite valida el sitio de nginx (ADR-023).
+// checkSite valida el sitio de nginx (ADR-023), con las reglas del contrato:
+// el sitio viaja al control plane.
 func checkSite(s *site) error {
-	switch {
-	case !ValidDomain(s.Domain):
-		return fmt.Errorf("site.domain: tiene que ser un nombre de host en minúsculas, con al menos un punto, sin comodines y de hasta %d caracteres", maxDomainLen)
-	case s.Port < MinSitePort || s.Port > MaxSitePort:
-		return fmt.Errorf("site.port: tiene que estar entre %d y %d", MinSitePort, MaxSitePort)
+	if err := (proto.SiteSpec{Domain: s.Domain, Port: s.Port}).Validate(); err != nil {
+		return fmt.Errorf("site.%w", err)
 	}
 	return nil
-}
-
-// ValidDomain dice si un dominio se puede usar en el sitio generado: un nombre
-// de host en minúsculas, con al menos dos etiquetas y sin comodines. Es lo
-// único del dominio que llega a la plantilla de nginx.
-func ValidDomain(domain string) bool {
-	if domain == "" || len(domain) > maxDomainLen {
-		return false
-	}
-	labels := strings.Split(domain, ".")
-	if len(labels) < 2 {
-		return false
-	}
-	for _, label := range labels {
-		if !domainLabel.MatchString(label) {
-			return false
-		}
-	}
-	// La última etiqueta no es solo números: eso es una dirección IP.
-	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
 }
 
 // ProposalWorkdir es el workdir de un proyecto propuesto, que no se elige.

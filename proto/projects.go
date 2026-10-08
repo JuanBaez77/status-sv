@@ -57,6 +57,11 @@ type ProjectsState struct {
 	Source   RuntimeSource    `json:"source"`
 	Projects []Project        `json:"projects,omitempty"`
 	Invalid  []InvalidProject `json:"invalid,omitempty"`
+	// Proposals son las propuestas de proyectos nuevos que el agent tiene
+	// guardadas, esperando que una persona las acepte (ADR-022). Viajan
+	// aunque no se haya podido leer el directorio de proyectos: son del
+	// directorio de estado del agent.
+	Proposals []PendingProposal `json:"proposals,omitempty"`
 }
 
 // Type implementa Message.
@@ -90,6 +95,19 @@ func (p ProjectsState) Validate() error {
 		if err := invalid.Validate(); err != nil {
 			return fmt.Errorf("archivo inválido %d: %w", i, err)
 		}
+	}
+	if len(p.Proposals) > MaxPendingProposals {
+		return fmt.Errorf("trae %d propuestas y el máximo es %d", len(p.Proposals), MaxPendingProposals)
+	}
+	proposals := make(map[string]bool, len(p.Proposals))
+	for i, proposal := range p.Proposals {
+		if err := proposal.Validate(); err != nil {
+			return fmt.Errorf("propuesta %d: %w", i, err)
+		}
+		if proposals[proposal.Name] {
+			return fmt.Errorf("propuesta %d: el nombre %s está repetido", i, proposal.Name)
+		}
+		proposals[proposal.Name] = true
 	}
 	return nil
 }
@@ -133,6 +151,21 @@ type Project struct {
 	// Health es el último resultado del healthcheck pasivo. Falta si el
 	// proyecto no declara healthcheck o si todavía no se probó.
 	Health *HealthResult `json:"health,omitempty"`
+
+	// Lo que sigue llegó con el alta (ADR-022 y ADR-023); un agent anterior
+	// no lo manda.
+
+	// SpecHash es el hash del project.yaml (SpecHash): el control plane lo
+	// compara con el de una propuesta para saber si se aceptó tal cual.
+	SpecHash string `json:"spec_hash,omitempty"`
+	// Site es el sitio de nginx declarado.
+	Site *SiteSpec `json:"site,omitempty"`
+	// Env dice si están cargadas las variables requeridas. Falta si el
+	// proyecto no declara ninguna.
+	Env *EnvStatus `json:"env,omitempty"`
+	// DeployKey es la llave pública de la deploy key del proyecto, sin
+	// comentario, si tiene una. Es pública: es lo que se carga en GitHub.
+	DeployKey string `json:"deploy_key,omitempty"`
 }
 
 // Validate revisa cada campo. Son las mismas reglas que aplica el parser del
@@ -201,6 +234,22 @@ func (p Project) Validate() error {
 		if err := p.Health.Validate(); err != nil {
 			return fmt.Errorf("resultado del healthcheck: %w", err)
 		}
+	}
+	if p.SpecHash != "" && !validHash(p.SpecHash) {
+		return errors.New("spec_hash: tiene que ser un SHA-256 en hexadecimal")
+	}
+	if p.Site != nil {
+		if err := p.Site.Validate(); err != nil {
+			return fmt.Errorf("site.%w", err)
+		}
+	}
+	if p.Env != nil {
+		if err := p.Env.Validate(); err != nil {
+			return fmt.Errorf("env.%w", err)
+		}
+	}
+	if p.DeployKey != "" && !ValidPublicKey(p.DeployKey) {
+		return errors.New("deploy_key: tiene que ser una llave pública SSH, tipo y base64, sin comentario")
 	}
 	return nil
 }
