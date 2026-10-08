@@ -424,3 +424,44 @@ func TestRequestTimesOut(t *testing.T) {
 		t.Fatal("el ayudante quedó esperando un pedido")
 	}
 }
+
+// check dice qué variables requeridas faltan en el archivo de entorno, que el
+// agent no puede leer: solo los nombres (ADR-022).
+func TestCheckRequiredEnv(t *testing.T) {
+	withRequired := func(h *Helper, required ...string) {
+		load := h.Load
+		h.Load = func(dir, name string) (projectspec.Spec, error) {
+			spec, err := load(dir, name)
+			spec.RequiredEnv = required
+			return spec, err
+		}
+	}
+
+	h := newHelper(t, &fakeSystemd{})
+	withRequired(h, "CLAVE", "SECRET_KEY", "DATABASE_URL")
+	resp := ask(t, h, `{"op":"check","project":"facturas"}`)
+	if resp.OK || resp.Code != CodeNotReady || !resp.EnvChecked || strings.Join(resp.Missing, ",") != "SECRET_KEY,DATABASE_URL" {
+		t.Fatalf("respuesta = %+v", resp)
+	}
+	if strings.Contains(resp.Message, "valor") {
+		t.Errorf("la respuesta muestra un valor: %+v", resp)
+	}
+
+	h = newHelper(t, &fakeSystemd{})
+	withRequired(h, "CLAVE")
+	if resp := ask(t, h, `{"op":"check","project":"facturas"}`); !resp.OK || !resp.EnvChecked || len(resp.Missing) != 0 {
+		t.Errorf("con todo cargado = %+v", resp)
+	}
+
+	// Sin variables requeridas, no hay nada que mirar.
+	if resp := ask(t, newHelper(t, &fakeSystemd{}), `{"op":"check","project":"facturas"}`); !resp.OK || resp.EnvChecked {
+		t.Errorf("sin requeridas = %+v", resp)
+	}
+
+	// Aunque otra cosa no esté lista, los nombres que faltan viajan igual.
+	h = newHelper(t, &fakeSystemd{missing: map[string]bool{"facturas-worker.service": true}})
+	withRequired(h, "SECRET_KEY")
+	if resp := ask(t, h, `{"op":"check","project":"facturas"}`); resp.Unit == "" || strings.Join(resp.Missing, ",") != "SECRET_KEY" {
+		t.Errorf("con una unidad que falta = %+v", resp)
+	}
+}

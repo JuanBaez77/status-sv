@@ -23,6 +23,8 @@ type Error struct {
 	Message  string
 	Unit     string
 	ExitCode int
+	// Missing son las variables requeridas que faltan, si el chequeo las miró.
+	Missing []string
 }
 
 func (e *Error) Error() string {
@@ -69,19 +71,45 @@ func (c *Client) StopUnits(ctx context.Context, project string) error {
 	return c.do(ctx, Request{Op: OpStopUnits, Project: project})
 }
 
+// CheckEnv pregunta qué variables requeridas faltan en el archivo de entorno
+// del proyecto (ADR-022). checked es falso si el ayudante no lo pudo mirar o
+// el proyecto no declara ninguna. Solo viajan nombres.
+func (c *Client) CheckEnv(ctx context.Context, project string) (missing []string, checked bool, err error) {
+	resp, err := c.exchange(ctx, Request{Op: OpCheck, Project: project})
+	if err != nil {
+		return nil, false, err
+	}
+	return resp.Missing, resp.EnvChecked, nil
+}
+
 // do manda un pedido y espera la respuesta. Una conexión por pedido.
 func (c *Client) do(ctx context.Context, req Request) error {
+	resp, err := c.exchange(ctx, req)
+	if err != nil {
+		return err
+	}
+	if resp.OK {
+		return nil
+	}
+	if resp.Code == "" {
+		resp.Code = CodeInternal
+	}
+	return &Error{Code: resp.Code, Message: resp.Message, Unit: resp.Unit, ExitCode: resp.ExitCode, Missing: resp.Missing}
+}
+
+// exchange manda un pedido y devuelve la respuesta tal cual, buena o mala.
+func (c *Client) exchange(ctx context.Context, req Request) (Response, error) {
 	if err := req.Validate(); err != nil {
-		return &Error{Code: CodeInvalidRequest, Message: err.Error()}
+		return Response{}, &Error{Code: CodeInvalidRequest, Message: err.Error()}
 	}
 
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
-			return ErrUnavailable
+			return Response{}, ErrUnavailable
 		}
-		return fmt.Errorf("conectar con el ayudante: %w", err)
+		return Response{}, fmt.Errorf("conectar con el ayudante: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -92,27 +120,21 @@ func (c *Client) do(ctx context.Context, req Request) error {
 
 	raw, err := json.Marshal(req)
 	if err != nil {
-		return err
+		return Response{}, err
 	}
 	if _, err := conn.Write(append(raw, '\n')); err != nil {
-		return c.failed(ctx, "mandar el pedido al ayudante", err)
+		return Response{}, c.failed(ctx, "mandar el pedido al ayudante", err)
 	}
 
 	line, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil {
-		return c.failed(ctx, "leer la respuesta del ayudante", err)
+		return Response{}, c.failed(ctx, "leer la respuesta del ayudante", err)
 	}
 	var resp Response
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return fmt.Errorf("la respuesta del ayudante no se entiende: %w", err)
+		return Response{}, fmt.Errorf("la respuesta del ayudante no se entiende: %w", err)
 	}
-	if resp.OK {
-		return nil
-	}
-	if resp.Code == "" {
-		resp.Code = CodeInternal
-	}
-	return &Error{Code: resp.Code, Message: resp.Message, Unit: resp.Unit, ExitCode: resp.ExitCode}
+	return resp, nil
 }
 
 // failed arma el error de una conexión que se cortó: si fue porque se

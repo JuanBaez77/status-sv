@@ -49,20 +49,8 @@ func (o OS) CreateUser(name, home string) error {
 }
 
 // Chown implementa System.
-func (OS) Chown(path, owner, group string) error {
-	u, err := user.Lookup(owner)
-	if err != nil {
-		return fmt.Errorf("buscar el usuario %s: %w", owner, err)
-	}
-	g, err := user.LookupGroup(group)
-	if err != nil {
-		return fmt.Errorf("buscar el grupo %s: %w", group, err)
-	}
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return err
-	}
-	gid, err := strconv.Atoi(g.Gid)
+func (o OS) Chown(path, owner, group string) error {
+	uid, gid, err := o.Owner(owner, group)
 	if err != nil {
 		return err
 	}
@@ -129,4 +117,25 @@ func (o OS) run(ctx context.Context, name string, args ...string) error {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	return nil
+}
+
+// Owner implementa System.
+func (OS) Owner(owner, group string) (int, int, error) {
+	u, err := user.Lookup(owner)
+	if err != nil {
+		return 0, 0, fmt.Errorf("buscar el usuario %s: %w", owner, err)
+	}
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return 0, 0, fmt.Errorf("buscar el grupo %s: %w", group, err)
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return 0, 0, err
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil {
+		return 0, 0, err
+	}
+	return uid, gid, nil
 }

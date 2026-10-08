@@ -142,6 +142,11 @@ type Response struct {
 	Unit string `json:"unit,omitempty"`
 	// ExitCode es el código de salida de un paso que terminó mal.
 	ExitCode int `json:"exit_code,omitempty"`
+	// Missing son las variables requeridas que faltan en el archivo de
+	// entorno, y EnvChecked dice que se miró (ADR-022). Solo en check: son
+	// nombres, nunca valores.
+	Missing    []string `json:"missing,omitempty"`
+	EnvChecked bool     `json:"env_checked,omitempty"`
 }
 
 // StepUnit es el nombre de la unidad transitoria en la que corre un paso. Es
