@@ -156,3 +156,15 @@ func notLoaded(err error) bool {
 	var dbusErr dbus.Error
 	return errors.As(err, &dbusErr) && dbusErr.Name == "org.freedesktop.systemd1.NoSuchUnit"
 }
+
+// Enable habilita las unidades, como systemctl enable, y le pide a systemd
+// que relea su configuración. No las arranca.
+func (s *Systemd) Enable(ctx context.Context, units []string) error {
+	if _, _, err := s.conn.EnableUnitFilesContext(ctx, units, false, false); err != nil {
+		return fmt.Errorf("habilitar las unidades: %w", err)
+	}
+	if err := s.conn.ReloadContext(ctx); err != nil {
+		return fmt.Errorf("recargar systemd: %w", err)
+	}
+	return nil
+}

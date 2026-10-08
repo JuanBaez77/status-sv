@@ -51,6 +51,10 @@ const (
 	// OpStopUnits para las unidades declaradas del proyecto. Es lo que deshace
 	// un primer deploy que no quedó bien (ADR-021).
 	OpStopUnits Op = "stop_units"
+	// OpEnableUnits habilita las unidades declaradas del proyecto para que
+	// arranquen con el servidor, sin arrancarlas. Es lo último de un primer
+	// deploy que quedó bien (ADR-022).
+	OpEnableUnits Op = "enable_units"
 )
 
 // Phase es de qué lista de pasos del project.yaml es un paso.
@@ -81,7 +85,7 @@ func (r Request) Validate() error {
 		return errors.New("proyecto inválido")
 	}
 	switch r.Op {
-	case OpCheck, OpRestartUnits, OpStopUnits:
+	case OpCheck, OpRestartUnits, OpStopUnits, OpEnableUnits:
 		if r.Phase != "" || r.Index != 0 || r.Deploy != "" {
 			return errors.New("esa operación lleva solo el proyecto")
 		}
@@ -129,6 +133,8 @@ const (
 	CodeRestartFailed Code = "restart_failed"
 	// CodeStopFailed: una unidad no se pudo parar.
 	CodeStopFailed Code = "stop_failed"
+	// CodeEnableFailed es que no se pudieron habilitar las unidades.
+	CodeEnableFailed Code = "enable_failed"
 	// CodeInternal: cualquier otra cosa.
 	CodeInternal Code = "internal"
 )

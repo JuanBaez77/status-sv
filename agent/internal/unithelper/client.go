@@ -82,6 +82,11 @@ func (c *Client) CheckEnv(ctx context.Context, project string) (missing []string
 	return resp.Missing, resp.EnvChecked, nil
 }
 
+// EnableUnits habilita las unidades declaradas del proyecto para el arranque.
+func (c *Client) EnableUnits(ctx context.Context, project string) error {
+	return c.do(ctx, Request{Op: OpEnableUnits, Project: project})
+}
+
 // do manda un pedido y espera la respuesta. Una conexión por pedido.
 func (c *Client) do(ctx context.Context, req Request) error {
 	resp, err := c.exchange(ctx, req)

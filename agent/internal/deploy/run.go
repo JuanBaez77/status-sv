@@ -480,12 +480,55 @@ func (r *run) succeed() {
 		}
 	}
 
+	r.enableAtBoot(ctx)
+
 	r.update(func(j *journal) {
 		j.Event.Status = proto.DeploySucceeded
 		j.Event.FinishedAt = maxTime(r.e.now().UTC().Truncate(time.Millisecond), j.Event.StartedAt)
 	})
 	r.emit()
 	r.e.log.Info("deploy terminado", "deploy", r.j.Event.DeployID, "proyecto", r.j.Event.Project, "commit", short(r.j.Event.Commit))
+}
+
+// enableAtBoot habilita para el arranque lo que un primer deploy dejó andando
+// (ADR-022): hasta el Sprint 6 lo hacía una persona a mano. Que falle no
+// deshace el deploy, que quedó bien: se anota en la salida del paso que
+// arrancó el proyecto, con cómo hacerlo a mano.
+func (r *run) enableAtBoot(ctx context.Context) {
+	if r.j.Event.Kind != proto.DeployKindBootstrap {
+		return
+	}
+	enabler, ok := r.rt.(interface {
+		EnableAtBoot(ctx context.Context) (string, error)
+	})
+	if !ok {
+		return
+	}
+	line, err := enabler.EnableAtBoot(ctx)
+	if err != nil {
+		r.e.log.Warn("no se pudieron habilitar las unidades del primer deploy", "deploy", r.j.Event.DeployID, "error", err)
+		line = "no se pudieron habilitar las unidades para el arranque (" + err.Error() + "): habilitalas con systemctl enable"
+	}
+	r.update(func(j *journal) {
+		for i := len(j.Event.Steps) - 1; i >= 0; i-- {
+			if j.Event.Steps[i].Name == r.rt.StartStep() {
+				out := append(j.Event.Steps[i].Output, clip(line))
+				if len(out) > proto.MaxStepOutputLines {
+					out = out[len(out)-proto.MaxStepOutputLines:]
+				}
+				j.Event.Steps[i].Output = out
+				return
+			}
+		}
+	})
+}
+
+// clip acota un renglón de la salida de un paso.
+func clip(line string) string {
+	if len(line) > proto.MaxStepOutputLineLen {
+		return strings.ToValidUTF8(line[:proto.MaxStepOutputLineLen], "")
+	}
+	return line
 }
 
 // fail vuelve atrás si hace falta y deja la foto final.

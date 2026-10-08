@@ -39,6 +39,7 @@ limpiar() {
   paso "limpieza"
   systemctl disable --now statussv-agent statussv-unit-helper.socket >/dev/null 2>&1
   systemctl stop ${NAME} lab-gunicorn lab-otra 2>/dev/null
+  systemctl disable lab-gunicorn lab-otra 2>/dev/null
   systemctl stop 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
   systemctl reset-failed ${NAME} 'statussv-unit-helper@*.service' 'statussv-step-*.service' 2>/dev/null
   rm -rf "${UNIT}" "${DROPIN_DIR}" "${REGLA}" \
@@ -134,6 +135,10 @@ for u in lab-gunicorn lab-otra; do
 [Service]
 User=labapp
 ExecStart=/usr/bin/sleep infinity
+
+# Para probar que el ayudante habilita solo las del proyecto (enable_units).
+[Install]
+WantedBy=multi-user.target
 EOF
 done
 

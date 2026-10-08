@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/compose"
 	"github.com/JuanBaez77/status-sv/agent/internal/runner"
+	"github.com/JuanBaez77/status-sv/internal/envfile"
 	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -80,6 +85,10 @@ type build struct {
 type dockerRuntime struct {
 	project composeProject
 	api     compose.ImageAPI
+	// workdir y required son para revisar el .env: las variables requeridas
+	// del proyecto (ADR-022). required puede estar vacía.
+	workdir  string
+	required []string
 }
 
 func (d dockerRuntime) Preflight(ctx context.Context) (string, error) {
@@ -98,6 +107,9 @@ func (d dockerRuntime) Available(ctx context.Context) (string, error) {
 	version, err := d.project.Version(ctx)
 	if err != nil {
 		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	if err := d.checkEnv(); err != nil {
+		return "", err
 	}
 	return "compose " + version, nil
 }
@@ -214,7 +226,11 @@ func (e *Engine) runtimeFor(j *journal, spec *projectspec.Spec) (runtime, error)
 		if err != nil {
 			return nil, err
 		}
-		return dockerRuntime{project: project, api: e.api}, nil
+		rt := dockerRuntime{project: project, api: e.api, workdir: p.Workdir}
+		if spec != nil {
+			rt.required = spec.RequiredEnv
+		}
+		return rt, nil
 	}
 
 	if e.systemd == nil {
@@ -228,4 +244,40 @@ func (e *Engine) runtimeFor(j *journal, spec *projectspec.Spec) (runtime, error)
 		spec = &loaded
 	}
 	return newSystemdRuntime(*e.systemd, *spec, j.Event.DeployID), nil
+}
+
+// maxEnvBytes acota lo que se lee del .env.
+const maxEnvBytes = 1 << 20
+
+// checkEnv revisa que el .env del workdir tenga las variables requeridas
+// (ADR-022): sin ellas el proyecto no arranca, y se dice antes de tocar
+// nada. Solo se nombran las que faltan.
+func (d dockerRuntime) checkEnv() error {
+	if len(d.required) == 0 {
+		return nil
+	}
+	path := filepath.Join(d.workdir, ".env")
+	var data []byte
+	info, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return deployError(proto.DeployPreflightFailed, "no se pudo mirar el .env: %v", err)
+	case !info.Mode().IsRegular():
+		return deployError(proto.DeployPreflightFailed, "el .env de %s no es un archivo regular", d.workdir)
+	default:
+		f, err := os.Open(path) //nolint:gosec // workdir declarado por root
+		if err != nil {
+			return deployError(proto.DeployPreflightFailed, "no se pudo leer el .env: %v", err)
+		}
+		data, err = io.ReadAll(io.LimitReader(f, maxEnvBytes))
+		_ = f.Close()
+		if err != nil {
+			return deployError(proto.DeployPreflightFailed, "no se pudo leer el .env: %v", err)
+		}
+	}
+	if missing := envfile.Missing(d.required, data); len(missing) > 0 {
+		return deployError(proto.DeployPreflightFailed, "faltan variables requeridas en el .env: %s (se cargan con sudo statussv-agent project env)", strings.Join(missing, ", "))
+	}
+	return nil
 }

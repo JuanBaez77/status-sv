@@ -160,6 +160,20 @@ else
   falla "parada: después de reiniciar, ${respuesta} (lab-gunicorn.service quedó $(prop lab-gunicorn.service ActiveState))"
 fi
 
+# --- Habilitar las unidades: lo último de un primer deploy que quedó bien ---
+
+respuesta="$(pide '{"op":"enable_units","project":"lab"}')"
+if [ "${respuesta}" = '{"ok":true}' ] && [ "$(systemctl is-enabled lab-gunicorn.service 2>/dev/null)" = enabled ]; then
+  ok "habilitar: la unidad declarada quedó habilitada para el arranque"
+else
+  falla "habilitar: ${respuesta} (lab-gunicorn.service quedó $(systemctl is-enabled lab-gunicorn.service 2>&1))"
+fi
+if [ "$(systemctl is-enabled lab-otra.service 2>/dev/null)" != enabled ]; then
+  ok "habilitar: la unidad que no es del proyecto no se habilitó"
+else
+  falla "habilitar: se habilitó una unidad que no es del proyecto"
+fi
+
 # --- Lo que el ayudante rechaza ---
 
 rechaza() { # $1 = pedido, $2 = código esperado, $3 = qué prueba
@@ -177,6 +191,7 @@ rechaza "$(paso run_step lab shell 0)" invalid_request "una fase que no existe"
 rechaza '{"op":"run_step","project":"lab","phase":"build","index":0,"deploy":"'"${DEPLOY}"'","command":["/bin/sh"]}' invalid_request "un pedido que trae un comando"
 rechaza '{"op":"restart_units","project":"lab","unit":"lab-otra.service"}' invalid_request "un pedido que trae una unidad"
 rechaza '{"op":"stop_units","project":"lab","unit":"lab-otra.service"}' invalid_request "una parada que trae una unidad"
+rechaza '{"op":"enable_units","project":"lab","unit":"lab-otra.service"}' invalid_request "una habilitación que trae una unidad"
 rechaza '{"op":"restart","project":"lab"}' invalid_request "una operación que no existe"
 rechaza '{"op":"run_step","project":"lab","phase":"build","index":0,"deploy":"../../etc"}' invalid_request "un deploy que no es un identificador"
 rechaza 'run_step lab build 0' invalid_request "un pedido que no es JSON"

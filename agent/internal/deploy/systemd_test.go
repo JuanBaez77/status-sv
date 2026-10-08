@@ -59,6 +59,7 @@ type fakeHelper struct {
 	stepErr    error
 	restartErr error
 	stopErr    error
+	enableErr  error
 	// stopped es que las unidades se pararon y no se arrancaron de nuevo.
 	stopped bool
 	broken  func() bool
@@ -120,6 +121,11 @@ func (h *fakeHelper) StopUnits(context.Context, string) error {
 	h.stopped = true
 	h.mu.Unlock()
 	return nil
+}
+
+func (h *fakeHelper) EnableUnits(context.Context, string) error {
+	h.call("enable")
+	return h.enableErr
 }
 
 // fakeUnits contesta el estado de las unidades según cómo esté el código.

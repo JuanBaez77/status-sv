@@ -63,6 +63,9 @@ type fakeSystemd struct {
 	failRestart string
 	// failStop es la unidad que no se puede parar.
 	failStop string
+	// enabled son las unidades habilitadas, y failEnable hace fallar Enable.
+	enabled    []string
+	failEnable bool
 	// missing son las unidades que systemd no conoce.
 	missing map[string]bool
 }
@@ -99,6 +102,16 @@ func (f *fakeSystemd) Restart(_ context.Context, unit string) error {
 	if unit == f.failRestart {
 		return errors.New("el trabajo terminó en failed")
 	}
+	return nil
+}
+
+func (f *fakeSystemd) Enable(_ context.Context, units []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failEnable {
+		return errors.New("no se pudo")
+	}
+	f.enabled = append(f.enabled, units...)
 	return nil
 }
 
@@ -463,5 +476,25 @@ func TestCheckRequiredEnv(t *testing.T) {
 	withRequired(h, "SECRET_KEY")
 	if resp := ask(t, h, `{"op":"check","project":"facturas"}`); resp.Unit == "" || strings.Join(resp.Missing, ",") != "SECRET_KEY" {
 		t.Errorf("con una unidad que falta = %+v", resp)
+	}
+}
+
+func TestEnableUnits(t *testing.T) {
+	sd := &fakeSystemd{}
+	if resp := ask(t, newHelper(t, sd), `{"op":"enable_units","project":"facturas"}`); !resp.OK {
+		t.Fatalf("respuesta = %+v", resp)
+	}
+	if strings.Join(sd.enabled, ",") != "gunicorn-facturas.service,facturas-worker.service" {
+		t.Errorf("habilitadas = %v", sd.enabled)
+	}
+	if resp := ask(t, newHelper(t, &fakeSystemd{failEnable: true}), `{"op":"enable_units","project":"facturas"}`); resp.Code != CodeEnableFailed {
+		t.Errorf("con falla = %+v", resp)
+	}
+	// Solo el proyecto: una unidad en el pedido es un pedido inválido.
+	if resp := ask(t, newHelper(t, sd), `{"op":"enable_units","project":"facturas","unit":"sshd.service"}`); resp.Code != CodeInvalidRequest {
+		t.Errorf("con una unidad en el pedido = %+v", resp)
+	}
+	if resp := ask(t, newHelper(t, sd), `{"op":"enable_units","project":"tienda"}`); resp.OK {
+		t.Errorf("un proyecto de Docker = %+v", resp)
 	}
 }
