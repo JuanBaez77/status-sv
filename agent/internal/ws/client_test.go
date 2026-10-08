@@ -55,6 +55,8 @@ type fakeControlPlane struct {
 	acks chan proto.CommandAck
 	// deployEvents son las fotos de deploy recibidas, que se confirman siempre.
 	deployEvents []proto.DeployEvent
+	// proposalAcks recibe los acuses de las propuestas de proyectos.
+	proposalAcks chan proto.ProjectProposalAck
 }
 
 type metricsMode int
@@ -115,6 +117,17 @@ func (f *fakeControlPlane) handle(w http.ResponseWriter, r *http.Request) {
 			if ack, err := proto.Decode[proto.CommandAck](envelope); err == nil {
 				f.mu.Lock()
 				acks := f.acks
+				f.mu.Unlock()
+				if acks != nil {
+					acks <- ack
+				}
+			}
+			continue
+		}
+		if envelope.Type == proto.TypeProjectProposalAck {
+			if ack, err := proto.Decode[proto.ProjectProposalAck](envelope); err == nil {
+				f.mu.Lock()
+				acks := f.proposalAcks
 				f.mu.Unlock()
 				if acks != nil {
 					acks <- ack

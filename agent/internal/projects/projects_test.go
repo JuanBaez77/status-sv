@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/JuanBaez77/status-sv/proto"
 )
@@ -221,5 +224,61 @@ func TestReadSpecRejectsSymlinks(t *testing.T) {
 	}
 	if _, err := ReadSpec(dir, "cristales-baez"); err == nil {
 		t.Fatal("ReadSpec siguió un enlace simbólico")
+	}
+}
+
+// Cada proyecto viaja con el hash de su archivo (ADR-022): igual al de la
+// propuesta si se declaró tal cual.
+func TestReadSpecHash(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "facturas.yaml", facturas)
+	state := Read(dir, t0)
+	if len(state.Projects) != 1 || state.Projects[0].SpecHash != proto.SpecHash([]byte(facturas)) {
+		t.Errorf("proyectos = %+v", state.Projects)
+	}
+}
+
+// Las propuestas guardadas viajan en la misma foto, y una que llega la manda
+// sin esperar el refresco.
+func TestRunnerSendsProposals(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "facturas.yaml", facturas)
+	box := NewOutbox()
+	r := NewRunner(dir, box, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.refresh = time.Hour
+	var pending []proto.PendingProposal
+	r.SetProposals(func() ([]proto.PendingProposal, error) { return pending, nil })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { r.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	next := func() proto.ProjectsState {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if s, ok := box.Next(time.Now()); ok {
+				box.Sent([16]byte{1}, s.TakenAt, time.Now())
+				box.Acked(s.TakenAt)
+				return s
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("no salió ninguna foto")
+		return proto.ProjectsState{}
+	}
+
+	if s := next(); len(s.Proposals) != 0 {
+		t.Fatalf("primera foto = %+v", s.Proposals)
+	}
+	pending = []proto.PendingProposal{{ProposalID: uuid.New(), Name: "svdemo", Hash: proto.SpecHash([]byte("x"))}}
+	r.Refresh()
+	s := next()
+	if len(s.Proposals) != 1 || s.Proposals[0].Name != "svdemo" {
+		t.Fatalf("después de Refresh = %+v", s.Proposals)
+	}
+	if err := s.Validate(); err != nil {
+		t.Errorf("la foto no cumple el contrato: %v", err)
 	}
 }

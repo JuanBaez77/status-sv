@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/JuanBaez77/status-sv/agent/internal/journal"
 	"github.com/JuanBaez77/status-sv/agent/internal/metrics"
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
+	"github.com/JuanBaez77/status-sv/agent/internal/proposals"
 	"github.com/JuanBaez77/status-sv/agent/internal/runtimestate"
 	"github.com/JuanBaez77/status-sv/agent/internal/state"
 	"github.com/JuanBaez77/status-sv/agent/internal/systemd"
@@ -106,6 +108,18 @@ func runAgent(ctx context.Context, args []string) error {
 		projectsOutbox := projects.NewOutbox()
 		client.SetProjects(projectsOutbox)
 		declared := projects.NewRunner(cfg.ProjectsDir, projectsOutbox, projects.NewChecker(buildinfo.Version), log)
+
+		// Las propuestas de proyectos nuevos (ADR-022) se guardan en el
+		// directorio de estado y viajan con los proyectos, hasta que una
+		// persona las acepta en el servidor.
+		store := proposals.NewStore(filepath.Join(filepath.Dir(cfg.StateFile), proposals.DirName), func(name string) bool {
+			// Cualquier archivo con ese nombre, aunque sea inválido o no se
+			// pueda leer, ocupa el nombre.
+			_, err := projects.ReadSpec(cfg.ProjectsDir, name)
+			return !errors.Is(err, projects.ErrNotDeclared)
+		})
+		declared.SetProposals(store.List)
+		client.SetProposals(store, declared.Refresh)
 		wg.Go(func() { declared.Run(ctx) })
 	}
 

@@ -64,6 +64,11 @@ type Client struct {
 	commands commandHandler
 	// deploys es la bandeja de las fotos de los deploys, también opcional.
 	deploys *deploy.Outbox
+	// proposals guarda las propuestas de proyectos nuevos (ADR-022), y
+	// proposalsChanged avisa que cambiaron. Opcionales: sin ellos, una
+	// propuesta se rechaza.
+	proposals        proposalHandler
+	proposalsChanged func()
 
 	sampler *selfstat.Sampler
 	backoff *Backoff
@@ -451,6 +456,11 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 			c.handleProjectsAck(ctx, envelope)
 		case proto.TypeDeployEventAck:
 			c.handleDeployAck(ctx, envelope)
+		case proto.TypeProjectProposal:
+			// En orden, no aparte como un comando: guardar y después retirar
+			// la misma propuesta no puede llegar al revés. Es escribir dos
+			// archivos chicos.
+			c.handleProposal(ctx, conn, envelope)
 		case proto.TypeMetricsAck:
 			c.handleMetricsAck(ctx, envelope)
 		case proto.TypeError:

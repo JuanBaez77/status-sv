@@ -61,6 +61,13 @@ func TestParseAltaSystemd(t *testing.T) {
 	if spec.Site == nil || *spec.Site != (Site{Domain: "svdemo.extendsystem.com", Port: 18097}) {
 		t.Errorf("site = %+v", spec.Site)
 	}
+	// El sitio viaja con el proyecto; las variables y el servicio, no.
+	if site := spec.Project.Site; site == nil || site.Domain != "svdemo.extendsystem.com" || site.Port != 18097 {
+		t.Errorf("project.Site = %+v", site)
+	}
+	if err := spec.Project.Validate(); err != nil {
+		t.Errorf("el proyecto no entra en el contrato: %v", err)
+	}
 	if strings.Join(spec.RequiredEnv, ",") != "SECRET_KEY,DATABASE_URL" {
 		t.Errorf("required_env = %q", spec.RequiredEnv)
 	}
