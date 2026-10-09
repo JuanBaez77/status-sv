@@ -73,6 +73,26 @@ type projectDetail struct {
 	Services     []runtimeService   `json:"services"`
 	// Source dice si el agent pudo leer Docker o systemd, según el runtime.
 	Source *runtimeSource `json:"source"`
+	// Site es el sitio de nginx declarado (ADR-023).
+	Site *projectSite `json:"site,omitempty"`
+	// Env dice si están cargadas las variables requeridas: nombres, nunca
+	// valores (ADR-022). Falta si el proyecto no declara ninguna.
+	Env *projectEnv `json:"env,omitempty"`
+	// DeployKey es la llave pública de la deploy key, para cargarla en el
+	// repositorio.
+	DeployKey string `json:"deploy_key,omitempty"`
+}
+
+type projectSite struct {
+	Domain string `json:"domain"`
+	Port   int32  `json:"port"`
+}
+
+type projectEnv struct {
+	Required int32    `json:"required"`
+	Missing  []string `json:"missing"`
+	// Unknown es que el agent no pudo mirar.
+	Unknown bool `json:"unknown"`
 }
 
 type projectListResponse struct {
@@ -204,6 +224,13 @@ func buildDetail(row store.ListProjectsRow, runtime runtimeResponse) projectDeta
 		Containers:     []runtimeContainer{},
 		Services:       []runtimeService{},
 	}
+	if row.SiteDomain != "" {
+		d.Site = &projectSite{Domain: row.SiteDomain, Port: row.SitePort}
+	}
+	if row.EnvRequired > 0 {
+		d.Env = &projectEnv{Required: row.EnvRequired, Missing: row.EnvMissing, Unknown: row.EnvUnknown}
+	}
+	d.DeployKey = row.DeployKey
 	if row.HealthcheckUrl != "" {
 		d.Health = &projectHealth{
 			URL: row.HealthcheckUrl, ExpectStatus: row.HealthcheckExpectStatus, TimeoutSeconds: row.HealthcheckTimeoutSeconds,

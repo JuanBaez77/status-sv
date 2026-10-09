@@ -50,9 +50,10 @@ export function ProjectsPage() {
           <CardHeader>
             <CardTitle>Todavía no hay proyectos declarados</CardTitle>
             <CardDescription>
-              Cada proyecto es un archivo en{' '}
-              <code className="font-mono">/etc/status-sv/projects.d</code> del servidor donde corre.
-              El paso a paso está en el runbook.
+              Un proyecto nuevo se propone desde la página de su servidor, con{' '}
+              <span className="font-medium">Nuevo proyecto</span>, y una persona lo acepta en el
+              servidor con un comando. Cada proyecto queda como un archivo en{' '}
+              <code className="font-mono">/etc/status-sv/projects.d</code>.
             </CardDescription>
           </CardHeader>
         </Card>

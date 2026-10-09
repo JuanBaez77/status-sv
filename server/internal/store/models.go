@@ -204,6 +204,13 @@ type Project struct {
 	HealthLatencyMs           int32
 	HealthDetail              string
 	SeenAt                    time.Time
+	SiteDomain                string
+	SitePort                  int32
+	EnvRequired               int32
+	EnvMissing                []string
+	EnvUnknown                bool
+	DeployKey                 string
+	SpecHash                  string
 }
 
 type ProjectInvalidFile struct {

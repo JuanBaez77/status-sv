@@ -64,6 +64,7 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
+  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
 
 /**
@@ -380,6 +381,16 @@ export type ProjectDetail = ProjectSummary & {
   services: RuntimeService[]
   /** source dice si el agent pudo leer Docker o systemd; null si nunca mandó nada. */
   source: RuntimeSource | null
+  /** site es el sitio de nginx declarado (ADR-023). */
+  site?: { domain: string; port: number }
+  /**
+   * env dice si están cargadas las variables requeridas (ADR-022): nombres,
+   * nunca valores. Falta si el proyecto no declara ninguna; con unknown, el
+   * agent no pudo mirar.
+   */
+  env?: { required: number; missing: string[]; unknown: boolean }
+  /** deploy_key es la llave pública de la deploy key, para cargarla en el repositorio. */
+  deploy_key?: string
 }
 
 /** InvalidProjectFile es un project.yaml que no se pudo usar: nunca trae el contenido. */
@@ -515,4 +526,89 @@ export type AuditPage = {
 export const audit = {
   /** list trae una página; query son los parámetros ya armados (lib/audit). */
   list: (query: string) => api.get<AuditPage>(query === '' ? '/v1/audit' : `/v1/audit?${query}`),
+}
+
+/**
+ * ProposalStatus es en qué anda una propuesta de proyecto nuevo (ADR-022):
+ * `pending` todavía no llegó al agent; `delivered` la tiene el agent y espera
+ * que una persona la acepte en el servidor. Las demás están cerradas.
+ */
+export type ProposalStatus =
+  | 'pending'
+  | 'delivered'
+  | 'accepted'
+  | 'rejected'
+  | 'withdrawn'
+  | 'expired'
+  | 'superseded'
+
+/** ProposalStep es un paso declarado: service solo con Docker. */
+export type ProposalStep = {
+  service?: string
+  command: string[]
+  timeout_seconds?: number
+}
+
+/**
+ * ProposalRequest es lo que se elige al proponer un proyecto. El directorio,
+ * el usuario y el archivo de entorno no se eligen: los completa el control
+ * plane. De las variables van solo los nombres: los valores se cargan en el
+ * servidor.
+ */
+export type ProposalRequest = {
+  name: string
+  environment: 'production' | 'staging'
+  repo: string
+  branch: string
+  runtime: 'docker' | 'systemd'
+  compose_file?: string
+  command?: string[]
+  required_env?: string[]
+  site?: { domain: string; port: number }
+  healthcheck?: { url: string; expect_status?: number; timeout_seconds?: number }
+  build?: ProposalStep[]
+  pre?: ProposalStep[]
+  post?: ProposalStep[]
+}
+
+/** ProposalPreview es lo que se va a escribir en el servidor, con las plantillas de fábrica. */
+export type ProposalPreview = {
+  yaml: string
+  unit?: string
+  site?: string
+  /** command es lo que se corre en el servidor para aceptarla. */
+  command: string
+}
+
+export type ProposalSummary = {
+  id: string
+  server_id: string
+  name: string
+  runtime: 'docker' | 'systemd'
+  environment: 'production' | 'staging'
+  status: ProposalStatus
+  /** message es por qué el agent la rechazó, o cómo se aceptó. */
+  message?: string
+  created_by: string
+  actor_type: 'user' | 'llm'
+  created_at: string
+  expires_at: string
+  delivered_at?: string
+  closed_at?: string
+  command: string
+}
+
+export type ProposalDetail = ProposalSummary & { preview: ProposalPreview }
+
+export const proposals = {
+  list: (serverID: string) =>
+    api
+      .get<{ proposals: ProposalSummary[] }>(`/v1/servers/${encodeURIComponent(serverID)}/proposals`)
+      .then((body) => body.proposals),
+  preview: (serverID: string, req: ProposalRequest) =>
+    api.post<ProposalPreview>(`/v1/servers/${encodeURIComponent(serverID)}/proposals/preview`, req),
+  create: (serverID: string, req: ProposalRequest) =>
+    api.post<ProposalDetail>(`/v1/servers/${encodeURIComponent(serverID)}/proposals`, req),
+  get: (id: string) => api.get<ProposalDetail>(`/v1/proposals/${encodeURIComponent(id)}`),
+  withdraw: (id: string) => api.del<ProposalSummary>(`/v1/proposals/${encodeURIComponent(id)}`),
 }

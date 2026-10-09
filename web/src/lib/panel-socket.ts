@@ -35,6 +35,11 @@ export type LiveProjects = {
   server_id: string
 }
 
+/** LiveProposals avisa que cambiaron las propuestas de proyectos nuevos de un servidor. */
+export type LiveProposals = {
+  server_id: string
+}
+
 /** LiveDeploy avisa que cambió un deploy: no trae el deploy, el panel lo vuelve a pedir. */
 export type LiveDeploy = {
   server_id: string
@@ -50,6 +55,7 @@ type SampleListener = (sample: LiveSample) => void
 type RuntimeListener = (runtime: LiveRuntime) => void
 type ProjectsListener = (projects: LiveProjects) => void
 type DeployListener = (deploy: LiveDeploy) => void
+type ProposalsListener = (proposals: LiveProposals) => void
 type StatusListener = (status: PanelStatus) => void
 
 /**
@@ -69,6 +75,7 @@ export class PanelSocket {
   #runtimeListeners = new Map<string, Set<RuntimeListener>>()
   #projectsListeners = new Map<string, Set<ProjectsListener>>()
   #deployListeners = new Map<string, Set<DeployListener>>()
+  #proposalsListeners = new Map<string, Set<ProposalsListener>>()
   /**
    * #refs cuenta cuántos oyentes tiene cada servidor, de cualquier tipo: la
    * suscripción al control plane es por servidor y trae muestras y fotos.
@@ -114,6 +121,14 @@ export class PanelSocket {
     return this.#add(this.#deployListeners, serverID, listener)
   }
 
+  /**
+   * subscribeProposals avisa cuando cambian las propuestas de un servidor
+   * (ADR-022) y devuelve cómo darse de baja.
+   */
+  subscribeProposals(serverID: string, listener: ProposalsListener): () => void {
+    return this.#add(this.#proposalsListeners, serverID, listener)
+  }
+
   /** getStatus y onStatus son el par que espera useSyncExternalStore. */
   getStatus = (): PanelStatus => this.#status
 
@@ -132,6 +147,7 @@ export class PanelSocket {
     this.#runtimeListeners.clear()
     this.#projectsListeners.clear()
     this.#deployListeners.clear()
+    this.#proposalsListeners.clear()
     this.#refs.clear()
     this.#attempt = 0
     this.#setStatus('connecting')
@@ -214,6 +230,11 @@ export class PanelSocket {
       case 'deploy': {
         const deploy = message as LiveDeploy
         this.#deployListeners.get(deploy.server_id)?.forEach((listener) => listener(deploy))
+        break
+      }
+      case 'proposals': {
+        const proposals = message as LiveProposals
+        this.#proposalsListeners.get(proposals.server_id)?.forEach((listener) => listener(proposals))
         break
       }
       case 'error':

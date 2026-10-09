@@ -5,8 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useSession } from '@/hooks/use-session'
 import { AuditPage } from '@/pages/audit'
 import { LoginPage } from '@/pages/login'
+import { NewProjectPage } from '@/pages/new-project'
 import { ProjectPage } from '@/pages/project'
 import { ProjectsPage } from '@/pages/projects'
+import { ProposalPage } from '@/pages/proposal'
 import { ServerPage } from '@/pages/server'
 import { ServersPage } from '@/pages/servers'
 import { TotpEnrollPage, TotpVerifyPage } from '@/pages/totp'
@@ -54,9 +56,15 @@ export default function App() {
 
         <Route path="/servers/:id">{(params) => <ServerPage id={params.id} />}</Route>
 
+        <Route path="/servers/:id/new-project">
+          {(params) => <NewProjectPage serverID={params.id} />}
+        </Route>
+
         <Route path="/projects" component={ProjectsPage} />
 
         <Route path="/projects/:id">{(params) => <ProjectPage id={params.id} />}</Route>
+
+        <Route path="/proposals/:id">{(params) => <ProposalPage id={params.id} />}</Route>
 
         <Route path="/audit" component={AuditPage} />
 

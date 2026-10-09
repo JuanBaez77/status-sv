@@ -82,7 +82,7 @@ func (q *Queries) DeleteProjectsExcept(ctx context.Context, arg DeleteProjectsEx
 }
 
 const getProject = `-- name: GetProject :one
-SELECT p.id, p.server_id, p.name, p.environment, p.repo, p.branch, p.runtime, p.workdir, p.compose_file, p.compose_project, p.units, p.healthcheck_url, p.healthcheck_expect_status, p.healthcheck_timeout_seconds, p.health_state, p.health_checked_at, p.health_status_code, p.health_latency_ms, p.health_detail, p.seen_at, s.name AS server_name
+SELECT p.id, p.server_id, p.name, p.environment, p.repo, p.branch, p.runtime, p.workdir, p.compose_file, p.compose_project, p.units, p.healthcheck_url, p.healthcheck_expect_status, p.healthcheck_timeout_seconds, p.health_state, p.health_checked_at, p.health_status_code, p.health_latency_ms, p.health_detail, p.seen_at, p.site_domain, p.site_port, p.env_required, p.env_missing, p.env_unknown, p.deploy_key, p.spec_hash, s.name AS server_name
 FROM projects p
 JOIN servers s ON s.id = p.server_id
 WHERE p.id = $1
@@ -109,6 +109,13 @@ type GetProjectRow struct {
 	HealthLatencyMs           int32
 	HealthDetail              string
 	SeenAt                    time.Time
+	SiteDomain                string
+	SitePort                  int32
+	EnvRequired               int32
+	EnvMissing                []string
+	EnvUnknown                bool
+	DeployKey                 string
+	SpecHash                  string
 	ServerName                string
 }
 
@@ -137,6 +144,13 @@ func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (GetProjectRow, 
 		&i.HealthLatencyMs,
 		&i.HealthDetail,
 		&i.SeenAt,
+		&i.SiteDomain,
+		&i.SitePort,
+		&i.EnvRequired,
+		&i.EnvMissing,
+		&i.EnvUnknown,
+		&i.DeployKey,
+		&i.SpecHash,
 		&i.ServerName,
 	)
 	return i, err
@@ -254,7 +268,7 @@ func (q *Queries) ListProjectReadErrors(ctx context.Context) ([]ListProjectReadE
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT p.id, p.server_id, p.name, p.environment, p.repo, p.branch, p.runtime, p.workdir, p.compose_file, p.compose_project, p.units, p.healthcheck_url, p.healthcheck_expect_status, p.healthcheck_timeout_seconds, p.health_state, p.health_checked_at, p.health_status_code, p.health_latency_ms, p.health_detail, p.seen_at, s.name AS server_name
+SELECT p.id, p.server_id, p.name, p.environment, p.repo, p.branch, p.runtime, p.workdir, p.compose_file, p.compose_project, p.units, p.healthcheck_url, p.healthcheck_expect_status, p.healthcheck_timeout_seconds, p.health_state, p.health_checked_at, p.health_status_code, p.health_latency_ms, p.health_detail, p.seen_at, p.site_domain, p.site_port, p.env_required, p.env_missing, p.env_unknown, p.deploy_key, p.spec_hash, s.name AS server_name
 FROM projects p
 JOIN servers s ON s.id = p.server_id
 ORDER BY s.name, p.name
@@ -281,6 +295,13 @@ type ListProjectsRow struct {
 	HealthLatencyMs           int32
 	HealthDetail              string
 	SeenAt                    time.Time
+	SiteDomain                string
+	SitePort                  int32
+	EnvRequired               int32
+	EnvMissing                []string
+	EnvUnknown                bool
+	DeployKey                 string
+	SpecHash                  string
 	ServerName                string
 }
 
@@ -316,6 +337,13 @@ func (q *Queries) ListProjects(ctx context.Context) ([]ListProjectsRow, error) {
 			&i.HealthLatencyMs,
 			&i.HealthDetail,
 			&i.SeenAt,
+			&i.SiteDomain,
+			&i.SitePort,
+			&i.EnvRequired,
+			&i.EnvMissing,
+			&i.EnvUnknown,
+			&i.DeployKey,
+			&i.SpecHash,
 			&i.ServerName,
 		); err != nil {
 			return nil, err
@@ -332,14 +360,17 @@ const upsertProject = `-- name: UpsertProject :exec
 INSERT INTO projects (
     id, server_id, name, environment, repo, branch, runtime, workdir, compose_file, compose_project,
     units, healthcheck_url, healthcheck_expect_status, healthcheck_timeout_seconds,
-    health_state, health_checked_at, health_status_code, health_latency_ms, health_detail, seen_at
+    health_state, health_checked_at, health_status_code, health_latency_ms, health_detail, seen_at,
+    site_domain, site_port, env_required, env_missing, env_unknown, deploy_key, spec_hash
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
     $10, $11::text[], $12,
     $13, $14,
     $15, $16, $17,
-    $18, $19, $20
+    $18, $19, $20,
+    $21, $22, $23, COALESCE($24::text[], '{}'),
+    $25, $26, $27
 )
 ON CONFLICT (server_id, name) DO UPDATE
 SET environment                 = EXCLUDED.environment,
@@ -358,7 +389,14 @@ SET environment                 = EXCLUDED.environment,
     health_status_code          = EXCLUDED.health_status_code,
     health_latency_ms           = EXCLUDED.health_latency_ms,
     health_detail               = EXCLUDED.health_detail,
-    seen_at                     = EXCLUDED.seen_at
+    seen_at                     = EXCLUDED.seen_at,
+    site_domain                 = EXCLUDED.site_domain,
+    site_port                   = EXCLUDED.site_port,
+    env_required                = EXCLUDED.env_required,
+    env_missing                 = EXCLUDED.env_missing,
+    env_unknown                 = EXCLUDED.env_unknown,
+    deploy_key                  = EXCLUDED.deploy_key,
+    spec_hash                   = EXCLUDED.spec_hash
 `
 
 type UpsertProjectParams struct {
@@ -382,6 +420,13 @@ type UpsertProjectParams struct {
 	HealthLatencyMs           int32
 	HealthDetail              string
 	SeenAt                    time.Time
+	SiteDomain                string
+	SitePort                  int32
+	EnvRequired               int32
+	EnvMissing                []string
+	EnvUnknown                bool
+	DeployKey                 string
+	SpecHash                  string
 }
 
 // UpsertProject guarda un proyecto. Si ya existía con ese nombre en ese
@@ -408,6 +453,13 @@ func (q *Queries) UpsertProject(ctx context.Context, arg UpsertProjectParams) er
 		arg.HealthLatencyMs,
 		arg.HealthDetail,
 		arg.SeenAt,
+		arg.SiteDomain,
+		arg.SitePort,
+		arg.EnvRequired,
+		arg.EnvMissing,
+		arg.EnvUnknown,
+		arg.DeployKey,
+		arg.SpecHash,
 	)
 	return err
 }
