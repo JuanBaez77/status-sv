@@ -73,6 +73,11 @@ type fakeSystem struct {
 	certbotErr    error
 	// live es dónde certbot de mentira deja el certificado.
 	live string
+	// acme es de dónde sirve nginx el desafío; con notServing, no lo sirve
+	// (otro sitio atiende el dominio).
+	acme       string
+	notServing bool
+	fetches    int
 }
 
 func newFakeSystem() *fakeSystem {
@@ -200,8 +205,15 @@ func TestAcceptSystemd(t *testing.T) {
 	if runtime.GOOS == "linux" && info.Mode()&os.ModeSetgid == 0 {
 		t.Errorf("el workdir no tiene setgid: %v", info.Mode())
 	}
-	if e.sys.keygens != 1 || e.sys.chowns[filepath.Join(e.a.Paths.Keys, "svdemo")] != "root:"+AgentUser {
-		t.Errorf("keygens = %d", e.sys.keygens)
+	key := filepath.Join(e.a.Paths.Keys, "svdemo")
+	if e.sys.keygens != 1 || e.sys.chowns[key] != AgentUser+":"+AgentUser {
+		t.Errorf("keygens = %d, dueño de la llave = %q", e.sys.keygens, e.sys.chowns[key])
+	}
+	// ssh rechaza una llave que otros pueden leer, y deploy-check lo revisa.
+	if info, err := os.Stat(key); err != nil {
+		t.Errorf("la llave: %v", err)
+	} else if runtime.GOOS == "linux" && info.Mode().Perm() != 0o400 {
+		t.Errorf("la llave quedó %v", info.Mode())
 	}
 
 	// El drop-in suma el workdir y el agent se reinicia una vez.
@@ -478,4 +490,17 @@ func (f *fakeSystem) Certbot(_ context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// Fetch hace de nginx: sirve el desafío desde su directorio.
+func (f *fakeSystem) Fetch(_ context.Context, _ string, path string) (string, error) {
+	f.fetches++
+	if f.notServing || f.acme == "" || !strings.HasPrefix(path, "/.well-known/acme-challenge/") {
+		return "", errors.New("contestó 404")
+	}
+	data, err := os.ReadFile(filepath.Join(f.acme, filepath.FromSlash(path)))
+	if err != nil {
+		return "", errors.New("contestó 404")
+	}
+	return string(data), nil
 }

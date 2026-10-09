@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -184,4 +185,30 @@ func (o OS) NginxReload(ctx context.Context) error {
 // Certbot implementa System.
 func (o OS) Certbot(ctx context.Context, args []string) error {
 	return o.run(ctx, "certbot", args...)
+}
+
+// Fetch implementa System: el pedido va a 127.0.0.1 con el dominio como
+// Host, sin proxy y sin seguir redirecciones.
+func (OS) Fetch(ctx context.Context, domain, path string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1"+path, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Host = domain
+	client := &http.Client{
+		Transport:     &http.Transport{Proxy: nil},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("contestó %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+	return string(body), err
 }

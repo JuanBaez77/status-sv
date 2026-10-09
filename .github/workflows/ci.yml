@@ -238,6 +238,52 @@ jobs:
           SERVER_BIN="${RUNNER_TEMP}/bin/server" AGENT_BIN="${RUNNER_TEMP}/bin/agent"
           bash ./deploy/e2e/deploy-systemd.sh
 
+  alta:
+    name: "Alta de punta a punta: propuesta, aceptación, sitio y primer deploy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: statussv
+          POSTGRES_PASSWORD: statussv
+          POSTGRES_DB: statussv_alta
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U statussv -d statussv_alta"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: nginx
+        run: command -v nginx >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq nginx)
+
+      - name: Binarios del control plane y del agent
+        run: CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/bin/" ./server/cmd/server ./agent/cmd/agent
+
+      # El alta de un proyecto de systemd y de uno de Docker (ADR-022 y
+      # ADR-023) en un servidor sin proyectos: se proponen por la API, se
+      # aceptan con project accept, quedan con su sitio de nginx y su
+      # certificado (de un certbot de mentira) y contestan por HTTPS después
+      # del primer deploy. Los valores de las variables no llegan a la base ni
+      # a los registros.
+      - name: Alta de punta a punta
+        env:
+          DATABASE_URL: postgres://statussv:statussv@127.0.0.1:5432/statussv_alta?sslmode=disable
+        run: >-
+          sudo DATABASE_URL="${DATABASE_URL}"
+          SERVER_BIN="${RUNNER_TEMP}/bin/server" AGENT_BIN="${RUNNER_TEMP}/bin/agent"
+          bash ./deploy/e2e/alta.sh
+
   laboratorio:
     name: "Laboratorio: la unidad del agent con el drop-in de deploy"
     runs-on: ubuntu-latest

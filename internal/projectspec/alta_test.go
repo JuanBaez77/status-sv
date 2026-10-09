@@ -187,6 +187,7 @@ func TestCheckProposalRejects(t *testing.T) {
 		{name: "repo https con usuario", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: https://juan@github.com/", 1), wantErr: "repo: una propuesta no lleva"},
 		{name: "repo ssh con contraseña", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: ssh://git:clave@github.com/", 1), wantErr: "repo: una propuesta no lleva"},
 		{name: "repo scp con contraseña", yaml: strings.Replace(svdemoYAML, "repo: github.com/JuanBaez77/", "repo: git:clave@github.com:JuanBaez77/", 1), wantErr: "repo: una propuesta no lleva"},
+		{name: "repo file con host", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: file://otro/", 1), wantErr: "repo: una propuesta no lleva"},
 		{name: "repo por http", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: http://github.com/", 1), wantErr: "repo: en una propuesta, solo https o ssh"},
 	}
 	for _, tt := range tests {
@@ -239,6 +240,7 @@ func TestCheckProposalRepoAccepts(t *testing.T) {
 		"git@github.com:JuanBaez77/status-sv-demo.git",
 		"https://github.com/JuanBaez77/status-sv-demo.git",
 		"ssh://git@github.com/JuanBaez77/status-sv-demo.git",
+		"file:///srv/e2e-alta-origen.git",
 	} {
 		if err := checkProposalRepo(repo); err != nil {
 			t.Errorf("%s: %v", repo, err)

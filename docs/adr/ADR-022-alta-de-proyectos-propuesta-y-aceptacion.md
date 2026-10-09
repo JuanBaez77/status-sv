@@ -56,7 +56,9 @@ variables requeridas) es lo que la persona revisa al aceptar.
 
 El repo de una propuesta no lleva credenciales (ni `usuario:contraseña@`, ni un token en una
 dirección `https`): quedarían en la base del control plane. Para un repo privado está la deploy
-key. Lo agregamos el 2026-10-09, al escribir los tests del lado del servidor.
+key. Lo agregamos el 2026-10-09, al escribir los tests del lado del servidor. Las formas que
+valen son la corta, la de scp, `https` y `ssh`; `file://` también, porque no puede llevar
+credenciales y el agent solo lo acepta en pruebas (la de punta a punta del alta lo usa).
 
 - Hay una propuesta pendiente por nombre y por servidor: una nueva con el mismo nombre reemplaza a
   la anterior. No se puede proponer el nombre de un proyecto ya declarado en ese servidor.

@@ -121,3 +121,48 @@ func TestCheckBeforeTheFirstDeploy(t *testing.T) {
 		t.Errorf("deploy-check dejó archivos en el workdir: %v", entries)
 	}
 }
+
+// Los host keys hacen falta solo si el repo se trae por SSH: un proyecto con
+// deploy key y un repo que no es SSH no los pide.
+func TestCheckKnownHostsOnlyForSSH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("el agent corre en Linux")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no hay git")
+	}
+	projectsDir, keysDir, workdir := t.TempDir(), t.TempDir(), t.TempDir()
+	declare := func(repo string) {
+		t.Helper()
+		yaml := "name: facturas\nenvironment: staging\nrepo: " + repo + "\nbranch: main\nruntime: systemd\nworkdir: " + workdir +
+			"\nunits: [gunicorn-facturas.service]\n"
+		if err := os.WriteFile(filepath.Join(projectsDir, "facturas.yaml"), []byte(yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(keysDir, "facturas"), []byte("llave"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		ProjectsDir: projectsDir, DeployKeysDir: keysDir, AllowFileRepos: true,
+		KnownHosts:       filepath.Join(t.TempDir(), "no-hay-known_hosts"),
+		StateFile:        filepath.Join(t.TempDir(), "agent.json"),
+		UnitHelperSocket: filepath.Join(t.TempDir(), "no-hay-socket"),
+	}
+
+	declare("file://" + t.TempDir())
+	var out bytes.Buffer
+	c := &checker{out: &out}
+	c.run(t.Context(), cfg, "facturas")
+	if strings.Contains(out.String(), "host keys") {
+		t.Errorf("pidió host keys para un repo file://:\n%s", out.String())
+	}
+
+	declare("github.com/a/facturas")
+	out.Reset()
+	c = &checker{out: &out}
+	c.run(t.Context(), cfg, "facturas")
+	if !strings.Contains(out.String(), "con los host keys del servidor de git") {
+		t.Errorf("no pidió host keys para un repo por SSH:\n%s", out.String())
+	}
+}
