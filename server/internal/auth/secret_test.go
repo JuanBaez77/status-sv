@@ -19,6 +19,8 @@ func TestNewSecretsAreUniqueAndPrefixed(t *testing.T) {
 	}{
 		{name: "token de enrolamiento", create: auth.NewEnrollmentToken, prefix: auth.EnrollmentTokenPrefix},
 		{name: "credencial de agent", create: auth.NewAgentCredential, prefix: auth.AgentCredentialPrefix},
+		{name: "sesión del panel", create: auth.NewSessionToken, prefix: auth.SessionTokenPrefix},
+		{name: "token del MCP", create: auth.NewMCPToken, prefix: auth.MCPTokenPrefix},
 	}
 
 	for _, tt := range tests {
