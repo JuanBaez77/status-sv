@@ -166,16 +166,19 @@ func (c *checker) run(ctx context.Context, cfg config.Config, name string) {
 		}
 		_ = f.Close()
 		c.ok("deploy key %s", key)
-		if _, err := os.Stat(cfg.KnownHosts); err != nil {
-			c.fail("falta %s con los host keys del servidor de git", cfg.KnownHosts)
-			return
-		}
 	}
 
 	url, err := gitops.FetchURL(p.Repo, key != "", cfg.AllowFileRepos)
 	if err != nil {
 		c.fail("dirección del repo: %v", err)
 		return
+	}
+	// Los host keys hacen falta solo si el repo se trae por SSH.
+	if strings.HasPrefix(url, "ssh://") {
+		if _, err := os.Stat(cfg.KnownHosts); err != nil {
+			c.fail("falta %s con los host keys del servidor de git", cfg.KnownHosts)
+			return
+		}
 	}
 	repo, err := gitops.Open(gitops.Config{Git: gitPath, StateDir: stateDir, KnownHosts: cfg.KnownHosts, AllowFileRepos: cfg.AllowFileRepos}, p.Workdir, key)
 	if err != nil {
