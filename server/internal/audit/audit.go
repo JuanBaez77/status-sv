@@ -55,6 +55,10 @@ const (
 	ActionUserPassword      = "user.password"
 	ActionUserTOTPReset     = "user.totp_reset"
 	ActionEnrollTokenCreate = "enrollment_token.create"
+
+	// Las de los tokens del MCP (ADR-025).
+	ActionTokenCreate = "token.create"
+	ActionTokenRevoke = "token.revoke"
 )
 
 // Resultados de las acciones de acceso. Las de deploy usan el estado del

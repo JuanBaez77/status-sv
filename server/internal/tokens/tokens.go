@@ -144,25 +144,48 @@ type NewToken struct {
 	CreatedByName string
 }
 
-// Create valida el pedido, guarda el token y devuelve su valor en claro, que
-// no se puede volver a obtener.
-func (s *Service) Create(ctx context.Context, req NewToken) (auth.Secret, Token, error) {
+// prepared es un pedido ya validado y normalizado.
+type prepared struct {
+	name       string
+	scopes     []Scope
+	ttl        time.Duration
+	projectIDs []uuid.UUID
+}
+
+func (s *Service) prepare(ctx context.Context, req NewToken) (prepared, error) {
 	name, err := normalizeName(req.Name)
 	if err != nil {
-		return auth.Secret{}, Token{}, err
+		return prepared{}, err
 	}
 	scopes, err := ParseScopes(req.Scopes)
 	if err != nil {
-		return auth.Secret{}, Token{}, err
+		return prepared{}, err
 	}
 	ttl := req.TTL
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
 	if ttl < 0 || ttl > MaxTTL {
-		return auth.Secret{}, Token{}, fmt.Errorf("%w: el vencimiento tiene que ser de 90 días como mucho", ErrInvalid)
+		return prepared{}, fmt.Errorf("%w: el vencimiento tiene que ser de 90 días como mucho", ErrInvalid)
 	}
 	projectIDs, err := s.checkProjects(ctx, req.ProjectIDs)
+	if err != nil {
+		return prepared{}, err
+	}
+	return prepared{name: name, scopes: scopes, ttl: ttl, projectIDs: projectIDs}, nil
+}
+
+// Check valida un pedido sin guardar nada. El panel lo usa antes de gastar el
+// código TOTP: un nombre equivocado no tiene que costar un código.
+func (s *Service) Check(ctx context.Context, req NewToken) error {
+	_, err := s.prepare(ctx, req)
+	return err
+}
+
+// Create valida el pedido, guarda el token y devuelve su valor en claro, que
+// no se puede volver a obtener.
+func (s *Service) Create(ctx context.Context, req NewToken) (auth.Secret, Token, error) {
+	p, err := s.prepare(ctx, req)
 	if err != nil {
 		return auth.Secret{}, Token{}, err
 	}
@@ -178,15 +201,15 @@ func (s *Service) Create(ctx context.Context, req NewToken) (auth.Secret, Token,
 	now := s.now().UTC()
 	row, err := s.q.CreateAPIToken(ctx, store.CreateAPITokenParams{
 		ID:            id,
-		Name:          name,
+		Name:          p.name,
 		Prefix:        secret.Reveal()[:PrefixLen],
 		TokenHash:     secret.Hash(),
-		Scopes:        scopeStrings(scopes),
-		ProjectIds:    projectIDs,
+		Scopes:        scopeStrings(p.scopes),
+		ProjectIds:    p.projectIDs,
 		CreatedBy:     req.CreatedBy,
 		CreatedByName: req.CreatedByName,
 		CreatedAt:     now,
-		ExpiresAt:     now.Add(ttl),
+		ExpiresAt:     now.Add(p.ttl),
 	})
 	if err != nil {
 		return auth.Secret{}, Token{}, fmt.Errorf("guardar el token: %w", err)
