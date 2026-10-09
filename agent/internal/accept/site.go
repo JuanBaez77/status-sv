@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/JuanBaez77/status-sv/internal/projectspec"
 	"github.com/JuanBaez77/status-sv/internal/templates"
@@ -170,6 +173,10 @@ func (a *Accepter) makeSite(ctx context.Context, spec projectspec.Spec, set *tem
 		if err := a.writeSite(ctx, site, http); err != nil {
 			return err
 		}
+		if err := a.waitChallenge(ctx, domain, acme); err != nil {
+			a.revertSite(ctx, site)
+			return err
+		}
 		args := []string{
 			"certonly", "--webroot", "-w", set.ACMERoot, "--cert-name", templates.CertName(name), "-d", domain,
 			"--non-interactive", "--agree-tos", "--keep-until-expiring", "--deploy-hook", "systemctl reload nginx",
@@ -191,6 +198,51 @@ func (a *Accepter) makeSite(ctx context.Context, spec projectspec.Spec, set *tem
 	}
 	a.printf("sitio listo: https://%s (contesta el proyecto desde su primer deploy)\n", domain)
 	return nil
+}
+
+// challengeWait es cuánto se espera a que nginx sirva el desafío de Let's
+// Encrypt: systemctl reload vuelve antes de que nginx tome la configuración
+// nueva.
+var challengeWait = 10 * time.Second
+
+// waitChallenge deja un archivo de prueba donde certbot deja el desafío y
+// espera a que nginx lo sirva para el dominio. Así no se gasta un intento de
+// Let's Encrypt, que los limita, si nginx todavía no tomó el sitio o si lo
+// atiende otro.
+func (a *Accepter) waitChallenge(ctx context.Context, domain, acme string) error {
+	dir := filepath.Join(acme, ".well-known", "acme-challenge")
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // nginx sirve el desafío desde acá
+		return err
+	}
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return err
+	}
+	token := "statussv-" + hex.EncodeToString(random)
+	probe := filepath.Join(dir, token)
+	if err := os.WriteFile(probe, []byte(token), 0o644); err != nil { //nolint:gosec // nginx lo tiene que leer
+		return err
+	}
+	defer func() { _ = os.Remove(probe) }()
+
+	deadline := time.Now().Add(challengeWait)
+	for {
+		got, err := a.Sys.Fetch(ctx, domain, "/.well-known/acme-challenge/"+token)
+		if err == nil && got == token {
+			return nil
+		}
+		if err == nil {
+			err = errors.New("contestó otra cosa")
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("nginx no sirve el desafío de Let's Encrypt de %s (%w): revisá que ningún otro sitio atienda ese dominio", domain, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // siteFiles es el archivo del sitio y su enlace, y cómo estaban antes de esta

@@ -96,6 +96,9 @@ type System interface {
 	NginxReload(ctx context.Context) error
 	// Certbot corre certbot con esos argumentos.
 	Certbot(ctx context.Context, args []string) error
+	// Fetch pide una ruta de un dominio al nginx de este servidor, por HTTP,
+	// y devuelve el cuerpo si contesta 200.
+	Fetch(ctx context.Context, domain, path string) (string, error)
 }
 
 // Options son las banderas del comando.
@@ -445,16 +448,17 @@ func (a *Accepter) makeWorkdir(dir, owner string) error {
 	return os.Chmod(dir, os.ModeSetgid|0o775) //nolint:gosec // el grupo del agent escribe ahí (runbook, primer deploy)
 }
 
-// makeKey genera la deploy key: la privada root:statussv 0640, que el agent
-// lee para traer el código, y la pública 0644.
+// makeKey genera la deploy key: la privada del agent y 0400, como en el
+// runbook (ssh rechaza una llave que otros pueden leer), y la pública 0644,
+// que el agent informa para mostrarla en el panel.
 func (a *Accepter) makeKey(key, name string) error {
 	if err := a.Sys.Keygen(key, fmt.Sprintf("status-sv %s@%s", name, a.Sys.Hostname())); err != nil {
 		return err
 	}
-	if err := a.Sys.Chown(key, "root", AgentUser); err != nil {
+	if err := a.Sys.Chown(key, AgentUser, AgentUser); err != nil {
 		return err
 	}
-	if err := os.Chmod(key, 0o640); err != nil { //nolint:gosec // el grupo del agent la lee para traer el código (ADR-015)
+	if err := os.Chmod(key, 0o400); err != nil {
 		return err
 	}
 	return os.Chmod(key+".pub", 0o644) //nolint:gosec // es la llave pública

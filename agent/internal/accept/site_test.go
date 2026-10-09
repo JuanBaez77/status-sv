@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JuanBaez77/status-sv/agent/internal/projects"
 	"github.com/JuanBaez77/status-sv/internal/projectspec"
@@ -53,6 +54,7 @@ func (e *env) withNginx(t *testing.T) {
 		}
 	}
 	e.sys.live = e.a.onDisk("/etc/letsencrypt/live")
+	e.sys.acme = e.a.onDisk(templates.ACMERoot)
 }
 
 func TestAcceptWritesUnit(t *testing.T) {
@@ -264,6 +266,46 @@ func TestSiteRevertsWhenCertbotFails(t *testing.T) {
 	}
 	if len(e.sys.certbot) != 1 {
 		t.Errorf("después de fallar la prueba se pidió el de verdad: %q", e.sys.certbot)
+	}
+}
+
+// Si nginx no sirve el desafío (todavía no tomó el sitio, u otro atiende el
+// dominio), no se le pide nada a Let's Encrypt: limita los intentos fallidos.
+func TestSiteWaitsForTheChallenge(t *testing.T) {
+	wait := challengeWait
+	challengeWait = 300 * time.Millisecond
+	t.Cleanup(func() { challengeWait = wait })
+
+	e := newEnv(t)
+	e.withNginx(t)
+	e.sys.notServing = true
+	e.propose(t, "svdemo", svdemoYAML)
+	if err := e.a.Accept(t.Context(), "svdemo", Options{Yes: true}); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if len(e.sys.certbot) != 0 || e.sys.fetches < 2 {
+		t.Errorf("certbot = %q, pedidos a nginx = %d", e.sys.certbot, e.sys.fetches)
+	}
+	if _, err := os.Lstat(e.siteFile()); !os.IsNotExist(err) {
+		t.Errorf("el sitio del desafío quedó: %v", err)
+	}
+	if !strings.Contains(e.out.String(), "nginx no sirve el desafío de Let's Encrypt de svdemo.extendsystem.com") {
+		t.Errorf("la salida no dice por qué:\n%s", e.out)
+	}
+	// El archivo de prueba no queda.
+	left, _ := os.ReadDir(filepath.Join(e.a.onDisk(templates.ACMERoot), ".well-known", "acme-challenge"))
+	if len(left) != 0 {
+		t.Errorf("quedaron archivos de prueba: %v", left)
+	}
+
+	// Cuando lo sirve, sigue con certbot.
+	e.sys.notServing = false
+	e.a.LoadSpec = projects.ReadSpec
+	if err := e.a.Site(t.Context(), "svdemo", ""); err != nil {
+		t.Fatalf("Site: %v\n%s", err, e.out)
+	}
+	if len(e.sys.certbot) != 2 {
+		t.Errorf("certbot = %q", e.sys.certbot)
 	}
 }
 
