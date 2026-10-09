@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-10-08
+Última actualización: 2026-10-09
 
 ## Visión y alcance
 
@@ -119,7 +119,7 @@ Quince entidades cubren el MVP. Las métricas crudas y agregadas viven particion
 
 - `users`: cuenta del panel con hash de contraseña (argon2id) y secreto TOTP cifrado; los códigos de recuperación van en `user_recovery_codes`, como hash ([ADR-013](adr/ADR-013-segundo-factor-totp.md)).
 - `sessions`: sesión del panel, guardada como hash del token que viaja en la cookie; vence a las 24 h sin uso o a los 7 días ([ADR-010](adr/ADR-010-usuarios-y-sesiones-del-panel.md)).
-- `api_tokens`: token del MCP con hash, scopes por proyecto y entorno, y vencimiento.
+- `api_tokens`: token del MCP guardado como SHA-256, con su prefijo visible, sus scopes (de una lista cerrada, por entorno), la lista opcional de proyectos que alcanza, el vencimiento (90 días como mucho), la revocación y el último uso con su IP ([ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md)). Entra en el Sprint 7.
 - `approvals`: solicitud de aprobación humana con el deploy asociado, quién aprobó y cuándo.
 
 **Reglas**
@@ -175,24 +175,27 @@ El token se genera desde el panel, se usa una vez y vence a los 15 minutos. Desp
 
 ## MCP: herramientas, auth y aprobaciones
 
-El MCP es remoto, usa transporte Streamable HTTP y vive dentro del control plane. Cada herramienta es una operación acotada con parámetros validados; ninguna acepta comandos libres.
+El MCP es remoto, usa transporte Streamable HTTP y vive dentro del control plane, en `/mcp`. Cada herramienta es una operación acotada con parámetros validados; ninguna acepta comandos libres. Se arma con el SDK oficial para Go, sin estado entre pedidos y con respuestas JSON ([ADR-024](adr/ADR-024-mcp-remoto.md)).
 
 | Herramienta | Tipo | Qué hace | Aprobación en producción |
 | --- | --- | --- | --- |
 | `list_servers` | Lectura | Servidores con estado y último contacto. | No |
-| `get_server_metrics` | Lectura | CPU, RAM, disco y red en un rango de tiempo. | No |
+| `get_server_metrics` | Lectura | CPU, RAM, disco y red en un rango de tiempo: resumen y una serie corta. | No |
 | `list_projects` | Lectura | Proyectos por servidor, runtime y entorno. | No |
 | `get_project_status` | Lectura | Estado, versión desplegada y healthcheck. | No |
-| `get_logs` | Lectura | Últimas N líneas, con secretos enmascarados. | No |
+| `get_logs` | Lectura | Últimas N líneas de una unidad de un proyecto declarado, con secretos enmascarados. | No |
 | `list_deploys` | Lectura | Historial de deploys de un proyecto. | No |
+| `get_deploy` | Lectura | Un deploy con sus pasos y los últimos renglones de cada uno. | No |
 | `deploy` | Escritura | Despliega una referencia con healthcheck y rollback automático. | Sí |
 | `rollback` | Escritura | Vuelve a la versión anterior conocida. | Sí |
 | `restart` | Escritura | Reinicia un proyecto declarado. | Sí |
 | `smoke_test` | Verificación | Abre la URL con Playwright y valida checks definidos. | No |
 
+Las de lectura llegan en el Sprint 7, y las de escritura, con las aprobaciones, en el Sprint 8. `smoke_test` necesita el worker de Playwright, de la Fase 4. El texto que viene de un servidor (logs, salida de pasos) viaja aparte y marcado como no confiable, y cada llamada queda en `audit_log` con el token como actor de tipo `llm` ([ADR-024](adr/ADR-024-mcp-remoto.md)).
+
 **Autenticación**
 
-1. **Etapa 1:** tokens de API con scopes por proyecto y entorno (por ejemplo `deploy:staging` sin `deploy:production`), con vencimiento y revocación. Alcanza para Claude Code.
+1. **Etapa 1:** tokens de API con scopes por entorno (`read:staging`, `logs:production`; en el Sprint 8, `deploy:staging` sin `deploy:production`) y una lista opcional de proyectos, con vencimiento y revocación. Se crean en el panel con un código TOTP nuevo y se guardan como hash ([ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md)). Alcanza para Claude Code.
 2. **Etapa 2:** OAuth 2.1 con registro dinámico de clientes, que es lo que necesita claude.ai para conectores remotos.
 
 **Aprobaciones**
@@ -258,7 +261,7 @@ El riesgo central es que un LLM con acceso a producción puede ser engañado. El
 | Amenaza | Mitigación |
 | --- | --- |
 | Prompt injection (un issue, PR o web con texto malicioso que induce a desplegar o borrar) | Herramientas acotadas, sin `run_shell`, aprobación humana en producción y auditoría de cada acción. |
-| Token del MCP filtrado | Scopes por proyecto y entorno, vencimiento corto, revocación inmediata y alerta ante uso desde una IP nueva. |
+| Token del MCP filtrado | Scopes por proyecto y entorno, vencimiento corto (90 días como mucho), revocación inmediata desde el panel o por SSH, y alerta ante uso desde una IP nueva (con las alertas de la Fase 4; hasta entonces el panel muestra la última IP). |
 | Agent comprometido o falso | Enrolamiento con token de un solo uso, credencial propia revocable y mTLS en la Fase 4. |
 | Control plane comprometido | El agent solo ejecuta comandos de la lista permitida sobre proyectos declarados; no hay ejecución arbitraria. |
 | Acceso al socket de Docker (equivale a root) | El agent corre con usuario dedicado, sin exponer el socket por red y con operaciones predefinidas únicamente. |
@@ -311,7 +314,7 @@ status-sv/
 │   └── internal/     # collector, config, state, selfstat, ws; después docker, systemd, deploy
 ├── server/           # Go: API + MCP + WebSocket + embed del front
 │   ├── cmd/server/
-│   ├── internal/     # api, auth, config, enrollment, metrics, panel, store; después mcp, approvals
+│   ├── internal/     # api, auth, config, enrollment, metrics, panel, store, tokens, mcp; después approvals
 │   └── migrations/   # SQL versionado
 ├── internal/         # Go: código compartido por agent y server (buildinfo, projectspec)
 ├── web/              # React + Vite + TypeScript
@@ -429,9 +432,9 @@ El deploy desde cero (`bootstrap_project`) se construye al cierre de la Fase 2, 
 
 Gestión de backups, renovación y estado de certificados, comparación entre entornos, plantillas de proyecto, notificaciones de deploy a clientes, y un modo staging automático por cada PR.
 
-## Sprints 0 a 6
+## Sprints 0 a 7
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy, y el Sprint 6 cierra la Fase 2 con el alta de proyectos nuevos.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy, el Sprint 6 cierra la Fase 2 con el alta de proyectos nuevos, y el Sprint 7 abre la Fase 3 con el MCP de lectura.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -1016,6 +1019,63 @@ Quedan abiertos, fuera del sprint:
 Las lecciones del despliegue están en el runbook, sección 8. La que más tiempo ahorra: pegar los
 bloques de un servidor adentro de un `if` que mira el hostname.
 
+**Sprint 7 (2 semanas): MCP de lectura y tokens**
+
+Objetivo: que Claude Code, conectado al control plane real con un token de solo lectura, consulte
+servidores, métricas, proyectos, deploys y logs, y que cada llamada quede en la auditoría. Las seis
+decisiones que lo abrían las tomó Juan el 2026-10-09, aceptando las recomendaciones del plan:
+[ADR-024](adr/ADR-024-mcp-remoto.md) (el SDK oficial, sin estado, en `/mcp`, qué devuelve y cómo
+se audita) y [ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md) (los tokens y sus scopes).
+
+- **Nada de escritura.** `deploy`, `rollback`, `restart`, las aprobaciones y `register_project` y
+  `bootstrap_project` por MCP son del Sprint 8; `smoke_test`, de la Fase 4.
+- **El agent no cambia.** `get_logs` usa el comando que ya existe, más angosto: solo unidades de
+  un proyecto declarado.
+- **Antes del Sprint 8, el control plane se muda al VPS dedicado** de
+  [ADR-014](adr/ADR-014-control-plane-en-vps-propio.md), como pide
+  [ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md) antes de que exista un
+  token con escritura. El VPS lo contrata Juan; la mudanza va al cierre de este sprint.
+
+Tokens
+
+- [ ] Migración 00013 con `api_tokens` y el paquete que los genera, los verifica y lee sus scopes.
+- [ ] `GET`, `POST` y `DELETE` de `/v1/tokens`, con un código TOTP nuevo para crear;
+      `token.create` y `token.revoke` en `audit_log`; `server token-revoke` por SSH.
+- [ ] **Tokens del MCP** en el panel: crear con scopes, proyectos y vencimiento, mostrarlo una vez
+      con el comando para Claude Code, la lista con el último uso y su IP, y revocar.
+
+MCP
+
+- [ ] `/mcp` con el SDK: el token en `Authorization`, el rechazo de `Origin`, el límite por token y
+      un renglón de `audit_log` por llamada.
+- [ ] `list_servers` y `get_server_metrics`.
+- [ ] `list_projects` y `get_project_status`, filtrados por los scopes y la lista de proyectos.
+- [ ] `list_deploys` y `get_deploy`.
+- [ ] `get_logs`, con el texto del servidor aparte y marcado como no confiable.
+
+Panel
+
+- [ ] La auditoría filtra por tipo de actor y muestra las llamadas del MCP.
+
+Calidad y despliegue
+
+- [ ] Prueba de punta a punta del MCP en el CI, con un cliente MCP de verdad: cada herramienta, y un
+      rechazo para un pedido sin token, con un token vencido, revocado, sin el scope, con un
+      proyecto fuera de su lista o con `Origin`. Un secreto sembrado en un log sale enmascarado.
+- [ ] Llamadas al MCP durante la prueba de carga, con la meta de 100 MB del control plane.
+- [ ] Runbook: "Conectar Claude Code al MCP", y rotar y revocar un token.
+- [ ] Desplegar el sprint y conectar Claude Code al control plane real.
+- [ ] Mudar el control plane al VPS dedicado, antes del primer token con escritura.
+
+Terminado cuando Claude Code, conectado al control plane real con un token de solo lectura, lista
+los servidores y los proyectos, lee las métricas, el estado y los deploys de un proyecto y los logs
+de una unidad suya con los secretos enmascarados; un token vencido, revocado o sin el scope recibe
+un rechazo y nada más; cada llamada queda en `audit_log` como LLM, con el nombre del token; el
+control plane sigue por debajo de 100 MB con 10 agents; y el CI está verde, con el e2e del MCP.
+
+Si el sprint se estira, la línea de corte es la página de tokens del panel: los tokens se crean por
+SSH en el servidor del control plane, con un subcomando, hasta el Sprint 8.
+
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |
@@ -1024,7 +1084,7 @@ bloques de un servidor adentro de un `if` que mira el hostname.
 | 4 | Deploy Docker | `deploy` con `git fetch`, build, healthcheck y rollback automático; `audit_log` mínimo. |
 | 5 | Deploy systemd y auditoría | Deploy de gunicorn, vista de auditoría en el panel y el primer deploy de un proyecto declarado. |
 | 6 | Deploy desde cero | El alta de un proyecto: propuesta desde el panel y aceptación en el servidor, con la unidad y el sitio desde plantillas, el certificado y los secretos. |
-| 7 | MCP de lectura y tokens | Herramientas de lectura, tokens con scopes, conexión con Claude Code. |
+| 7 | MCP de lectura y tokens | Herramientas de lectura (con `get_deploy`), tokens con scopes por entorno y proyecto creados en el panel, auditoría de cada llamada, conexión con Claude Code. |
 | 8 | MCP de escritura y aprobaciones | `deploy`, `rollback` y `restart` con aprobación humana en el panel. |
 
 ## Riesgos y decisiones abiertas
@@ -1058,3 +1118,6 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 - [x] ¿Dónde se cargan los valores de los secretos de un proyecto nuevo? **En el servidor**, en el comando que acepta el alta; al control plane llegan solo los nombres que faltan ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), 2026-10-08).
 - [x] ¿Puede el control plane declarar un proyecto (`register_project`)? **No: lo propone**, y una persona lo acepta en el servidor ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), 2026-10-08).
 - [x] ¿Las plantillas de systemd y del proxy viven en el control plane o en cada servidor? **En el repo**, con un reemplazo de root en cada servidor; el panel solo las muestra. Cambia la regla 7 ([ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md), 2026-10-08).
+- [x] ¿El protocolo del MCP con el SDK oficial o con un transporte propio? **El SDK oficial**, sin estado y con respuestas JSON ([ADR-024](adr/ADR-024-mcp-remoto.md), 2026-10-09).
+- [x] ¿Dónde se crean los tokens del MCP y cómo son sus scopes? **En el panel, con un código TOTP nuevo**; scopes `read` y `logs` por entorno, y una lista opcional de proyectos ([ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md), 2026-10-09).
+- [x] ¿Se mantiene el control plane en el servidor compartido cuando haya tokens con escritura? **No**: se muda al VPS dedicado al cierre del Sprint 7, como pide [ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md) (2026-10-09).
