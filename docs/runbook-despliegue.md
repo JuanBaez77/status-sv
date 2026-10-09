@@ -806,6 +806,44 @@ Un proyecto que ya corre en el servidor, o que necesita lo que una propuesta no 
 `workdir`, varias unidades, un sitio armado a mano), se sigue declarando a mano, como en "Declarar
 un proyecto", con su deploy prendido como en las dos secciones anteriores.
 
+### Sacar un proyecto
+
+No hay un comando: lo hace una persona como root, en el orden inverso al alta. Antes, mirar en el
+panel que el proyecto no tenga un deploy en curso. Se hizo así el 2026-10-09 con los dos
+proyectos de demostración de `sv-gcg`.
+
+```bash
+# 1. Pararlo. De systemd:
+sudo systemctl disable --now <UNIDAD>.service
+sudo rm -rf /etc/systemd/system/<UNIDAD>.service /etc/systemd/system/<UNIDAD>.service.d
+sudo systemctl daemon-reload
+# De Docker (los volúmenes quedan; con -v se borran también):
+cd /srv/<PROYECTO> && sudo docker compose down; cd /
+
+# 2. Sus imágenes, con las etiquetas de vuelta atrás que dejó el deploy:
+sudo docker images | grep -e <PROYECTO>
+sudo docker rmi <IMAGEN>:<TAG> statussv-rollback/<PROYECTO>/<SERVICIO>:<COMMIT>
+
+# 3. La declaración, lo que el agent guarda del proyecto y lo que dejó el alta:
+sudo rm -f /etc/status-sv/projects.d/<PROYECTO>.yaml /var/lib/status-sv/deploys/projects/<PROYECTO>.json
+sudo rm -f /etc/status-sv/env/<PROYECTO>.env /etc/status-sv/keys/<PROYECTO> /etc/status-sv/keys/<PROYECTO>.pub
+sudo rm -rf /srv/<PROYECTO>
+sudo userdel <RUN_AS>   # de systemd, si el usuario era solo de este proyecto
+
+# 4. El sitio y el certificado, si los tenía:
+sudo rm -f /etc/nginx/sites-enabled/statussv-<PROYECTO>.conf /etc/nginx/sites-available/statussv-<PROYECTO>.conf
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot delete --cert-name statussv-<PROYECTO>
+
+# 5. El instalador otra vez, con el binario de la versión instalada (sale del mismo tarball):
+sudo ./install-agent.sh ./statussv-agent
+```
+
+El paso 5 reescribe el drop-in sin el `workdir` del proyecto y, si ya no queda ningún proyecto de
+systemd, saca el ayudante root. Si el proyecto tenía deploy key, queda borrar su llave pública en
+el repo (en GitHub, *Settings → Deploy keys*). El proyecto desaparece del panel cuando el agent
+reconecta; su historial de deploys y la auditoría quedan.
+
 ## 3. Actualizar
 
 **Control plane:** copiar el nuevo commit igual que en el paso 1, actualizar `STATUSSV_COMMIT` y
@@ -1196,3 +1234,36 @@ Salieron al desplegar el Sprint 5 (2026-10-05), con los dos proyectos de demostr
 - **Desde PowerShell 5.1, el comando de `ssh` va entre comillas simples y sin comillas dobles
   adentro.** PowerShell rompe las comillas dobles al pasárselas a `ssh`, y el comando llega cortado
   al servidor. Un punto en vez de un espacio sirve para `grep` (`grep -e agent.conectado`).
+
+Salieron al desplegar el Sprint 6 (2026-10-09) y de la prueba de punta a punta del alta:
+
+- **`systemctl reload nginx` vuelve antes de que nginx tome la configuración nueva.** Un pedido
+  hecho enseguida puede llegar todavía a la anterior. El alta, antes de llamar a certbot, espera a
+  que nginx sirva un archivo de prueba en la ruta del desafío: sin eso, certbot pierde el intento,
+  y Let's Encrypt acepta pocos intentos fallidos por hora para un mismo dominio.
+- **La memoria del agent se mide con la RSS del proceso, no con el cgroup.**
+  `systemctl show -p MemoryCurrent` cuenta también la caché de los archivos que leyó y escribió el
+  servicio: después de dos altas, con sus clones y sus builds, marcó 61 MiB en el CI.
+  `ps -o rss= -C statussv-agent` dio 17 MB en `sv-gcg`, con una hora andando.
+- **systemd no borra el archivo de un socket al pararlo**, salvo con `RemoveOnStop=yes`. El
+  instalador sacó el ayudante de `sv-gcg` y su socket siguió en `/run/status-sv`; la unidad ya lo
+  trae.
+- **Un bloque para pegar en un servidor va adentro de un `if` que mira el hostname.** El bloque
+  del agent de `cristales-baez-prod` se pegó en la sesión de `srv936263` y falló en cada renglón
+  sin tocar nada, porque ahí no estaba el archivo; con otro bloque podría no haber fallado. Así no
+  corre en otro servidor ni si se pega en PowerShell, que no entiende el `if` de bash, y con `&&`
+  entre los pasos se frena en el primero que falla:
+
+  ```bash
+  if [ "$(hostname)" = <SERVIDOR> ]; then
+    echo '<SHA256>  /tmp/<ARCHIVO>' | sha256sum -c &&
+    <PASO> &&
+    <PASO>
+  else
+    echo "esto va en <SERVIDOR> y estás en $(hostname)"
+  fi
+  ```
+
+- **Una salida larga se corta al copiarla de la terminal.** Un `find` de cuarenta renglones llegó
+  cortado y hubo que pegarlo en dos veces. Para confirmar algo, mejor contar (`| wc -l`,
+  `| sort | uniq -c`) que listar.

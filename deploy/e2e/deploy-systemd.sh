@@ -611,5 +611,19 @@ verde "ok: ${PEDIDOS} pedidos, ${PRIMEROS} primeros deploys y ${FINALES} finales
 MEMORIA="$(systemctl show -p MemoryCurrent --value statussv-agent)"
 verde "ok: el agent ocupa $((MEMORIA / 1024 / 1024)) MiB después de siete deploys"
 
+# --- 8. Apagar el deploy ---
+
+paso "8. --disable-deploy saca el drop-in, el ayudante y su socket"
+if ! APAGADO="$(bash "${RAIZ}/deploy/install-agent.sh" --disable-deploy "${AGENT_BIN}" 2>&1)"; then
+  printf '%s\n' "${APAGADO}"
+  falla "el instalador falló al apagar el deploy"
+fi
+[ ! -e "${DROPIN_DIR}/20-deploy.conf" ] || falla "--disable-deploy no sacó el drop-in"
+! systemctl is-active --quiet statussv-unit-helper.socket || falla "el ayudante sigue activo"
+[ ! -e /etc/systemd/system/statussv-unit-helper.socket ] || falla "--disable-deploy no sacó la unidad del ayudante"
+[ ! -e /run/status-sv/unit-helper.sock ] || falla "el socket del ayudante quedó en /run"
+systemctl is-active --quiet statussv-agent || falla "el agent no quedó andando con el deploy apagado"
+verde "ok: deploy apagado, sin ayudante ni socket, y el agent andando"
+
 paso "listo"
 verde "el deploy de systemd de punta a punta anduvo"
