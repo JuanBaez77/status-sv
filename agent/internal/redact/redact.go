@@ -70,7 +70,7 @@ var rules = []rule{
 			`xox[abprs]-[A-Za-z0-9-]{10,}|` + // Slack
 			`AKIA[0-9A-Z]{16}|` + // AWS
 			`sk-[A-Za-z0-9_-]{20,}|` + // OpenAI, Anthropic y otros
-			`sv(?:enr|agt|ses)_[A-Za-z0-9_-]{16,}|` + // los de status-sv
+			`sv(?:enr|agt|ses|mcp)_[A-Za-z0-9_-]{16,}|` + // los de status-sv
 			`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+` + // JWT
 			`)`),
 		repl: Mask,

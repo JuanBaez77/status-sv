@@ -118,6 +118,14 @@ func TestString(t *testing.T) {
 			secret: "svagt_0123456789abcdefghij",
 		},
 		{
+			// Un token del MCP que alguien pegó en la configuración de un
+			// proyecto, sin ninguna palabra al lado que lo delate.
+			name:   "token del MCP de status-sv",
+			in:     "MCP_URL https://status.example.com/mcp svmcp_AbCdEf0123456789-_xyzXYZ",
+			want:   "MCP_URL https://status.example.com/mcp ***",
+			secret: "svmcp_AbCdEf0123456789-_xyzXYZ",
+		},
+		{
 			name:   "JWT",
 			in:     "sesión eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
 			want:   "sesión ***",
