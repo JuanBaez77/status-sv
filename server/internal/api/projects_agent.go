@@ -69,5 +69,11 @@ func (s *Server) handleProjectsState(ctx context.Context, conn *websocket.Conn, 
 		"validos", len(state.Projects),
 		"invalidos", len(state.Invalid),
 	)
-	return s.writeMessage(ctx, conn, proto.ProjectsStateAck{TakenAt: state.TakenAt})
+	if err := s.writeMessage(ctx, conn, proto.ProjectsStateAck{TakenAt: state.TakenAt}); err != nil {
+		return err
+	}
+	// Con lo que el agent tiene guardado y lo que tiene declarado, las
+	// propuestas se ponen al día (ADR-022).
+	s.reconcileProposals(ctx, conn, server, state)
+	return nil
 }

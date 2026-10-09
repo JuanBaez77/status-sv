@@ -213,6 +213,25 @@ type ProjectInvalidFile struct {
 	SeenAt   time.Time
 }
 
+type ProjectProposal struct {
+	ID            uuid.UUID
+	ServerID      uuid.UUID
+	Name          string
+	Runtime       string
+	Environment   string
+	Spec          string
+	SpecHash      string
+	Status        string
+	Message       string
+	CreatedBy     *uuid.UUID
+	CreatedByName string
+	ActorType     string
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	DeliveredAt   *time.Time
+	ClosedAt      *time.Time
+}
+
 type RuntimeSource struct {
 	ServerID uuid.UUID
 	Source   string

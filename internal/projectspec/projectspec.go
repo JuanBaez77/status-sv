@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -515,6 +516,9 @@ func CheckProposal(spec Spec) error {
 	if project.Workdir != ProposalWorkdir(project.Name) {
 		return errors.New("workdir: en una propuesta es siempre /srv/<nombre>")
 	}
+	if err := checkProposalRepo(project.Repo); err != nil {
+		return err
+	}
 	if project.Runtime != proto.RuntimeSystemd {
 		return nil
 	}
@@ -527,6 +531,39 @@ func CheckProposal(spec Spec) error {
 		return errors.New("run_as: en una propuesta es siempre el nombre del proyecto")
 	case spec.EnvFile != ProposalEnvFile(project.Name):
 		return errors.New("env_file: en una propuesta es siempre /etc/status-sv/env/<nombre>.env")
+	}
+	return nil
+}
+
+// checkProposalRepo rechaza un repo con credenciales: una propuesta pasa por
+// el control plane y queda en su base, y un secreto no viaja (regla 3). Para
+// un repo privado está la deploy key.
+func checkProposalRepo(repo string) error {
+	const msg = "repo: una propuesta no lleva usuario con contraseña, token ni parámetros; para un repo privado está la deploy key"
+	scheme, _, hasScheme := strings.Cut(repo, "://")
+	if !hasScheme {
+		// Forma corta o forma scp (git@servidor:dueño/repo): el usuario no
+		// puede llevar contraseña.
+		if user, _, ok := strings.Cut(repo, "@"); ok && strings.Contains(user, ":") {
+			return errors.New(msg)
+		}
+		return nil
+	}
+	u, err := url.Parse(repo)
+	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return errors.New(msg)
+	}
+	switch scheme {
+	case "https":
+		if u.User != nil {
+			return errors.New(msg)
+		}
+	case "ssh":
+		if _, hasPassword := u.User.Password(); hasPassword {
+			return errors.New(msg)
+		}
+	default:
+		return errors.New("repo: en una propuesta, solo https o ssh")
 	}
 	return nil
 }

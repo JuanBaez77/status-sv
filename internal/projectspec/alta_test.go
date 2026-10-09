@@ -183,6 +183,11 @@ func TestCheckProposalRejects(t *testing.T) {
 		{name: "sin unidad generada", yaml: strings.Replace(strings.Split(svdemoYAML, "service:")[0], "runtime: systemd\n", "runtime: systemd\nunits: [gunicorn.service]\n", 1), wantErr: "service: falta"},
 		{name: "nombre que empieza con número", file: "1demo.yaml", yaml: strings.NewReplacer("svdemo", "1demo", "run_as: svdemo", "run_as: otro").Replace(svdemoYAML), wantErr: "name: un proyecto systemd propuesto"},
 		{name: "nombre de más de 32", file: strings.Repeat("a", 33) + ".yaml", yaml: strings.NewReplacer("run_as: svdemo", "run_as: otro", "svdemo", strings.Repeat("a", 33)).Replace(svdemoYAML), wantErr: "name: un proyecto systemd propuesto"},
+		{name: "repo https con token", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: https://x-access-token:ghp_abc@github.com/", 1), wantErr: "repo: una propuesta no lleva"},
+		{name: "repo https con usuario", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: https://juan@github.com/", 1), wantErr: "repo: una propuesta no lleva"},
+		{name: "repo ssh con contraseña", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: ssh://git:clave@github.com/", 1), wantErr: "repo: una propuesta no lleva"},
+		{name: "repo scp con contraseña", yaml: strings.Replace(svdemoYAML, "repo: github.com/JuanBaez77/", "repo: git:clave@github.com:JuanBaez77/", 1), wantErr: "repo: una propuesta no lleva"},
+		{name: "repo por http", yaml: strings.Replace(svdemoYAML, "repo: github.com/", "repo: http://github.com/", 1), wantErr: "repo: en una propuesta, solo https o ssh"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,5 +229,19 @@ func TestAltaErrorsNeverIncludeValues(t *testing.T) {
 				t.Errorf("el error muestra un valor del archivo: %v", err)
 			}
 		})
+	}
+}
+
+// Las formas de repo que usa un alta de verdad pasan.
+func TestCheckProposalRepoAccepts(t *testing.T) {
+	for _, repo := range []string{
+		"github.com/JuanBaez77/status-sv-demo",
+		"git@github.com:JuanBaez77/status-sv-demo.git",
+		"https://github.com/JuanBaez77/status-sv-demo.git",
+		"ssh://git@github.com/JuanBaez77/status-sv-demo.git",
+	} {
+		if err := checkProposalRepo(repo); err != nil {
+			t.Errorf("%s: %v", repo, err)
+		}
 	}
 }
