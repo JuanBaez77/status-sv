@@ -970,7 +970,8 @@ persona a mano, como hoy, y la unidad generada queda.
 sin usar la línea de corte: el sitio y el certificado entraron. #107 se cerró solo al borrarse su
 rama base, y lo reemplazó #108. El control plane de `srv936263` pasó a `9bbb6b4` con las
 migraciones 00011 y 00012, con un respaldo antes; con él viajó #93, del Sprint 5. Los dos agents
-pasaron a `9bbb6b4` y reconectaron sin errores. El deploy sigue prendido solo en `sv-gcg`, para
+pasaron a `9bbb6b4` y reconectaron sin errores. En el panel, `sv-gcg` muestra sus tres proyectos
+de GCG funcionando y ninguna de las demos. El deploy sigue prendido solo en `sv-gcg`, para
 `gcg-alertas-nbcargo`.
 
 **El alta se probó en el CI, no en un servidor real.** La prueba de punta a punta (#108) corre con
@@ -993,8 +994,8 @@ y el alta de `svdemo` espera un servidor de pruebas.
   base. Ahora se rechaza, con la misma regla en el control plane y en el agent (#105).
 - **El agent**, con la versión del sprint: 17 MB de memoria propia (RSS) en `sv-gcg` después de
   una hora andando, y 10 MB en su cgroup. Los 61 MiB que marcó el cgroup en el CI después de dos
-  altas son caché de los archivos de los clones y los builds. La CPU no se volvió a medir: en el
-  Sprint 5 fue 0,13% de un núcleo.
+  altas son caché de los archivos de los clones y los builds. En reposo, 0,19% de un núcleo en
+  `sv-gcg`, medido durante dos minutos con `CPUUsageNSec`.
 - **Las dos demos del Sprint 5 ya no están en `sv-gcg`.** Se sacaron a mano (las unidades, el
   Compose y sus imágenes, los `workdir`, las declaraciones y el usuario `statusdemo`), y el
   instalador, corrido de nuevo, reescribió el drop-in y sacó el ayudante root, que se había quedado
