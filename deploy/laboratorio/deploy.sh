@@ -74,8 +74,8 @@ fi
 TMP="$(mktemp -d)"
 G=(git -c user.name=laboratorio -c user.email=lab@status-sv.invalid -c init.defaultBranch=main)
 "${G[@]}" init -q "${TMP}"
-cat >"${TMP}/Dockerfile" <<'EOF'
-FROM busybox:1.37
+printf 'FROM %s/busybox:1.37\n' "${IMAGENES:-docker.io/library}" >"${TMP}/Dockerfile"
+cat >>"${TMP}/Dockerfile" <<'EOF'
 COPY *.html /www/
 CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]
 EOF

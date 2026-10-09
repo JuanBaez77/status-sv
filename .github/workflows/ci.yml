@@ -12,6 +12,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Las imágenes oficiales de Docker Hub se bajan por mirror.gcr.io, la caché de
+# Google: los runners comparten IPs y Docker Hub sin cuenta se queda sin cupo
+# (429) o contesta 500. El Dockerfile, los compose y los scripts de prueba
+# leen IMAGENES; sin ella, Docker Hub, como en producción.
+env:
+  IMAGENES: mirror.gcr.io/library
+
 jobs:
   go:
     name: "Go: formato, lint, tests y build"
@@ -74,7 +81,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por mirror.gcr.io, como el resto de las imágenes (ver IMAGENES,
+        # arriba). Acá va escrito: la imagen de un servicio no lee env.
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -168,7 +177,9 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por mirror.gcr.io, como el resto de las imágenes (ver IMAGENES,
+        # arriba). Acá va escrito: la imagen de un servicio no lee env.
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -203,7 +214,9 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por mirror.gcr.io, como el resto de las imágenes (ver IMAGENES,
+        # arriba). Acá va escrito: la imagen de un servicio no lee env.
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -244,7 +257,9 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por mirror.gcr.io, como el resto de las imágenes (ver IMAGENES,
+        # arriba). Acá va escrito: la imagen de un servicio no lee env.
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -282,7 +297,7 @@ jobs:
         run: >-
           sudo DATABASE_URL="${DATABASE_URL}"
           SERVER_BIN="${RUNNER_TEMP}/bin/server" AGENT_BIN="${RUNNER_TEMP}/bin/agent"
-          bash ./deploy/e2e/alta.sh
+          IMAGENES="${IMAGENES}" bash ./deploy/e2e/alta.sh
 
   laboratorio:
     name: "Laboratorio: la unidad del agent con el drop-in de deploy"
@@ -305,7 +320,7 @@ jobs:
         run: CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/statussv-agent" ./agent/cmd/agent
 
       - name: Laboratorio del deploy
-        run: sudo AGENT_BIN="${RUNNER_TEMP}/statussv-agent" bash ./deploy/laboratorio/deploy.sh
+        run: sudo IMAGENES="${IMAGENES}" AGENT_BIN="${RUNNER_TEMP}/statussv-agent" bash ./deploy/laboratorio/deploy.sh
 
       # El reparto del deploy de systemd (ADR-019): el agent no ejecuta nada
       # del proyecto ni reinicia servicios; se lo pide a un ayudante root por
@@ -320,7 +335,9 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por mirror.gcr.io, como el resto de las imágenes (ver IMAGENES,
+        # arriba). Acá va escrito: la imagen de un servicio no lee env.
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv

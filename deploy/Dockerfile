@@ -7,11 +7,16 @@
 #   docker build -f deploy/Dockerfile --target server -t status-sv-server .
 #   docker build -f deploy/Dockerfile --target agent  -t status-sv-agent .
 
+# De dónde salen las imágenes oficiales. Por defecto, Docker Hub; el CI pasa
+# mirror.gcr.io/library, la caché de Google, porque los runners se quedan sin
+# cupo de Docker Hub.
+ARG IMAGENES=docker.io/library
+
 # --- Panel web ---
 #
 # Node solo aparece acá: el panel se compila a archivos estáticos que el binario
 # del control plane se lleva adentro. En el servidor no corre Node.
-FROM node:22-alpine AS web
+FROM ${IMAGENES}/node:22-alpine AS web
 
 WORKDIR /web
 
@@ -25,7 +30,7 @@ COPY web/ ./
 RUN npm run build && find dist -name "*.map" -delete
 
 # --- Binarios ---
-FROM golang:1.27-alpine AS builder
+FROM ${IMAGENES}/golang:1.27-alpine AS builder
 
 WORKDIR /src
 
@@ -53,7 +58,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -o /out/agent ./agent/cmd/agent
 
 # --- Control plane ---
-FROM alpine:3.22 AS server
+FROM ${IMAGENES}/alpine:3.22 AS server
 
 # ca-certificates para poder hablar HTTPS con lo que haga falta.
 RUN apk add --no-cache ca-certificates \
@@ -67,7 +72,7 @@ ENTRYPOINT ["/usr/local/bin/server"]
 CMD ["serve"]
 
 # --- Agent ---
-FROM alpine:3.22 AS agent
+FROM ${IMAGENES}/alpine:3.22 AS agent
 
 RUN apk add --no-cache ca-certificates \
  && adduser -D -u 10002 statussv \

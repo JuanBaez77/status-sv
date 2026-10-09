@@ -18,6 +18,10 @@ concurrency:
   group: nocturno
   cancel-in-progress: false
 
+# Ver ci.yml: las imágenes oficiales por mirror.gcr.io.
+env:
+  IMAGENES: mirror.gcr.io/library
+
 jobs:
   carga:
     name: "Carga larga: 10 agents durante 10 minutos"
