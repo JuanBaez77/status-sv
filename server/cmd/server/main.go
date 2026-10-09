@@ -9,6 +9,7 @@
 //	server user-add --username NOMBRE   da de alta a una persona del panel
 //	server user-password --username N   cambia su contraseña
 //	server user-totp-reset --username N borra su segundo factor y cierra sus sesiones
+//	server token-revoke --id ID|--all    revoca tokens del MCP
 //	server version                      imprime la versión
 package main
 
@@ -57,6 +58,8 @@ func run(ctx context.Context, args []string) error {
 		return runUserPassword(ctx, args[1:])
 	case "user-totp-reset":
 		return runUserTOTPReset(ctx, args[1:])
+	case "token-revoke":
+		return runTokenRevoke(ctx, args[1:])
 	case "enroll-token":
 		return runEnrollToken(ctx, args[1:])
 	case "version", "--version", "-version":
@@ -84,6 +87,8 @@ Uso:
   server user-password --username NOMBRE cambia la contraseña y cierra sus sesiones
   server user-totp-reset --username NOMBRE borra el segundo factor y cierra sus sesiones:
                                           el próximo login pide darlo de alta de nuevo
+  server token-revoke --id ID            revoca un token del MCP
+  server token-revoke --all              revoca todos los tokens del MCP (emergencia)
   server version                         imprime la versión
 
 Configuración (variables de entorno, ver .env.example):

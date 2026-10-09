@@ -22,6 +22,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/proposals"
 	"github.com/JuanBaez77/status-sv/server/internal/runstate"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
+	"github.com/JuanBaez77/status-sv/server/internal/tokens"
 	"github.com/JuanBaez77/status-sv/server/internal/users"
 )
 
@@ -57,6 +58,8 @@ type Server struct {
 	deployLimiter   *ipLimiter
 	proposals       *proposals.Service
 	proposalLimiter *ipLimiter
+	tokens          *tokens.Service
+	tokenLimiter    *ipLimiter
 }
 
 // New arma el servidor de la API.
@@ -85,6 +88,8 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		deployLimiter:   newIPLimiter(deployRequestsPerMinute, deployRequestsBurst, limiterTTL),
 		proposals:       proposals.NewService(pool),
 		proposalLimiter: newIPLimiter(proposalRequestsPerMinute, proposalRequestsBurst, limiterTTL),
+		tokens:          tokens.NewService(pool, log),
+		tokenLimiter:    newIPLimiter(tokenRequestsPerMinute, tokenRequestsBurst, limiterTTL),
 	}
 }
 
@@ -131,6 +136,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/servers/{id}/proposals/preview", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handlePreviewProposal))))
 	mux.Handle("GET /v1/proposals/{id}", s.requireSession(http.HandlerFunc(s.handleGetProposal)))
 	mux.Handle("DELETE /v1/proposals/{id}", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleWithdrawProposal))))
+	// Los tokens del MCP (ADR-025).
+	mux.Handle("GET /v1/tokens", s.requireSession(http.HandlerFunc(s.handleListTokens)))
+	mux.Handle("POST /v1/tokens", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleCreateToken))))
+	mux.Handle("DELETE /v1/tokens/{id}", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRevokeToken))))
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si
