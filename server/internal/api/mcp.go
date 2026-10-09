@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/google/uuid"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -148,6 +150,55 @@ func (b mcpBackend) Projects(ctx context.Context) ([]mcp.ProjectInfo, error) {
 			Name:        row.Name,
 			Environment: row.Environment,
 		}
+	}
+	return out, nil
+}
+
+func (b mcpBackend) ServerMetrics(ctx context.Context, serverID uuid.UUID, span time.Duration) (mcp.MetricsInfo, error) {
+	now := time.Now().UTC()
+	q := rangeQuery{from: now.Add(-span), to: now, resolution: autoResolution(span)}
+	series, err := b.s.readSeries(ctx, serverID, q)
+	if err != nil {
+		return mcp.MetricsInfo{}, err
+	}
+	out := mcp.MetricsInfo{
+		Resolution: series.Resolution,
+		From:       series.From,
+		To:         series.To,
+		Truncated:  series.Truncated,
+		Points:     make([]mcp.MetricPoint, len(series.Samples)),
+		Disks:      make([]mcp.DiskSeries, len(series.Disks)),
+		Networks:   make([]mcp.NetworkSeries, len(series.Networks)),
+	}
+	for i, p := range series.Samples {
+		out.Points[i] = mcp.MetricPoint{
+			At:          p.TS,
+			CPU:         float64(p.CPUUsedPercent),
+			CPUMax:      float64(p.CPUUsedMaxPercent),
+			IOWait:      float64(p.CPUIOWaitPercent),
+			IOWaitMax:   float64(p.CPUIOWaitMaxPercent),
+			MemUsed:     p.MemUsedBytes,
+			MemUsedMax:  p.MemUsedMaxBytes,
+			MemTotal:    p.MemTotalBytes,
+			SwapUsed:    p.SwapUsedBytes,
+			SwapUsedMax: p.SwapUsedMaxBytes,
+			SwapTotal:   p.SwapTotalBytes,
+			Load1:       float64(p.Load1),
+		}
+	}
+	for i, disk := range series.Disks {
+		points := make([]mcp.DiskPoint, len(disk.Points))
+		for j, p := range disk.Points {
+			points[j] = mcp.DiskPoint{At: p.TS, UsedBytes: p.UsedBytes, TotalBytes: p.TotalBytes}
+		}
+		out.Disks[i] = mcp.DiskSeries{Mountpoint: disk.Mountpoint, Points: points}
+	}
+	for i, network := range series.Networks {
+		points := make([]mcp.NetworkPoint, len(network.Points))
+		for j, p := range network.Points {
+			points[j] = mcp.NetworkPoint{At: p.TS, Rx: p.RxPerSec, RxMax: p.RxMaxPerSec, Tx: p.TxPerSec, TxMax: p.TxMaxPerSec}
+		}
+		out.Networks[i] = mcp.NetworkSeries{Interface: network.Interface, Points: points}
 	}
 	return out, nil
 }

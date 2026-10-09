@@ -14,6 +14,9 @@ type Backend interface {
 	Servers(ctx context.Context) ([]ServerInfo, error)
 	// Projects devuelve todos los proyectos declarados.
 	Projects(ctx context.Context) ([]ProjectInfo, error)
+	// ServerMetrics devuelve las series de un servidor desde span atrás hasta
+	// ahora, con la resolución que corresponde al largo del rango.
+	ServerMetrics(ctx context.Context, serverID uuid.UUID, span time.Duration) (MetricsInfo, error)
 }
 
 // ServerInfo es un servidor con su estado derivado del último contacto.
