@@ -321,3 +321,48 @@ func TestMCPDeploys(t *testing.T) {
 		t.Errorf("get_deploy = %s", raw)
 	}
 }
+
+func TestMCPGetLogsAsksTheAgentForAProjectUnit(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.85"
+	agent, _ := connectAgent(t, f, "vps-mcp-logs", "203.0.113.85")
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	sendRuntime(t, agent, runtimeStateFor(at))
+	sendProjects(t, agent, declaredProjects(at))
+
+	logAt := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	seen := answerCommands(t, agent, func(envelope proto.Envelope, _ proto.Command) proto.CommandAck {
+		return proto.CommandAck{CommandID: envelope.ID, Status: proto.CommandOK, Logs: &proto.LogsResult{
+			Lines: []proto.LogLine{{TS: logAt, Stream: "stdout", Text: "GET /health 200"}},
+		}}
+	})
+
+	value, _ := f.mcpToken(t, "logs", []string{"logs:production"})
+	session, err := f.mcpSession(t, value, ip)
+	if err != nil {
+		t.Fatalf("conectar: %v", err)
+	}
+	res, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "get_logs", Arguments: map[string]any{"project": "web", "unit": "web-1", "lines": 20}})
+	if err != nil || res.IsError {
+		t.Fatalf("get_logs = %+v, %v", res, err)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(raw), `"text":"GET /health 200"`) || !strings.Contains(string(raw), `"unit":"web-1"`) {
+		t.Errorf("get_logs = %s", raw)
+	}
+	cmd := <-seen
+	if cmd.Operation != proto.OpGetLogs || cmd.GetLogs.Kind != proto.LogContainer || cmd.GetLogs.Target != strings.Repeat("a1", 32) || cmd.GetLogs.Lines != 20 {
+		t.Errorf("el agent recibió %+v", cmd.GetLogs)
+	}
+
+	// api-1 es de otro proyecto: por MCP no se piden logs de lo que no es del proyecto.
+	res, err = session.CallTool(t.Context(), &sdk.CallToolParams{Name: "get_logs", Arguments: map[string]any{"project": "web", "unit": "api-1"}})
+	if err != nil || !res.IsError {
+		t.Fatalf("unidad de otro proyecto = %+v, %v", res, err)
+	}
+	select {
+	case cmd := <-seen:
+		t.Errorf("no se le pide nada al agent, y le llegó %+v", cmd)
+	case <-time.After(200 * time.Millisecond):
+	}
+}

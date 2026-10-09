@@ -8,6 +8,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// Errores de Backend.
+var (
+	// ErrAgentOffline es un servidor cuyo agent no está conectado.
+	ErrAgentOffline = errors.New("el agent de ese servidor no está conectado")
+	// ErrNoAnswer es un agent que no contestó a tiempo.
+	ErrNoAnswer = errors.New("el agent no contestó a tiempo")
+)
+
 // ErrNotFound es lo que devuelve Backend cuando lo pedido no existe.
 var ErrNotFound = errors.New("no existe")
 
@@ -25,6 +33,10 @@ type Backend interface {
 	ProjectDeploys(ctx context.Context, serverID uuid.UUID, project string, limit int) ([]DeployInfo, error)
 	// Deploy devuelve un deploy con sus pasos, o ErrNotFound.
 	Deploy(ctx context.Context, id uuid.UUID) (DeployDetail, error)
+	// Logs le pide al agent del servidor los últimos renglones de un
+	// contenedor (por su ID) o de un servicio. Puede devolver ErrAgentOffline
+	// o ErrNoAnswer.
+	Logs(ctx context.Context, serverID uuid.UUID, kind, target string, lines int) (LogsInfo, error)
 	// ServerMetrics devuelve las series de un servidor desde span atrás hasta
 	// ahora, con la resolución que corresponde al largo del rango.
 	ServerMetrics(ctx context.Context, serverID uuid.UUID, span time.Duration) (MetricsInfo, error)
@@ -113,6 +125,8 @@ type ProjectDetail struct {
 
 // ContainerInfo es un contenedor de un proyecto Docker.
 type ContainerInfo struct {
+	// ID es el ID completo, con el que se le piden los logs al agent.
+	ID          string
 	Name        string
 	Service     string
 	Image       string
@@ -172,4 +186,21 @@ type StepInfo struct {
 	FinishedAt *time.Time
 	Detail     string
 	Output     []string
+}
+
+// LogsInfo es la respuesta del agent a un pedido de logs.
+type LogsInfo struct {
+	// Status es ok, rejected o failed.
+	Status    string
+	Code      string
+	Message   string
+	Lines     []LogLine
+	Truncated bool
+}
+
+// LogLine es un renglón de log, ya enmascarado en el agent.
+type LogLine struct {
+	At     *time.Time
+	Stream string
+	Text   string
 }

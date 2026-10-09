@@ -13,6 +13,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
+	"github.com/JuanBaez77/status-sv/proto"
 	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/deploys"
@@ -234,6 +235,7 @@ func (b mcpBackend) Project(ctx context.Context, id uuid.UUID) (mcp.ProjectDetai
 	for i, c := range d.Containers {
 		cpu, memory := mcpUsage(c.Usage)
 		out.Containers[i] = mcp.ContainerInfo{
+			ID:   c.ID,
 			Name: c.Name, Service: c.ComposeService, Image: c.Image, State: c.State, Health: c.Health,
 			StartedAt: c.StartedAt, CPUPercent: cpu, MemoryBytes: memory,
 		}
@@ -321,4 +323,29 @@ func nonZero(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+func (b mcpBackend) Logs(ctx context.Context, serverID uuid.UUID, kind, target string, lines int) (mcp.LogsInfo, error) {
+	params := proto.GetLogsParams{Kind: proto.LogKind(kind), Target: target, Lines: lines}
+	if err := params.Validate(); err != nil {
+		return mcp.LogsInfo{}, fmt.Errorf("pedido de logs inválido: %w", err)
+	}
+	ack, err := b.s.sendCommand(ctx, serverID, proto.Command{Operation: proto.OpGetLogs, GetLogs: &params})
+	switch {
+	case errors.Is(err, errAgentOffline):
+		return mcp.LogsInfo{}, mcp.ErrAgentOffline
+	case errors.Is(err, errNoAnswer):
+		return mcp.LogsInfo{}, mcp.ErrNoAnswer
+	case err != nil:
+		return mcp.LogsInfo{}, err
+	}
+	out := mcp.LogsInfo{Status: string(ack.Status), Code: string(ack.Code), Message: ack.Message}
+	if ack.Logs != nil {
+		out.Truncated = ack.Logs.Truncated
+		out.Lines = make([]mcp.LogLine, len(ack.Logs.Lines))
+		for i, line := range ack.Logs.Lines {
+			out.Lines[i] = mcp.LogLine{At: nonZero(line.TS), Stream: line.Stream, Text: line.Text}
+		}
+	}
+	return out, nil
 }
