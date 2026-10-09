@@ -29,6 +29,7 @@ type fakeBackend struct {
 	asked    []metricsAsk
 	details  map[uuid.UUID]ProjectDetail
 	deploys  map[string][]DeployInfo
+	detailed map[uuid.UUID]DeployDetail
 }
 
 func (b *fakeBackend) Servers(context.Context) ([]ServerInfo, error) { return b.servers, b.err }
@@ -46,6 +47,14 @@ func (b *fakeBackend) Project(_ context.Context, id uuid.UUID) (ProjectDetail, e
 func (b *fakeBackend) ProjectDeploys(_ context.Context, _ uuid.UUID, project string, limit int) ([]DeployInfo, error) {
 	list := b.deploys[project]
 	return list[:min(limit, len(list))], b.err
+}
+
+func (b *fakeBackend) Deploy(_ context.Context, id uuid.UUID) (DeployDetail, error) {
+	d, ok := b.detailed[id]
+	if !ok {
+		return DeployDetail{}, ErrNotFound
+	}
+	return d, b.err
 }
 
 type metricsAsk struct {

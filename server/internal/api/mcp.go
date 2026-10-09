@@ -15,6 +15,7 @@ import (
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
 	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
+	"github.com/JuanBaez77/status-sv/server/internal/deploys"
 	"github.com/JuanBaez77/status-sv/server/internal/mcp"
 	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/tokens"
@@ -284,4 +285,40 @@ func mcpUsage(u *runtimeUsage) (*float64, *int64) {
 	}
 	cpu, memory := float64(u.CPUPercent), u.MemoryBytes
 	return &cpu, &memory
+}
+
+func (b mcpBackend) Deploy(ctx context.Context, id uuid.UUID) (mcp.DeployDetail, error) {
+	d, err := b.s.deploys.Get(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mcp.DeployDetail{}, mcp.ErrNotFound
+	}
+	if err != nil {
+		return mcp.DeployDetail{}, fmt.Errorf("leer el deploy: %w", err)
+	}
+	steps := deploys.Steps(d.Steps)
+	out := mcp.DeployDetail{
+		DeployInfo: mcp.DeployInfo{
+			ID: d.ID, Kind: d.Kind, Status: d.Status, Code: d.Code, Message: d.Message,
+			RequestedCommit: d.RequestedCommit, DeployedCommit: d.DeployedCommit, PreviousCommit: d.PreviousCommit,
+			RequestedBy: d.RequestedByName, RequestedAt: d.RequestedAt, StartedAt: d.StartedAt, FinishedAt: d.FinishedAt,
+		},
+		ProjectID: d.ProjectID, ProjectName: d.ProjectName, ServerID: d.ServerID, ServerName: d.ServerName,
+		Environment: d.Environment,
+		Steps:       make([]mcp.StepInfo, len(steps)),
+	}
+	for i, step := range steps {
+		out.Steps[i] = mcp.StepInfo{
+			Name: string(step.Name), Service: step.Service, Status: string(step.Status),
+			StartedAt: nonZero(step.StartedAt), FinishedAt: nonZero(step.FinishedAt),
+			Detail: step.Detail, Output: step.Output,
+		}
+	}
+	return out, nil
+}
+
+func nonZero(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }

@@ -23,6 +23,8 @@ type Backend interface {
 	// ProjectDeploys devuelve los últimos deploys de un proyecto, del más
 	// nuevo al más viejo.
 	ProjectDeploys(ctx context.Context, serverID uuid.UUID, project string, limit int) ([]DeployInfo, error)
+	// Deploy devuelve un deploy con sus pasos, o ErrNotFound.
+	Deploy(ctx context.Context, id uuid.UUID) (DeployDetail, error)
 	// ServerMetrics devuelve las series de un servidor desde span atrás hasta
 	// ahora, con la resolución que corresponde al largo del rango.
 	ServerMetrics(ctx context.Context, serverID uuid.UUID, span time.Duration) (MetricsInfo, error)
@@ -146,4 +148,28 @@ type DeployInfo struct {
 	RequestedAt     time.Time
 	StartedAt       *time.Time
 	FinishedAt      *time.Time
+}
+
+// DeployDetail es un deploy con sus pasos.
+type DeployDetail struct {
+	DeployInfo
+	// ProjectID es nil si el proyecto dejó de estar declarado.
+	ProjectID   *uuid.UUID
+	ProjectName string
+	ServerID    uuid.UUID
+	ServerName  string
+	Environment string
+	Steps       []StepInfo
+}
+
+// StepInfo es un paso de un deploy. Output son los últimos renglones de su
+// salida, enmascarados en el agent: texto del servidor, no confiable.
+type StepInfo struct {
+	Name       string
+	Service    string
+	Status     string
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	Detail     string
+	Output     []string
 }

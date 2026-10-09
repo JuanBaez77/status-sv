@@ -112,6 +112,7 @@ func New(opts Options) *Server {
 	s.addServerTools()
 	s.addMetricsTools()
 	s.addProjectTools()
+	s.addDeployTools()
 	return s
 }
 
