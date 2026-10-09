@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'wouter'
 
@@ -8,14 +8,17 @@ import { RangePicker } from '@/components/range-picker'
 import { RuntimeSections } from '@/components/runtime-sections'
 import { StatusBadge } from '@/components/status-badge'
 import { UsageBar } from '@/components/usage-bar'
+import { buttonVariants } from '@/components/ui/button-variants'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useLiveSamples } from '@/hooks/use-live-samples'
 import { useServerMetrics } from '@/hooks/use-server-metrics'
 import { useProjects } from '@/hooks/use-projects'
+import { useServerProposals } from '@/hooks/use-proposals'
 import { useServerRuntime } from '@/hooks/use-server-runtime'
 import { useServers } from '@/hooks/use-servers'
 import type { Resolution, ServerMetrics } from '@/lib/api'
 import { bytes, load, percent, perSecond, ratio, since } from '@/lib/format'
+import { isOpen, statusLabel as proposalStatusLabel } from '@/lib/proposals'
 import { defaultRange, isRangeKey } from '@/lib/ranges'
 import {
   cpuChart,
@@ -339,20 +342,43 @@ function BackLink() {
  */
 function ServerProjects({ serverID }: { serverID: string }) {
   const { data } = useProjects()
+  const proposals = useServerProposals(serverID)
   const mine = data?.projects.filter((p) => p.server_id === serverID) ?? []
-  if (mine.length === 0) return null
+  const open = proposals.data?.filter((p) => isOpen(p.status)) ?? []
   return (
     <section aria-labelledby="server-projects" className="flex flex-col gap-2">
-      <h2 id="server-projects" className="text-sm font-medium">
-        Proyectos
-      </h2>
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {mine.map((p) => (
-          <li key={p.id}>
-            <ProjectCard project={p} />
-          </li>
-        ))}
-      </ul>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="server-projects" className="text-sm font-medium">
+          Proyectos
+        </h2>
+        <Link href={`/servers/${serverID}/new-project`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+          <Plus className="size-3.5" aria-hidden />
+          Nuevo proyecto
+        </Link>
+      </div>
+      {open.length > 0 && (
+        <ul aria-label="Propuestas abiertas" className="flex flex-col gap-1">
+          {open.map((p) => (
+            <li key={p.id} className="text-xs">
+              <Link href={`/proposals/${p.id}`} className="font-medium underline-offset-2 hover:underline">
+                {p.name}
+              </Link>{' '}
+              <span className="text-muted-foreground">
+                · propuesto {since(p.created_at)} · {proposalStatusLabel(p.status).toLowerCase()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {mine.length > 0 && (
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {mine.map((p) => (
+            <li key={p.id}>
+              <ProjectCard project={p} />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

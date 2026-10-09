@@ -1,8 +1,8 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ServerLogs, ServerMetrics, ServerRuntime, ServerSummary } from '@/lib/api'
+import type { ProposalSummary, ServerLogs, ServerMetrics, ServerRuntime, ServerSummary } from '@/lib/api'
 import { panelSocket } from '@/lib/panel-socket'
 import { ServerPage } from '@/pages/server'
 import { json, renderWithQuery, stubFetch } from '@/test/render'
@@ -168,7 +168,13 @@ function runtime(overrides: Partial<ServerRuntime> = {}): ServerRuntime {
 
 /** answer responde la lista, las métricas y lo que corre, y guarda las consultas de rango. */
 function answer(
-  options: { servers?: ServerSummary[]; metrics?: ServerMetrics; runtime?: ServerRuntime; logs?: ServerLogs } = {},
+  options: {
+    servers?: ServerSummary[]
+    metrics?: ServerMetrics
+    runtime?: ServerRuntime
+    logs?: ServerLogs
+    proposals?: ProposalSummary[]
+  } = {},
 ) {
   const asked: URL[] = []
   const calls = stubFetch((path) => {
@@ -180,6 +186,9 @@ function answer(
     }
     if (path.endsWith('/runtime')) {
       return json(options.runtime ?? runtime())
+    }
+    if (path.endsWith('/proposals')) {
+      return json({ proposals: options.proposals ?? [] })
     }
     if (path.endsWith('/logs')) {
       return json(
@@ -211,6 +220,33 @@ afterEach(() => {
 })
 
 describe('ServerPage', () => {
+  it('ofrece proponer un proyecto nuevo y muestra las propuestas abiertas', async () => {
+    const base = {
+      server_id: id,
+      runtime: 'systemd',
+      environment: 'staging',
+      created_by: 'juan',
+      actor_type: 'user',
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+      command: 'sudo statussv-agent project accept svdemo',
+    } as const
+    answer({
+      proposals: [
+        { ...base, id: 'pr-1', name: 'svdemo', status: 'delivered' },
+        { ...base, id: 'pr-2', name: 'vieja', status: 'withdrawn' },
+      ],
+    })
+
+    renderWithQuery(<ServerPage id={id} />)
+
+    expect(await screen.findByRole('link', { name: 'Nuevo proyecto' })).toHaveAttribute('href', `/servers/${id}/new-project`)
+    const open = await screen.findByRole('list', { name: 'Propuestas abiertas' })
+    expect(within(open).getByRole('link', { name: 'svdemo' })).toHaveAttribute('href', '/proposals/pr-1')
+    expect(within(open).getByText(/esperando que la acepten en el servidor/)).toBeInTheDocument()
+    expect(within(open).queryByText('vieja')).not.toBeInTheDocument()
+  })
+
   it('muestra el estado de ahora y un gráfico por familia de métrica', async () => {
     answer()
 

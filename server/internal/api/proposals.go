@@ -378,7 +378,7 @@ func (s *Server) reconcileProposals(ctx context.Context, conn *websocket.Conn, s
 		s.record(ctx, audit.Entry{
 			Actor: server.Name, ActorType: audit.ActorAgent, Action: audit.ActionProjectAccept,
 			TargetType: "server", TargetID: server.ID.String(), Result: audit.ResultOK,
-			Detail: map[string]any{"proyecto": p.Name, "propuesta": p.ID.String(), "igual_a_la_propuesta": a.Same},
+			Detail: map[string]any{"servidor": server.Name, "proyecto": p.Name, "propuesta": p.ID.String(), "igual_a_la_propuesta": a.Same},
 		})
 		s.log.InfoContext(ctx, "propuesta aceptada en el servidor", "servidor", server.Name, "proyecto", p.Name, "igual", a.Same)
 	}

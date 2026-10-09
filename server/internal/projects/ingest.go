@@ -154,9 +154,23 @@ func upsertParams(serverID uuid.UUID, seenAt time.Time, p proto.Project) (store.
 		ComposeProject: p.ComposeProject,
 		Units:          p.Units,
 		SeenAt:         seenAt,
+		EnvMissing:     []string{},
+		DeployKey:      p.DeployKey,
+		SpecHash:       p.SpecHash,
 	}
 	if params.Units == nil {
 		params.Units = []string{}
+	}
+	if s := p.Site; s != nil {
+		params.SiteDomain, params.SitePort = s.Domain, toInt32(s.Port)
+	}
+	// De las variables llegan cuántas son y los nombres de las que faltan,
+	// nunca valores (ADR-022).
+	if e := p.Env; e != nil {
+		params.EnvRequired, params.EnvUnknown = toInt32(e.Required), e.Unknown
+		if e.Missing != nil {
+			params.EnvMissing = e.Missing
+		}
 	}
 	if h := p.Healthcheck; h != nil {
 		params.HealthcheckUrl = h.URL

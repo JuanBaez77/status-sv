@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { Link } from 'wouter'
 
+import { CommandBlock } from '@/components/copy-button'
 import { DeploysCard } from '@/components/deploy-panel'
 import { ProjectStatusBadge } from '@/components/project-status'
 import { ContainerRow, ServiceRow } from '@/components/runtime-sections'
@@ -10,6 +11,7 @@ import type { ProjectDetail } from '@/lib/api'
 import { containerStatus, serviceStatus, byAttention, sourceNotice } from '@/lib/runtime'
 import { since } from '@/lib/format'
 import { environmentLabel, healthText, missingUnitsText, unitsText } from '@/lib/projects'
+import { envCommand, envText } from '@/lib/proposals'
 
 /** ProjectPage muestra un proyecto: lo declarado y lo que corre de él. */
 export function ProjectPage({ id }: { id: string }) {
@@ -97,10 +99,82 @@ export function ProjectPage({ id }: { id: string }) {
         </Card>
       </div>
 
+      <Alta project={p} />
+
       <DeploysCard project={p} />
 
       <Units project={p} />
     </section>
+  )
+}
+
+/**
+ * Alta muestra lo que el agent informa de un proyecto dado de alta (ADR-022 y
+ * ADR-023): las variables que faltan (nombres, nunca valores), la llave
+ * pública de la deploy key y el sitio. Un proyecto declarado a mano puede no
+ * tener nada de esto, y entonces no se muestra.
+ */
+function Alta({ project: p }: { project: ProjectDetail }) {
+  if (!p.env && !p.deploy_key && !p.site) return null
+  const missing = (p.env?.missing.length ?? 0) > 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>En el servidor</CardTitle>
+        <CardDescription>Lo que hace falta para que el proyecto se despliegue y responda.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4 text-sm">
+        {p.env && (
+          <section aria-labelledby="alta-env" className="flex flex-col gap-1.5">
+            <h3 id="alta-env" className="text-xs font-medium text-muted-foreground">
+              Variables
+            </h3>
+            <p role={missing ? 'alert' : undefined} className={missing ? 'text-destructive' : undefined}>
+              {envText(p.env)}
+            </p>
+            {(missing || p.env.unknown) && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Se cargan en el servidor, sin que pasen por el panel:
+                </p>
+                <CommandBlock command={envCommand(p.name)} label="Copiar el comando para cargar las variables" />
+              </>
+            )}
+          </section>
+        )}
+        {p.deploy_key && (
+          <section aria-labelledby="alta-key" className="flex flex-col gap-1.5">
+            <h3 id="alta-key" className="text-xs font-medium text-muted-foreground">
+              Deploy key
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Si el repositorio es privado, cargala en él como deploy key de solo lectura. Es la
+              llave pública: la privada no sale del servidor.
+            </p>
+            <CommandBlock command={p.deploy_key} label="Copiar la llave pública" />
+          </section>
+        )}
+        {p.site && (
+          <section aria-labelledby="alta-site" className="flex flex-col gap-1.5">
+            <h3 id="alta-site" className="text-xs font-medium text-muted-foreground">
+              Sitio
+            </h3>
+            <p>
+              <a
+                href={`https://${p.site.domain}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="font-mono text-xs text-primary underline"
+              >
+                {p.site.domain}
+              </a>{' '}
+              <span className="text-xs text-muted-foreground">→ 127.0.0.1:{p.site.port}</span>
+            </p>
+          </section>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

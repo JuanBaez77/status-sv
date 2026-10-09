@@ -24,14 +24,17 @@ WHERE server_id = sqlc.arg('server_id')
 INSERT INTO projects (
     id, server_id, name, environment, repo, branch, runtime, workdir, compose_file, compose_project,
     units, healthcheck_url, healthcheck_expect_status, healthcheck_timeout_seconds,
-    health_state, health_checked_at, health_status_code, health_latency_ms, health_detail, seen_at
+    health_state, health_checked_at, health_status_code, health_latency_ms, health_detail, seen_at,
+    site_domain, site_port, env_required, env_missing, env_unknown, deploy_key, spec_hash
 ) VALUES (
     sqlc.arg('id'), sqlc.arg('server_id'), sqlc.arg('name'), sqlc.arg('environment'), sqlc.arg('repo'),
     sqlc.arg('branch'), sqlc.arg('runtime'), sqlc.arg('workdir'), sqlc.arg('compose_file'),
     sqlc.arg('compose_project'), sqlc.arg('units')::text[], sqlc.arg('healthcheck_url'),
     sqlc.arg('healthcheck_expect_status'), sqlc.arg('healthcheck_timeout_seconds'),
     sqlc.arg('health_state'), sqlc.narg('health_checked_at'), sqlc.arg('health_status_code'),
-    sqlc.arg('health_latency_ms'), sqlc.arg('health_detail'), sqlc.arg('seen_at')
+    sqlc.arg('health_latency_ms'), sqlc.arg('health_detail'), sqlc.arg('seen_at'),
+    sqlc.arg('site_domain'), sqlc.arg('site_port'), sqlc.arg('env_required'), COALESCE(sqlc.arg('env_missing')::text[], '{}'),
+    sqlc.arg('env_unknown'), sqlc.arg('deploy_key'), sqlc.arg('spec_hash')
 )
 ON CONFLICT (server_id, name) DO UPDATE
 SET environment                 = EXCLUDED.environment,
@@ -50,7 +53,14 @@ SET environment                 = EXCLUDED.environment,
     health_status_code          = EXCLUDED.health_status_code,
     health_latency_ms           = EXCLUDED.health_latency_ms,
     health_detail               = EXCLUDED.health_detail,
-    seen_at                     = EXCLUDED.seen_at;
+    seen_at                     = EXCLUDED.seen_at,
+    site_domain                 = EXCLUDED.site_domain,
+    site_port                   = EXCLUDED.site_port,
+    env_required                = EXCLUDED.env_required,
+    env_missing                 = EXCLUDED.env_missing,
+    env_unknown                 = EXCLUDED.env_unknown,
+    deploy_key                  = EXCLUDED.deploy_key,
+    spec_hash                   = EXCLUDED.spec_hash;
 
 -- DeleteInvalidProjectFiles borra los archivos inválidos de un servidor, antes
 -- de guardar los de la lectura nueva.

@@ -226,3 +226,68 @@ func TestPanelIsToldWhenProjectsChange(t *testing.T) {
 		t.Errorf("mensaje = %s (%v)", raw, err)
 	}
 }
+
+// Un proyecto dado de alta trae su sitio, las variables que faltan y la llave
+// pública de su deploy key; uno declarado a mano, nada de eso.
+func TestProjectDetailShowsAlta(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.81"
+	cookie := f.login(t, ip)
+	agent, _ := connectAgent(t, f, "vps-alta", "203.0.113.81")
+
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefgh"
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	state := declaredProjects(at)
+	state.Projects[1].Site = &proto.SiteSpec{Domain: "facturas.example.com", Port: 18097}
+	state.Projects[1].Env = &proto.EnvStatus{Required: 3, Missing: []string{"SECRET_KEY", "DATABASE_URL"}}
+	state.Projects[1].DeployKey = key
+	state.Projects[1].SpecHash = strings.Repeat("ab", 32)
+	state.Projects[2].Env = &proto.EnvStatus{Required: 1, Unknown: true}
+	sendProjects(t, agent, state)
+
+	type altaBody struct {
+		Site *struct {
+			Domain string `json:"domain"`
+			Port   int    `json:"port"`
+		} `json:"site"`
+		Env *struct {
+			Required int      `json:"required"`
+			Missing  []string `json:"missing"`
+			Unknown  bool     `json:"unknown"`
+		} `json:"env"`
+		DeployKey string `json:"deploy_key"`
+	}
+	get := func(name string) altaBody {
+		t.Helper()
+		resp := f.do(t, http.MethodGet, "/v1/projects/"+f.projectID(t, cookie, ip, name), "", ip, cookie, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d %s", name, resp.StatusCode, resp.body)
+		}
+		return decodeJSON[altaBody](t, resp)
+	}
+
+	facturas := get("facturas")
+	if facturas.Site == nil || facturas.Site.Domain != "facturas.example.com" || facturas.Site.Port != 18097 {
+		t.Errorf("sitio = %+v", facturas.Site)
+	}
+	if facturas.Env == nil || facturas.Env.Required != 3 || strings.Join(facturas.Env.Missing, ",") != "SECRET_KEY,DATABASE_URL" || facturas.Env.Unknown {
+		t.Errorf("variables = %+v", facturas.Env)
+	}
+	if facturas.DeployKey != key {
+		t.Errorf("llave = %q", facturas.DeployKey)
+	}
+	if web := get("web"); web.Env == nil || !web.Env.Unknown || len(web.Env.Missing) != 0 || web.Site != nil || web.DeployKey != "" {
+		t.Errorf("web = %+v", web)
+	}
+	if api := get("api"); api.Env != nil || api.Site != nil || api.DeployKey != "" {
+		t.Errorf("api = %+v", api)
+	}
+
+	// Cargadas las variables, ya no falta ninguna.
+	state.TakenAt = at.Add(time.Second)
+	state.Projects[1].Env = &proto.EnvStatus{Required: 3}
+	sendProjects(t, agent, state)
+	if facturas := get("facturas"); facturas.Env == nil || len(facturas.Env.Missing) != 0 {
+		t.Errorf("después de cargarlas = %+v", facturas.Env)
+	}
+}
