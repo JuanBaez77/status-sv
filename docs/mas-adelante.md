@@ -57,6 +57,19 @@ roadmap de [DISENO.md](DISENO.md).
   restaurados solo se probaron a mano, el día de la mudanza. Un job que lo haga con la base de la
   prueba de punta a punta lo cubriría.
 
+## Lo que deja afuera el MCP de lectura del Sprint 7
+
+- **Alerta ante el uso de un token desde una IP nueva.** El diseño la pide; llega con las alertas
+  de la Fase 4. Hoy el panel muestra la última IP de cada token (ver
+  [adr/ADR-025-tokens-del-mcp-y-scopes.md](adr/ADR-025-tokens-del-mcp-y-scopes.md)).
+- **IPs permitidas por token.**
+- **Logs por MCP de cualquier unidad del servidor**, no solo de las de un proyecto declarado. El
+  panel los puede pedir; el MCP no (ver [adr/ADR-024-mcp-remoto.md](adr/ADR-024-mcp-remoto.md)).
+- **Sesiones y avisos del MCP** (Streamable HTTP con estado y SSE), por ejemplo para empujar el
+  avance de un deploy. Hoy cada pedido se atiende solo y el avance se consulta.
+- **Recursos y prompts del MCP.** Solo hay herramientas.
+- **Métricas por contenedor o por servicio** por MCP: no hay historia guardada (ver "Ideas sin fecha").
+
 ## Lo que deja afuera el alta del Sprint 6
 
 - **Plantillas editables desde el panel**, con cada versión aceptada en el servidor por su hash.
