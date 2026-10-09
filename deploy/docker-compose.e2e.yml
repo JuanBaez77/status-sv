@@ -8,7 +8,8 @@ name: status-sv-e2e
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # IMAGENES: de dónde salen las imágenes oficiales (el CI usa mirror.gcr.io).
+    image: ${IMAGENES:-docker.io/library}/postgres:17-alpine
     environment:
       POSTGRES_USER: statussv
       POSTGRES_PASSWORD: statussv
@@ -28,6 +29,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: server
+      args:
+        IMAGENES: ${IMAGENES:-docker.io/library}
     environment:
       DATABASE_URL: postgres://statussv:statussv@postgres:5432/statussv?sslmode=disable
       STATUSSV_LISTEN_ADDR: 0.0.0.0:8080
@@ -57,6 +60,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: agent
+      args:
+        IMAGENES: ${IMAGENES:-docker.io/library}
     environment:
       STATUSSV_SERVER_URL: http://server:8080
       STATUSSV_ENROLL_TOKEN: ${STATUSSV_ENROLL_TOKEN:?hace falta un token de enrolamiento}

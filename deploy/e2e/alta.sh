@@ -244,8 +244,8 @@ chmod 0755 "${FUENTE}/build.sh"
 FUENTE="${TRABAJO}/fuente-docker"
 "${G[@]}" init -q --bare "${ORIGEN_DOCKER}"
 "${G[@]}" init -q "${FUENTE}"
-cat >"${FUENTE}/Dockerfile" <<'EOF'
-FROM busybox:1.37
+printf 'FROM %s/busybox:1.37\n' "${IMAGENES:-docker.io/library}" >"${FUENTE}/Dockerfile"
+cat >>"${FUENTE}/Dockerfile" <<'EOF'
 CMD ["sh", "-c", "mkdir -p /www && echo ok > /www/health && printf %s \"$SECRET_KEY\" | sha256sum | cut -d' ' -f1 > /www/secreto && exec httpd -f -p 8080 -h /www"]
 EOF
 cat >"${FUENTE}/compose.yml" <<EOF

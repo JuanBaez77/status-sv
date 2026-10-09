@@ -18,6 +18,10 @@ concurrency:
   group: nocturno
   cancel-in-progress: false
 
+# Ver ci.yml: las imágenes oficiales por mirror.gcr.io.
+env:
+  IMAGENES: mirror.gcr.io/library
+
 jobs:
   carga:
     name: "Carga larga: 10 agents durante 10 minutos"
@@ -27,10 +31,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: main
-
-      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
-      - name: Docker Hub por mirror.gcr.io
-        run: ./deploy/ci/espejo-docker-hub.sh
 
       - uses: actions/setup-go@v7
         with:

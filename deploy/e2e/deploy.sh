@@ -137,8 +137,8 @@ paso "armando el proyecto de muestra"
 "${G[@]}" init -q --bare "${ORIGEN}"
 "${G[@]}" init -q "${FUENTE}"
 "${G[@]}" -C "${FUENTE}" remote add origin "${ORIGEN}"
-cat >"${FUENTE}/Dockerfile" <<'EOF'
-FROM busybox:1.37
+printf 'FROM %s/busybox:1.37\n' "${IMAGENES:-docker.io/library}" >"${FUENTE}/Dockerfile"
+cat >>"${FUENTE}/Dockerfile" <<'EOF'
 COPY www/ /www/
 # Una versión "lenta" tarda en compilar, para poder cortar al agent en el medio.
 RUN if [ -f /www/lento ]; then sleep 40; fi
@@ -192,8 +192,8 @@ EOF
 "${G[@]}" init -q --bare "${ORIGEN_NUEVO}"
 "${G[@]}" init -q "${FUENTE_NUEVO}"
 "${G[@]}" -C "${FUENTE_NUEVO}" remote add origin "${ORIGEN_NUEVO}"
-cat >"${FUENTE_NUEVO}/Dockerfile" <<'EOF'
-FROM busybox:1.37
+printf 'FROM %s/busybox:1.37\n' "${IMAGENES:-docker.io/library}" >"${FUENTE_NUEVO}/Dockerfile"
+cat >>"${FUENTE_NUEVO}/Dockerfile" <<'EOF'
 COPY www/ /www/
 CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]
 EOF
