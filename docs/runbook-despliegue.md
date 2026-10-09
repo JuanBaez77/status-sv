@@ -420,6 +420,10 @@ patrones separados por comas (por ejemplo `snapd*,unattended-upgrades.service`).
 
 ### Declarar un proyecto
 
+Para un proyecto **nuevo**, lo que va es "Dar de alta un proyecto", más abajo: se propone desde el
+panel y se acepta acá con un comando, que escribe este archivo. A mano queda para los proyectos que
+ya corren en el servidor.
+
 Cada proyecto es un archivo en `/etc/status-sv/projects.d/<nombre>.yaml` del propio servidor
 ([ADR-012](adr/ADR-012-proyectos-declarados-en-el-servidor.md)). El instalador crea el directorio
 (`root:statussv 0750`); los archivos los escribe una persona con SSH y el agent solo los lee. El
@@ -481,8 +485,7 @@ journalctl -u statussv-agent --since '-1 hour' | grep -i healthcheck
 El agent puede desplegar los proyectos Docker declarados: trae la rama, compila, levanta, verifica
 y, si no queda sano, vuelve solo a lo anterior ([ADR-015](adr/ADR-015-motor-de-deploy-docker.md)).
 **Viene apagado en cada servidor.** Lo prende una persona acá, y el control plane no tiene forma de
-prenderlo. Los proyectos de systemd y el primer deploy de un proyecto nuevo tienen su sección más
-abajo.
+prenderlo. Los proyectos de systemd y el alta de un proyecto nuevo tienen su sección más abajo.
 
 > **Nunca en el servidor donde vive el control plane**
 > ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)): un compose puede pedir
@@ -691,49 +694,100 @@ Lo que conviene saber antes del primer deploy:
   journalctl -u 'statussv-unit-helper@*' --since '-1 hour' --no-pager   # lo que se le pidió al ayudante
   ```
 
-### El primer deploy de un proyecto nuevo
+### Dar de alta un proyecto
 
-Un proyecto que todavía no corre en el servidor se levanta desde el panel con **Primer deploy**
-([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)): el agent clona la rama
-en el `workdir`, lo prepara, lo levanta y verifica. Lo que necesita root lo deja antes una persona,
-por SSH. La lista:
+Un proyecto nuevo se da de alta en dos llaves
+([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md)): se **propone** desde el
+panel y una persona lo **acepta** en el servidor, como root, con un solo comando. Después se
+levanta con el **Primer deploy** ([ADR-021](adr/ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md)).
+El control plane nunca declara nada: hasta que alguien acepta, el servidor no cambia.
 
-| | Qué | Cómo |
+Una vez por servidor hace falta:
+
+- El agent instalado con `--enable-deploy`, de la versión del Sprint 6 o más nueva.
+- Si el proyecto va a tener sitio: nginx con `sites-available` y `sites-enabled`, y certbot.
+- El registro DNS del dominio apuntando al servidor. Con el proxy de Cloudflare, el modo SSL va en
+  **Full**: si no, certbot no llega.
+
+Los pasos:
+
+| | Dónde | Qué |
 | --- | --- | --- |
-| 1 | Declarar el proyecto | `/etc/status-sv/projects.d/<PROYECTO>.yaml`, como en "Declarar un proyecto" |
-| 2 | La deploy key y los host keys | Puntos 2 y 3 de "Prender el deploy" |
-| 3 | El `workdir`, vacío de código | Abajo |
-| 4 | Los secretos | El `.env` en el `workdir` (Docker) o el `env_file` (systemd) |
-| 5 | Solo systemd: el usuario y la unidad | `useradd --system`, y la unidad en `/etc/systemd/system/`, **sin arrancarla** |
-| 6 | Si es un sitio: el bloque del proxy y el certificado | Como cualquier sitio del servidor |
-| 7 | Correr el instalador de nuevo | Suma el `workdir` al drop-in y revisa el proyecto |
+| 1 | Panel | En el servidor, **Nuevo proyecto**. Completar, **Ver lo que se va a escribir** y **Proponer** |
+| 2 | Servidor | `sudo statussv-agent project accept <PROYECTO>` |
+| 3 | GitHub | Si el repo es privado, cargar la llave pública como deploy key de solo lectura |
+| 4 | Servidor | Solo si el paso 2 avisó que falta el ayudante root: correr el instalador de nuevo |
+| 5 | Panel | En el proyecto, **Primer deploy** |
+
+**1. Proponer.** El formulario pide:
+
+- el nombre, el entorno, el repo y la rama;
+- el comando del servicio (systemd) o el archivo de Compose (Docker);
+- los nombres de las variables requeridas;
+- el dominio y el puerto del sitio, el healthcheck y los pasos.
+
+Los comandos son listas de argumentos, sin shell: un argumento con espacios va entre comillas
+dobles. **De las variables van solo los nombres**: los valores se cargan en el servidor y nunca
+pasan por el panel. Lo que el formulario no pide no se elige: el directorio es siempre
+`/srv/<PROYECTO>` y, con systemd, el usuario se llama como el proyecto. La página de la propuesta
+muestra lo que se va a escribir, en qué anda y el comando para el paso 2. Vence a los 7 días, se
+puede retirar, y una propuesta nueva con el mismo nombre la reemplaza.
+
+**2. Aceptar.** Cuando la propuesta dice "Esperando que la acepten en el servidor", el agent ya la
+tiene:
 
 ```bash
-# 3. El workdir. Con Docker, de root y del grupo del agent:
-sudo install -d -o root -g statussv -m 2775 /srv/<PROYECTO>
-# Con systemd, del usuario del proyecto, que escribe ahí lo que preparan sus pasos:
-sudo install -d -o <RUN_AS> -g statussv -m 2775 /srv/<PROYECTO>
+sudo statussv-agent project accept <PROYECTO>
+```
 
-# 4. Con Docker, el .env que lee docker compose (legible por el grupo):
-sudo install -o root -g statussv -m 0640 /dev/stdin /srv/<PROYECTO>/.env <<'ENV'
-CLAVE=valor
-ENV
+Antes de hacer nada, el comando muestra la declaración, los comandos que va a correr, la unidad, el
+sitio y la lista de pasos. **No cambia nada hasta que se escribe el nombre del proyecto.**
+Después pide cada variable sin mostrarla en pantalla (con `--env-file ARCHIVO` las toma de un
+archivo `NOMBRE=valor`). Lo que deja:
 
-# 5. Con systemd, el usuario del proyecto (va antes que el workdir) y, después de
-# escribir la unidad con User=<RUN_AS> y WorkingDirectory=/srv/<PROYECTO>:
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin <RUN_AS>
-sudo systemctl daemon-reload
+| Qué | Dónde |
+| --- | --- |
+| La declaración | `/etc/status-sv/projects.d/<PROYECTO>.yaml` |
+| El usuario (systemd) | `<PROYECTO>`, de sistema y sin shell |
+| El `workdir` | `/srv/<PROYECTO>`, 2775 y del grupo `statussv`. Su dueño es el usuario del proyecto (systemd) o root (Docker) |
+| Las variables | `/etc/status-sv/env/<PROYECTO>.env`, de root y 0600 (systemd), o `/srv/<PROYECTO>/.env`, root:statussv 0640 (Docker) |
+| La deploy key | `/etc/status-sv/keys/<PROYECTO>`. La pública se muestra al final y en el panel |
+| La unidad (systemd) | `/etc/systemd/system/<PROYECTO>.service`, desde la plantilla |
+| El sitio | `/etc/nginx/sites-available/statussv-<PROYECTO>.conf` y su enlace, con el certificado `statussv-<PROYECTO>` |
+| El drop-in del deploy | Suma el `workdir` y reinicia el agent |
 
-# 7. El instalador, y lo que dice deploy-check del proyecto:
+Al terminar corre `deploy-check`, que tiene que decir **"todavía no se desplegó: está listo para
+su primer deploy"**. Si el repo es público, `--no-deploy-key` no genera la llave.
+
+**4. El ayudante root.** Con systemd, el agent necesita el ayudante root
+([ADR-019](adr/ADR-019-deploy-de-proyectos-systemd.md)). El instalador lo deja solo si ya hay
+proyectos de systemd. Si es el primero del servidor, `project accept` avisa, y va el instalador de
+nuevo, que conserva la credencial:
+
+```bash
 cd /tmp && sudo STATUSSV_SERVER_URL=https://<DOMINIO> ./install-agent.sh --enable-deploy ./statussv-agent
 ```
 
-`deploy-check` tiene que terminar con **"todavía no se desplegó: está listo para su primer
-deploy"**: probó que el agent puede escribir en el `workdir` y que el repo contesta con la llave,
-sin traer nada. Después, en el panel, el proyecto muestra el botón **Primer deploy**, que pide el
-nombre del proyecto y **siempre** un código nuevo de la app, también en staging.
+**5. Primer deploy.** En el panel, el proyecto muestra lo que falta:
 
-Lo que conviene saber:
+- las variables que todavía no se cargaron (los nombres, nunca los valores);
+- la llave pública;
+- el sitio.
+
+**Primer deploy** pide el nombre del proyecto y **siempre** un código nuevo de la app, también en
+staging.
+
+Si algo quedó a medias:
+
+- **El sitio no quedó** (el DNS todavía no resolvía, certbot no llegó): el alta sigue igual, nginx
+  queda como estaba y el comando dice por qué. Cuando esté resuelto:
+  `sudo statussv-agent project site <PROYECTO>`.
+- **Una variable falta o hay que cambiarla**: `sudo statussv-agent project env <PROYECTO>` (o
+  `--env-file`). Con variables faltantes, el deploy se frena antes de empezar.
+- **La propuesta llegó rechazada**: el agent dice por qué en su página (por ejemplo, que ya
+  guarda 10). Se corrige y se propone de nuevo.
+
+Lo que conviene saber del primer deploy:
 
 - **El `workdir` no tiene que estar vacío, sino sin clonar.** Lo que dejó una persona (el `.env`)
   queda como está: si un archivo choca con uno del repositorio, el deploy falla sin pisarlo.
@@ -743,16 +797,14 @@ Lo que conviene saber:
   un deploy común. Y al revés, un deploy común sobre un `workdir` sin clonar dice que hace falta el
   primer deploy.
 - Es siempre la punta de la rama declarada.
-- El `workdir` tiene que existir **antes** de correr el instalador: el agent solo puede escribir en
-  los directorios que el instalador encontró. Si se creó después, correr el instalador de nuevo.
-- Con systemd, el primer deploy **arranca** las unidades pero no las habilita. Cuando quedó bien:
-
-  ```bash
-  sudo systemctl enable <UNIDAD>
-  ```
-
+- Con systemd, cuando queda bien **habilita las unidades** para que arranquen con el servidor: ya
+  no hace falta `systemctl enable` a mano.
 - El repositorio que deja el agent es suyo (`statussv`). Para correr `git` a mano ahí como root:
   `git -c safe.directory=/srv/<PROYECTO> -C /srv/<PROYECTO> log -1`.
+
+Un proyecto que ya corre en el servidor, o que necesita lo que una propuesta no elige (otro
+`workdir`, varias unidades, un sitio armado a mano), se sigue declarando a mano, como en "Declarar
+un proyecto", con su deploy prendido como en las dos secciones anteriores.
 
 ## 3. Actualizar
 
