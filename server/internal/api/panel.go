@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -98,11 +100,21 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	noStore(w)
 
-	servers, err := s.queries.ListServers(ctx)
+	list, err := s.readServers(ctx)
 	if err != nil {
-		s.log.ErrorContext(ctx, "no se pudieron listar los servidores", "error", err)
+		s.log.ErrorContext(ctx, "no se pudieron leer los servidores", "error", err)
 		writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
 		return
+	}
+	writeJSON(ctx, w, http.StatusOK, serverListResponse{Servers: list})
+}
+
+// readServers arma la lista de servidores con su estado y su última muestra.
+// La usan el panel y el MCP.
+func (s *Server) readServers(ctx context.Context) ([]serverSummary, error) {
+	servers, err := s.queries.ListServers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listar los servidores: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -110,15 +122,11 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 
 	samples, err := s.queries.ListLatestSamples(ctx, since)
 	if err != nil {
-		s.log.ErrorContext(ctx, "no se pudieron leer las últimas muestras", "error", err)
-		writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
-		return
+		return nil, fmt.Errorf("leer las últimas muestras: %w", err)
 	}
 	disks, err := s.queries.ListLatestWorstDisks(ctx, since)
 	if err != nil {
-		s.log.ErrorContext(ctx, "no se pudieron leer los discos", "error", err)
-		writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
-		return
+		return nil, fmt.Errorf("leer los discos: %w", err)
 	}
 
 	byServer := make(map[uuid.UUID]store.MetricsRaw, len(samples))
@@ -166,7 +174,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 		list = append(list, summary)
 	}
 
-	writeJSON(ctx, w, http.StatusOK, serverListResponse{Servers: list})
+	return list, nil
 }
 
 // serverStatus deriva el estado del último contacto.

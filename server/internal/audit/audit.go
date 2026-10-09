@@ -59,6 +59,9 @@ const (
 	// Las de los tokens del MCP (ADR-025).
 	ActionTokenCreate = "token.create"
 	ActionTokenRevoke = "token.revoke"
+	// ActionMCPAuth es un pedido al MCP con un token que no sirve. Cada
+	// llamada a una herramienta se anota como "mcp.<herramienta>" (ADR-024).
+	ActionMCPAuth = "mcp.auth"
 )
 
 // Resultados de las acciones de acceso. Las de deploy usan el estado del
