@@ -35,8 +35,9 @@ La decisión la tomó Juan el 2026-10-09, aceptando las recomendaciones del plan
 
 **2. Forma y guardado.**
 
-- `ssvmcp_` y 43 caracteres base64url (32 bytes al azar). El prefijo fijo deja que un escáner de
-  secretos lo reconozca si aparece en un repo o en un log.
+- `svmcp_` y 43 caracteres base64url (32 bytes al azar), como los demás secretos del control plane
+  (`svenr_`, `svagt_`, `svses_`). El prefijo fijo deja que un escáner de secretos lo reconozca si
+  aparece en un repo o en un log.
 - En la base, solo su SHA-256, como las sesiones del panel y las credenciales de los agents
   (ADR-006, [ADR-010](ADR-010-usuarios-y-sesiones-del-panel.md)): un token al azar no necesita un
   hash lento, y así se busca por hash. Se guardan además los primeros 12 caracteres, para
