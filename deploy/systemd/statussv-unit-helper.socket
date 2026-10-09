@@ -18,6 +18,9 @@ SocketUser=root
 SocketGroup=statussv
 SocketMode=0660
 DirectoryMode=0755
+# Sin esto, el archivo del socket queda en /run después de pararlo: el
+# instalador saca el ayudante y queda un socket sin nadie detrás.
+RemoveOnStop=yes
 Accept=yes
 # Un deploy es un pedido por vez; el resto es margen.
 MaxConnections=8

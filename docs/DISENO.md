@@ -412,7 +412,7 @@ El MVP útil llega al final de la Fase 3, con unas 17 semanas de trabajo. Las es
 | --- | --- | --- | --- |
 | Sprint 0 | Fundaciones: repo, CI, PostgreSQL, un agent mínimo que se conecta y envía un latido. | 1 semana | Un agent real aparece como online en la base. |
 | Fase 1 | Observabilidad: métricas y estado de Docker y systemd de varios servidores en el panel. | Sprints 1 a 3 | Dos VPS visibles en vivo, con las metas de rendimiento cumplidas. |
-| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 a 6 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos (cumplido el 2026-10-05, en el Sprint 5; el Sprint 6 completa el deploy desde cero). |
+| Fase 2 | Motor de deploy con healthcheck, rollback y auditoría, disparable desde el panel. | Sprints 4 a 6 | Un proyecto Docker y uno gunicorn se despliegan y hacen rollback solos (cumplido el 2026-10-05, en el Sprint 5; el Sprint 6 sumó el alta de proyectos nuevos, probada en el CI). |
 | Fase 3 | MCP remoto con tokens, scopes y aprobaciones, conectado a Claude Code. | Sprints 7 y 8 | El flujo completo (PR, merge, deploy aprobado, verificación) corre desde Claude Code. |
 | Fase 4 | Smoke tests, alertas, chequeos de seguridad, mTLS y OAuth para claude.ai. | Sprints 9 en adelante | claude.ai usa el MCP con OAuth y hay alertas activas. |
 
@@ -874,7 +874,7 @@ Está declarado dos veces, como proyecto systemd y como proyecto Docker, los dos
   `cristales-baez-prod`, medido durante dos minutos; entre 10 y 12 MB en `sv-gcg` después de los
   deploys.
 - **Los dos proyectos de demostración quedan en `sv-gcg`**, para probar el Sprint 6. Escuchan solo
-  en `127.0.0.1` (puertos 18095 y 18096).
+  en `127.0.0.1` (puertos 18095 y 18096). *(Se sacaron al cierre del Sprint 6.)*
 
 Quedan abiertos, fuera del sprint:
 
@@ -910,49 +910,51 @@ certbot desde el comando de aceptación).
 
 Compartido
 
-- [ ] El parser de `project.yaml` pasa a `internal/projectspec`, para que el control plane valide
+- [x] El parser de `project.yaml` pasa a `internal/projectspec`, para que el control plane valide
       una propuesta con las mismas reglas que el agent.
-- [ ] `project.yaml`: `required_env`, `service` y `site`, y los campos que una propuesta no elige.
+- [x] `project.yaml`: `required_env`, `service` y `site`, y los campos que una propuesta no elige.
 
 Contrato
 
-- [ ] `project_proposal` y `project_proposal_ack`. `projects_state` suma las propuestas
+- [x] `project_proposal` y `project_proposal_ack`. `projects_state` suma las propuestas
       pendientes, el hash de cada declaración, los nombres de las variables que faltan y la llave
       pública del proyecto.
 
 Plantillas
 
-- [ ] La unidad de servicio y el sitio de nginx, embebidos, con el reemplazo de root en
+- [x] La unidad de servicio y el sitio de nginx, embebidos, con el reemplazo de root en
       `/etc/status-sv/templates/`; archivos golden, `systemd-analyze verify` y `nginx -t` en el CI.
 
 Agent
 
-- [ ] Recibe las propuestas, las valida y las guarda en su directorio de estado, con un tope.
-- [ ] `project accept`: muestra y confirma; usuario, `workdir`, deploy key y `project.yaml`;
+- [x] Recibe las propuestas, las valida y las guarda en su directorio de estado, con un tope.
+- [x] `project accept`: muestra y confirma; usuario, `workdir`, deploy key y `project.yaml`;
       `20-deploy.conf` desde el binario (`deploy-dropin`, que usa también el instalador); reinicio
       del agent, salvo con un deploy en curso; `deploy-check`.
-- [ ] Secretos: los pide sin mostrarlos, `project env` para cambiarlos, y solo viajan los nombres
+- [x] Secretos: los pide sin mostrarlos, `project env` para cambiarlos, y solo viajan los nombres
       que faltan (el ayudante los informa para systemd).
-- [ ] La unidad desde su plantilla, y el sitio con su certificado (`project site`), sin dejar nunca
+- [x] La unidad desde su plantilla, y el sitio con su certificado (`project site`), sin dejar nunca
       a nginx con una configuración que no pasa `nginx -t`.
-- [ ] El primer deploy se frena si faltan variables y, con systemd, habilita las unidades al
+- [x] El primer deploy se frena si faltan variables y, con systemd, habilita las unidades al
       terminar bien (`enable_units`).
 
 Servidor y panel
 
-- [ ] Migración 00011 con `project_proposals`; crear, listar, retirar y la vista previa; la entrega
+- [x] Migración 00011 con `project_proposals`; crear, listar, retirar y la vista previa; la entrega
       al agent y su reenvío; `project.propose`, `project.withdraw` y `project.accept` en `audit_log`.
-- [ ] **Nuevo proyecto** en el panel: el formulario con validación, la vista previa, el comando
+- [x] **Nuevo proyecto** en el panel: el formulario con validación, la vista previa, el comando
       para el servidor y el estado de la propuesta; en el proyecto, las variables que faltan y la
       llave pública.
 
 Calidad y despliegue
 
-- [ ] Prueba de punta a punta del alta en el CI, para systemd y Docker: proponer, aceptar sin
+- [x] Prueba de punta a punta del alta en el CI, para systemd y Docker: proponer, aceptar sin
       preguntas, primer deploy y respuesta a través de nginx. Los valores de los secretos no
       aparecen ni en la base ni en los logs del control plane.
-- [ ] Runbook: "Dar de alta un proyecto" reemplaza la lista de siete pasos.
-- [ ] Desplegar el sprint y dar de alta `svdemo` en `sv-gcg`, con su dominio y su certificado.
+- [x] Runbook: "Dar de alta un proyecto" reemplaza la lista de siete pasos.
+- [x] Desplegar el sprint.
+- [ ] Dar de alta `svdemo` en un servidor real, con su dominio y su certificado: queda pendiente
+      (ver el cierre).
 
 Terminado cuando un proyecto nuevo se propone desde el panel, se acepta en el servidor con un
 solo comando (que pide sus secretos y crea la deploy key, la unidad y el sitio con su certificado),
@@ -963,6 +965,56 @@ y el CI está verde, con el e2e del alta.
 
 Si el sprint se estira, la línea de corte es el sitio y el certificado: los sigue haciendo una
 persona a mano, como hoy, y la unidad generada queda.
+
+**Cerrado el 2026-10-09** (commit `9bbb6b4`). Se entregó en catorce PR (#95 a #106, #108 y #109),
+sin usar la línea de corte: el sitio y el certificado entraron. #107 se cerró solo al borrarse su
+rama base, y lo reemplazó #108. El control plane de `srv936263` pasó a `9bbb6b4` con las
+migraciones 00011 y 00012, con un respaldo antes; con él viajó #93, del Sprint 5. Los dos agents
+pasaron a `9bbb6b4` y reconectaron sin errores. En el panel, `sv-gcg` muestra sus tres proyectos
+de GCG funcionando y ninguna de las demos. El deploy sigue prendido solo en `sv-gcg`, para
+`gcg-alertas-nbcargo`.
+
+**El alta se probó en el CI, no en un servidor real.** La prueba de punta a punta (#108) corre con
+systemd, Docker y nginx de verdad, y un certbot de mentira que contesta el desafío a través de
+nginx y deja un certificado autofirmado. Propone un proyecto de systemd y uno de Docker, los acepta
+con `project accept`, hace el primer deploy de cada uno, y los dos contestan por HTTPS a través de
+nginx con su variable. Los valores de las variables no aparecen ni en la base, ni en los registros
+del control plane, ni en los del agent, y la auditoría muestra las propuestas, las aceptaciones y
+los primeros deploys. El formulario del panel se probó a mano en el navegador, contra un control
+plane local. Juan decidió el 2026-10-09 cerrar el sprint así: `sv-gcg` deja de usarse para pruebas,
+y el alta de `svdemo` espera un servidor de pruebas.
+
+- **La prueba de punta a punta encontró tres fallas reales**, arregladas en el mismo PR:
+  - la deploy key quedaba con permisos que ssh rechaza (ahora es del agent, con 0400);
+  - `systemctl reload nginx` vuelve antes de que nginx tome el sitio nuevo, y certbot pedía el
+    desafío enseguida, lo que en un servidor real gasta intentos de Let's Encrypt (ahora el comando
+    espera a que nginx sirva el desafío);
+  - `deploy-check` pedía `known_hosts` para un repo que no se trae por SSH.
+- **Una propuesta con credenciales en el repo** (`https://usuario:token@…`) quedaba guardada en la
+  base. Ahora se rechaza, con la misma regla en el control plane y en el agent (#105).
+- **El agent**, con la versión del sprint: 17 MB de memoria propia (RSS) en `sv-gcg` después de
+  una hora andando, y 10 MB en su cgroup. Los 61 MiB que marcó el cgroup en el CI después de dos
+  altas son caché de los archivos de los clones y los builds. En reposo, 0,19% de un núcleo en
+  `sv-gcg`, medido durante dos minutos con `CPUUsageNSec`.
+- **Las dos demos del Sprint 5 ya no están en `sv-gcg`.** Se sacaron a mano (las unidades, el
+  Compose y sus imágenes, los `workdir`, las declaraciones y el usuario `statusdemo`), y el
+  instalador, corrido de nuevo, reescribió el drop-in y sacó el ayudante root, que se había quedado
+  sin proyectos de systemd. El archivo del socket quedó en `/run`, porque a la unidad le faltaba
+  `RemoveOnStop=yes`: este cierre lo agrega, con su prueba en el e2e de systemd. Los pasos quedaron
+  en el runbook ("Sacar un proyecto").
+
+Quedan abiertos, fuera del sprint:
+
+- **El alta en un servidor real**, con un certificado de Let's Encrypt de verdad y el DNS en
+  Cloudflare: lo único que el CI no cubre. Espera un servidor de pruebas.
+- **Docker Hub en `sv-gcg`** y **`gcg-alertas` sin pasar `deploy-check`**, como al cierre del
+  Sprint 5.
+- **El primer alta de systemd de un servidor pide correr el instalador de nuevo**, para que deje
+  el ayudante root (el comando lo avisa y el runbook lo explica). Queda así a propósito: el ayudante
+  existe solo donde hace falta.
+
+Las lecciones del despliegue están en el runbook, sección 8. La que más tiempo ahorra: pegar los
+bloques de un servidor adentro de un `if` que mira el hostname.
 
 **Sprints siguientes (resumen)**
 
