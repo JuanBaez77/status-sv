@@ -74,7 +74,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por el espejo de Google: el servicio se baja antes de cualquier paso,
+        # y Docker Hub sin cuenta se queda sin cupo en los runners (deploy/ci).
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -140,6 +142,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
+      - name: Docker Hub por mirror.gcr.io
+        run: ./deploy/ci/espejo-docker-hub.sh
+
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -157,6 +163,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
+      - name: Docker Hub por mirror.gcr.io
+        run: ./deploy/ci/espejo-docker-hub.sh
+
       # Levanta los tres contenedores, enrola un agent de verdad y verifica que
       # el latido llegue a la base y sobreviva a un reinicio del control plane.
       - name: Prueba de punta a punta
@@ -168,7 +178,9 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por el espejo de Google: el servicio se baja antes de cualquier paso,
+        # y Docker Hub sin cuenta se queda sin cupo en los runners (deploy/ci).
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -182,6 +194,10 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v7
+
+      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
+      - name: Docker Hub por mirror.gcr.io
+        run: ./deploy/ci/espejo-docker-hub.sh
 
       - uses: actions/setup-go@v7
         with:
@@ -203,7 +219,9 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por el espejo de Google: el servicio se baja antes de cualquier paso,
+        # y Docker Hub sin cuenta se queda sin cupo en los runners (deploy/ci).
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -244,7 +262,9 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por el espejo de Google: el servicio se baja antes de cualquier paso,
+        # y Docker Hub sin cuenta se queda sin cupo en los runners (deploy/ci).
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv
@@ -258,6 +278,10 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v7
+
+      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
+      - name: Docker Hub por mirror.gcr.io
+        run: ./deploy/ci/espejo-docker-hub.sh
 
       - uses: actions/setup-go@v7
         with:
@@ -291,6 +315,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
+      - name: Docker Hub por mirror.gcr.io
+        run: ./deploy/ci/espejo-docker-hub.sh
+
       # Corre la unidad endurecida de verdad bajo el systemd del runner, con una
       # sonda que hace como statussv lo que hace el motor de deploy (git,
       # docker compose y la API de Docker) contra un Docker de verdad
@@ -320,7 +348,9 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        # Por el espejo de Google: el servicio se baja antes de cualquier paso,
+        # y Docker Hub sin cuenta se queda sin cupo en los runners (deploy/ci).
+        image: mirror.gcr.io/library/postgres:17-alpine
         env:
           POSTGRES_USER: statussv
           POSTGRES_PASSWORD: statussv

@@ -28,6 +28,10 @@ jobs:
         with:
           ref: main
 
+      # Docker Hub sin cuenta se queda sin cupo en los runners compartidos.
+      - name: Docker Hub por mirror.gcr.io
+        run: ./deploy/ci/espejo-docker-hub.sh
+
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
