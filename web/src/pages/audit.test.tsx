@@ -150,6 +150,37 @@ describe('AuditPage', () => {
     expect(calls[calls.length - 1].path).toBe('/v1/audit')
   })
 
+  it('un enlace desde un token muestra lo que hizo por el MCP', async () => {
+    const calls = stubFetch(() =>
+      json({
+        entries: [
+          {
+            id: '1',
+            at: '2026-10-09T12:00:00Z',
+            actor: 'claude-code',
+            actor_type: 'llm',
+            action: 'mcp.get_logs',
+            target_type: 'project',
+            target_id: 'id-de-tienda',
+            result: 'denied',
+            detail: { proyecto: 'sv-gcg/tienda', token: 'svmcp_AbCdEf' },
+          },
+        ],
+      }),
+    )
+
+    renderAt('/audit?actor_type=llm&actor=claude-code')
+
+    // El renglón: el objetivo sale del detalle; la acción y el resultado, en
+    // palabras (también están entre las opciones de los filtros).
+    expect(await screen.findByText('sv-gcg/tienda')).toBeInTheDocument()
+    expect(screen.getAllByText(/Pidió logs \(MCP\)/).length).toBeGreaterThan(1)
+    expect(screen.getAllByText('Sin permiso').length).toBeGreaterThan(1)
+    expect(screen.getByText(/Solo lo que hizo/)).toHaveTextContent('Solo lo que hizo claude-code.')
+    expect(queryOf(calls[0].path).get('actor')).toBe('claude-code')
+    expect(queryOf(calls[0].path).get('actor_type')).toBe('llm')
+  })
+
   it('si la API falla, lo dice', async () => {
     stubFetch(() => apiError(500, 'internal', 'error interno'))
 

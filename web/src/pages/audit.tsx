@@ -62,7 +62,7 @@ export function AuditPage() {
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-medium">Auditoría</h1>
         <p className="text-xs text-muted-foreground">
-          Lo que se hizo desde el panel, los agents y los subcomandos del servidor. No se puede
+          Lo que se hizo desde el panel, el MCP, los agents y los subcomandos del servidor. No se puede
           editar ni borrar.
         </p>
       </header>
@@ -135,8 +135,13 @@ export function AuditPage() {
             </Field>
           </div>
 
-          {(filters.target_id !== '' || filtered) && (
+          {(filters.target_id !== '' || filters.actor !== '' || filtered) && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {filters.actor !== '' && (
+                <span>
+                  Solo lo que hizo <strong className="font-medium text-foreground">{filters.actor}</strong>.
+                </span>
+              )}
               {filters.target_id !== '' && (
                 <span>
                   Solo lo {targetTypeLabel(filters.target_type)}{' '}
@@ -226,6 +231,10 @@ function targetTypeLabel(type: string): string {
       return 'del proyecto'
     case 'server':
       return 'del servidor'
+    case 'deploy':
+      return 'del deploy'
+    case 'api_token':
+      return 'del token'
     case 'user':
       return 'del usuario'
     default:
@@ -265,7 +274,7 @@ function Row({ entry }: { entry: AuditEntry }) {
               ({actorTypeLabels[entry.actor_type] ?? entry.actor_type})
             </span>{' '}
             · {actionLabel(entry.action)}
-            {target !== entry.actor && (
+            {target !== '' && target !== entry.actor && (
               <>
                 {' '}
                 · <span className="break-all">{target}</span>

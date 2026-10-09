@@ -16,20 +16,22 @@ const listAudit = `-- name: ListAudit :many
 SELECT id, at, actor, actor_type, action, target_type, target_id, result, ip, detail
 FROM audit_log
 WHERE ($1::text IS NULL OR actor_type = $1)
-  AND ($2::text IS NULL OR action = $2)
-  AND ($3::text IS NULL OR target_type = $3)
-  AND ($4::text IS NULL OR target_id = $4)
-  AND ($5::text IS NULL OR result = $5)
-  AND ($6::timestamptz IS NULL OR at >= $6)
-  AND ($7::timestamptz IS NULL OR at < $7)
-  AND ($8::timestamptz IS NULL
-       OR (at, id) < ($8::timestamptz, $9::uuid))
+  AND ($2::text IS NULL OR actor = $2)
+  AND ($3::text IS NULL OR action = $3)
+  AND ($4::text IS NULL OR target_type = $4)
+  AND ($5::text IS NULL OR target_id = $5)
+  AND ($6::text IS NULL OR result = $6)
+  AND ($7::timestamptz IS NULL OR at >= $7)
+  AND ($8::timestamptz IS NULL OR at < $8)
+  AND ($9::timestamptz IS NULL
+       OR (at, id) < ($9::timestamptz, $10::uuid))
 ORDER BY at DESC, id DESC
-LIMIT $10
+LIMIT $11
 `
 
 type ListAuditParams struct {
 	ActorType  *string
+	Actor      *string
 	Action     *string
 	TargetType *string
 	TargetID   *string
@@ -47,6 +49,7 @@ type ListAuditParams struct {
 func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, listAudit,
 		arg.ActorType,
+		arg.Actor,
 		arg.Action,
 		arg.TargetType,
 		arg.TargetID,

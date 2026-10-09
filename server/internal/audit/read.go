@@ -29,7 +29,9 @@ var ErrInvalidFilter = errors.New("filtro de auditoría inválido")
 
 // Filter acota la lectura. Los campos vacíos no filtran.
 type Filter struct {
-	ActorType  string
+	ActorType string
+	// Actor es quién actuó, tal cual: el usuario, el nombre del token del MCP.
+	Actor      string
 	Action     string
 	TargetType string
 	TargetID   string
@@ -102,6 +104,9 @@ func (f Filter) Validate() error {
 	if f.Result != "" && (len(f.Result) > maxResult || !wordFormat.MatchString(f.Result)) {
 		return fmt.Errorf("%w: resultado inválido", ErrInvalidFilter)
 	}
+	if len(f.Actor) > maxActor || strings.ContainsFunc(f.Actor, unicode.IsControl) {
+		return fmt.Errorf("%w: actor inválido", ErrInvalidFilter)
+	}
 	if len(f.TargetID) > maxTargetID || strings.ContainsFunc(f.TargetID, unicode.IsControl) {
 		return fmt.Errorf("%w: objetivo inválido", ErrInvalidFilter)
 	}
@@ -127,6 +132,7 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 	// Se pide uno de más para saber si hay otra página sin contar la tabla.
 	params := store.ListAuditParams{
 		ActorType:  optional(f.ActorType),
+		Actor:      optional(f.Actor),
 		Action:     optional(f.Action),
 		TargetType: optional(f.TargetType),
 		TargetID:   optional(f.TargetID),

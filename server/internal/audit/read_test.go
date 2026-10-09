@@ -49,6 +49,8 @@ func TestFilterValidate(t *testing.T) {
 		"resultado":            {Result: "ok ok"},
 		"objetivo con control": {TargetID: "abc\x00"},
 		"objetivo larguísimo":  {TargetID: strings.Repeat("a", 129)},
+		"actor con control":    {Actor: "claude\ncode"},
+		"actor larguísimo":     {Actor: strings.Repeat("a", 129)},
 		"rango al revés":       {From: now, To: now.Add(-time.Hour)},
 		"página enorme":        {Limit: MaxPage + 1},
 		"página negativa":      {Limit: -1},
@@ -64,6 +66,7 @@ func TestFilterValidate(t *testing.T) {
 		{ActorType: "agent", Action: ActionDeployFinish, TargetType: "project", TargetID: "0199-abc", Result: "rolled_back"},
 		{From: now.Add(-time.Hour), To: now, Limit: MaxPage},
 		{Action: ActionEnrollTokenCreate},
+		{ActorType: "llm", Actor: "claude-code en la notebook", Action: "mcp.get_logs"},
 	}
 	for _, f := range good {
 		if err := f.Validate(); err != nil {

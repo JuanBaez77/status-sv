@@ -30,15 +30,16 @@ function entry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 
 describe('filtros en la dirección', () => {
   it('se leen y se vuelven a escribir sin perder nada', () => {
-    const filters = filtersFromSearch('action=auth.login&result=failed&from=2026-10-01&otro=x')
+    const filters = filtersFromSearch('action=auth.login&result=failed&from=2026-10-01&actor=claude-code&otro=x')
     expect(filters).toEqual({
       ...noFilters,
       action: 'auth.login',
       result: 'failed',
       from: '2026-10-01',
+      actor: 'claude-code',
     })
     expect(searchFromFilters(filters)).toBe(
-      '/audit?action=auth.login&result=failed&from=2026-10-01',
+      '/audit?actor=claude-code&action=auth.login&result=failed&from=2026-10-01',
     )
   })
 
@@ -105,6 +106,8 @@ describe('textos', () => {
     )
     expect(targetText(entry())).toBe('id-del-proyecto')
     expect(targetText(entry({ detail: { proyecto: 7 } }))).toBe('id-del-proyecto')
+    // Una llamada del MCP sin objetivo, como list_servers.
+    expect(targetText(entry({ target_type: 'mcp', target_id: '-' }))).toBe('')
   })
 
   it('el detalle se aplana en orden, con lo que no es texto como JSON', () => {
