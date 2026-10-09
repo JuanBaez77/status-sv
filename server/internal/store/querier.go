@@ -85,6 +85,9 @@ type Querier interface {
 	CountSessionAttempt(ctx context.Context, id uuid.UUID) (int16, error)
 	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	// Los tokens del MCP (ADR-025). Los instantes los pone la aplicación, como en
+	// las sesiones, para que los plazos se midan con el mismo reloj.
+	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateAgentCredential(ctx context.Context, arg CreateAgentCredentialParams) (AgentCredential, error)
 	// Deploys y auditoría (ADR-015 y ADR-017, migración 00009).
 	// CreateDeploy anota un deploy pedido, antes de mandárselo al agent. Si ya
@@ -130,11 +133,18 @@ type Querier interface {
 	// devuelve cuántas creó. La lógica vive en una función de la migración 00002,
 	// que escapa los nombres de las tablas: desde Go no se arma DDL con texto.
 	EnsureMetricPartitions(ctx context.Context, arg EnsureMetricPartitionsParams) (int32, error)
+	// ExistingProjectIDs devuelve cuáles de los IDs son proyectos declarados hoy,
+	// para no guardar un token con una lista que no sirve.
+	ExistingProjectIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// ExpirePendingDeploys cierra los deploys que siguen pendientes pasado el
 	// plazo: el agent nunca confirmó que los recibió.
 	ExpirePendingDeploys(ctx context.Context, arg ExpirePendingDeploysParams) ([]Deploy, error)
 	// ExpireProposals cierra las propuestas abiertas que vencieron.
 	ExpireProposals(ctx context.Context, now time.Time) ([]ProjectProposal, error)
+	GetAPIToken(ctx context.Context, id uuid.UUID) (ApiToken, error)
+	// GetActiveAPIToken busca el token de un hash si sigue vivo: sin revocar y
+	// sin vencer.
+	GetActiveAPIToken(ctx context.Context, arg GetActiveAPITokenParams) (ApiToken, error)
 	// GetActiveCredentialByHash es la consulta de autenticación del agent: busca por
 	// hash y solo devuelve la credencial si no fue revocada.
 	GetActiveCredentialByHash(ctx context.Context, secretHash []byte) (AgentCredential, error)
@@ -180,6 +190,7 @@ type Querier interface {
 	// KnownProposals dice, de una lista de IDs, cuáles son propuestas abiertas de
 	// ese servidor: las demás, el agent las tiene que borrar.
 	KnownProposals(ctx context.Context, arg KnownProposalsParams) ([]uuid.UUID, error)
+	ListAPITokens(ctx context.Context) ([]ApiToken, error)
 	// ListAudit lee la auditoría del más nuevo al más viejo (ADR-020). Cada filtro
 	// es opcional. El cursor es el instante y el ID del último renglón que ya se
 	// vio: así un renglón que entra mientras tanto no corre los que siguen.
@@ -252,8 +263,14 @@ type Querier interface {
 	RejectDeploy(ctx context.Context, arg RejectDeployParams) (Deploy, error)
 	// ResetTOTP borra el segundo factor de un usuario: el próximo login pide el alta.
 	ResetTOTP(ctx context.Context, id uuid.UUID) (int64, error)
+	// RevokeAPIToken revoca un token que todavía no lo estaba. Uno vencido se
+	// puede revocar igual: así queda claro en el panel que no se usa más.
+	RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) (ApiToken, error)
 	RevokeActiveCredentialsForServer(ctx context.Context, arg RevokeActiveCredentialsForServerParams) (int64, error)
 	RevokeAgentCredential(ctx context.Context, arg RevokeAgentCredentialParams) (AgentCredential, error)
+	// RevokeAllAPITokens revoca todos los que siguen sin revocar. Es el freno de
+	// emergencia de `server token-revoke --all`.
+	RevokeAllAPITokens(ctx context.Context, arg RevokeAllAPITokensParams) (int64, error)
 	// SetPendingTOTP guarda el secreto cifrado de un alta en curso. Pisa el de un
 	// alta anterior que no se confirmó.
 	SetPendingTOTP(ctx context.Context, arg SetPendingTOTPParams) (int64, error)
@@ -264,6 +281,9 @@ type Querier interface {
 	// SupersedeProposal cierra la propuesta abierta con ese nombre en ese
 	// servidor, si hay una: la reemplaza la nueva.
 	SupersedeProposal(ctx context.Context, arg SupersedeProposalParams) ([]uuid.UUID, error)
+	// TouchAPIToken anota el último uso, como mucho una vez por minuto: la
+	// condición evita escribir en cada pedido.
+	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) (int64, error)
 	TouchCredentialLastUsed(ctx context.Context, id uuid.UUID) error
 	// TouchServer deja constancia de que el agent sigue vivo. Es lo que actualiza el
 	// latido cada 15 segundos, y de lo que se deriva el estado online u offline.

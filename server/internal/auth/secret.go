@@ -1,6 +1,6 @@
 // Package auth genera y verifica los secretos del control plane: los tokens de
 // enrolamiento de un solo uso, las credenciales propias de cada agent, las
-// sesiones del panel y los hashes de las contraseñas.
+// sesiones del panel, los tokens del MCP y los hashes de las contraseñas.
 //
 // Dos reglas que valen para todo el paquete:
 //
@@ -35,6 +35,7 @@ const (
 	EnrollmentTokenPrefix = "svenr_"
 	AgentCredentialPrefix = "svagt_"
 	SessionTokenPrefix    = "svses_"
+	MCPTokenPrefix        = "svmcp_"
 )
 
 // Secret es un secreto en claro.
@@ -56,6 +57,12 @@ func NewSessionToken() (Secret, error) {
 // NewAgentCredential crea la credencial propia de un agent ya enrolado.
 func NewAgentCredential() (Secret, error) {
 	return newSecret(AgentCredentialPrefix)
+}
+
+// NewMCPToken crea un token del MCP, el que Claude Code manda en cada pedido
+// (ADR-025).
+func NewMCPToken() (Secret, error) {
+	return newSecret(MCPTokenPrefix)
 }
 
 func newSecret(prefix string) (Secret, error) {

@@ -21,6 +21,23 @@ type AgentCredential struct {
 	RevokedReason *string
 }
 
+type ApiToken struct {
+	ID            uuid.UUID
+	Name          string
+	Prefix        string
+	TokenHash     []byte
+	Scopes        []string
+	ProjectIds    []uuid.UUID
+	CreatedBy     *uuid.UUID
+	CreatedByName string
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
+	RevokedByName *string
+	LastUsedAt    *time.Time
+	LastUsedIp    *string
+}
+
 type AuditLog struct {
 	ID         uuid.UUID
 	At         time.Time
