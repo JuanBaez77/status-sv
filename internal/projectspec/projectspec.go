@@ -550,7 +550,18 @@ func checkProposalRepo(repo string) error {
 		return nil
 	}
 	u, err := url.Parse(repo)
-	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return errors.New(msg)
+	}
+	// Un repo file:// no lleva credenciales, y el agent solo lo acepta en
+	// pruebas (STATUSSV_DEPLOY_ALLOW_FILE_REPOS): lo usa el e2e del alta.
+	if scheme == "file" {
+		if u.Host != "" || u.User != nil {
+			return errors.New(msg)
+		}
+		return nil
+	}
+	if u.Host == "" {
 		return errors.New(msg)
 	}
 	switch scheme {
@@ -563,7 +574,7 @@ func checkProposalRepo(repo string) error {
 			return errors.New(msg)
 		}
 	default:
-		return errors.New("repo: en una propuesta, solo https o ssh")
+		return errors.New("repo: en una propuesta, solo https o ssh (y file, que el agent acepta solo en pruebas)")
 	}
 	return nil
 }
