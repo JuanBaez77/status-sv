@@ -226,3 +226,52 @@ func TestMCPServerMetrics(t *testing.T) {
 		t.Errorf("la serie tiene %d puntos", n)
 	}
 }
+
+func TestMCPProjects(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.83"
+	projectID := f.declaredProject(t, "vps-proyectos", "tienda", "production")
+	f.declaredProject(t, "vps-proyectos-2", "demo", "staging")
+	value, _ := f.mcpToken(t, "proyectos", []string{"read:production"})
+
+	session, err := f.mcpSession(t, value, ip)
+	if err != nil {
+		t.Fatalf("conectar: %v", err)
+	}
+	structured := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		res, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: name, Arguments: args})
+		if err != nil || res.IsError {
+			t.Fatalf("%s = %+v, %v", name, res, err)
+		}
+		raw, _ := json.Marshal(res.StructuredContent)
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	list := structured("list_projects", map[string]any{})
+	projects, _ := list["projects"].([]any)
+	if len(projects) != 1 {
+		t.Fatalf("proyectos = %+v", list)
+	}
+	if first, _ := projects[0].(map[string]any); first["ref"] != "vps-proyectos/tienda" {
+		t.Fatalf("proyectos = %+v", list)
+	}
+
+	status := structured("get_project_status", map[string]any{"project": "tienda"})
+	project, _ := status["project"].(map[string]any)
+	if project["id"] != projectID.String() || project["status"] != "unknown" || status["runtime_source"] != "unknown" || status["version"] != nil {
+		t.Errorf("estado sin nada del agent = %+v", status)
+	}
+
+	var actions []string
+	for _, e := range f.auditFrom(t, ip) {
+		actions = append(actions, e.Action+" "+e.TargetType)
+	}
+	if strings.Join(actions, ",") != "mcp.list_projects mcp,mcp.get_project_status project" {
+		t.Errorf("auditoría = %v", actions)
+	}
+}
