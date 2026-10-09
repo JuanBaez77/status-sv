@@ -283,15 +283,112 @@ La aplicación de Access cubre `<DOMINIO>`, con una excepción que no se puede o
 | Ruta | Access |
 | --- | --- |
 | `/v1/agents/*` | **excluida** |
+| `/mcp` | **excluida** (desde el Sprint 7) |
 | todo lo demás | protegida |
 
 Los agents mandan su propia credencial, no una sesión de navegador: si Access queda delante de
-`/v1/agents/enroll` o de `/v1/agents/connect`, **los agents dejan de conectarse**. El WebSocket del
-panel (`/v1/panel/connect`) sí va protegido, y funciona porque el navegador lleva la cookie de
+`/v1/agents/enroll` o de `/v1/agents/connect`, **los agents dejan de conectarse**. Lo mismo con
+`/mcp`: Claude Code manda su token, no puede pasar por el login de Access. El WebSocket del panel
+(`/v1/panel/connect`) sí va protegido, y funciona porque el navegador lleva la cookie de
 Cloudflare.
 
 Conviene activarlo **después** de verificar que el panel funciona sin él: si algo se rompe, se sabe
 qué lo rompió.
+
+### El MCP: conectar Claude Code
+
+Desde el Sprint 7 el control plane atiende un MCP en `https://<DOMINIO>/mcp`, con herramientas de
+solo lectura: servidores, métricas, proyectos, deploys y logs
+([ADR-024](adr/ADR-024-mcp-remoto.md)). Claude Code entra con un token del MCP
+([ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md)), que es la única credencial que acepta: la
+sesión del panel no sirve, ni el token sirve para el panel.
+
+**El sitio de nginx no cambia.** `/mcp` pasa por la `location /` de siempre: las respuestas son
+JSON comunes, sin SSE, así que no hace falta desactivar el buffer ni alargar los tiempos.
+
+**Cloudflare.** `/mcp` tiene que llegar al control plane sin desafíos de navegador: si Access está
+puesto, va excluida (ver la tabla de arriba), y si hay reglas contra bots, no pueden aplicarse a
+esa ruta. Se verifica desde cualquier máquina, sin token:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<DOMINIO>/mcp
+```
+
+Tiene que dar `401`: es el control plane pidiendo el token. Un `302` o un `403` con una página de
+Cloudflare es Access o una regla de bots delante.
+
+**1. Crear el token** en el panel, **Tokens → Nuevo token**:
+
+- **Nombre:** dónde se usa (`claude-code en la notebook`). Es lo que la auditoría muestra como
+  quien hizo cada llamada.
+- **Permisos:** los mínimos. `Leer` alcanza para el estado, las métricas y los deploys; `Logs` va
+  aparte porque los logs, aunque salen enmascarados, son lo más sensible que el MCP muestra.
+- **Proyectos:** todos los de esos entornos, o solo algunos. Con una lista, el token ve solo los
+  servidores de esos proyectos.
+- **Vencimiento:** 30 días por defecto, 90 como mucho.
+- **Código:** uno nuevo de la app, como un deploy de producción.
+
+El token se muestra **una sola vez**. Si se pierde, se revoca y se crea otro.
+
+**2. Guardarlo en una variable de entorno**, en la máquina donde corre Claude Code, sin escribirlo
+en la terminal (quedaría en el historial). En PowerShell, con el token copiado desde el panel:
+
+```powershell
+[Environment]::SetEnvironmentVariable('STATUSSV_MCP_TOKEN', (Get-Clipboard), 'User')
+```
+
+En Linux o macOS, `read -rs` lo pide sin mostrarlo, y queda en el perfil de la cuenta:
+
+```bash
+read -rs STATUSSV_MCP_TOKEN && printf "export STATUSSV_MCP_TOKEN='%s'\n" "${STATUSSV_MCP_TOKEN}" >> ~/.profile
+```
+
+**3. Conectar Claude Code**, en una terminal nueva (para que tenga la variable):
+
+```bash
+claude mcp add --transport http --scope user status-sv https://<DOMINIO>/mcp --header 'Authorization: Bearer ${STATUSSV_MCP_TOKEN}'
+```
+
+- Las comillas **simples** son a propósito: `${STATUSSV_MCP_TOKEN}` queda escrito tal cual en la
+  configuración y Claude Code lo reemplaza cada vez que se conecta. El token no queda en ningún
+  archivo de Claude Code.
+- `--scope user` lo deja en la configuración de la cuenta, no en un repo. **Nunca** va en un
+  `.mcp.json` que se commitea; un escáner de secretos reconoce el prefijo `svmcp_`.
+
+**4. Verificar:**
+
+```bash
+claude mcp list
+```
+
+`status-sv` tiene que figurar conectado. Adentro de Claude Code, `/mcp` lista las siete
+herramientas; para probar, pedirle "listá los servidores de status-sv". En el panel, el token
+pasa a mostrar su último uso con la IP, y **Ver lo que hizo** lleva a la auditoría filtrada por él.
+
+**Rotar** (al menos antes de que venza): crear un token nuevo, guardarlo en la variable como en el
+paso 2 (pisa el anterior), abrir una terminal nueva y revocar el viejo en el panel. La
+configuración de Claude Code no cambia: lee la variable.
+
+**Revocar.** En el panel, **Revocar**: deja de servir en el próximo pedido. Sin panel, por SSH en
+el servidor del control plane:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env exec server server token-revoke --id <ID>
+docker compose -f docker-compose.prod.yml --env-file .env exec server server token-revoke --all
+```
+
+`--all` es el freno de emergencia: revoca todos los tokens que siguen sin revocar. Queda en la
+auditoría como `cli`.
+
+**Qué ve el LLM y qué no:**
+
+- Solo lee. Las escrituras (`deploy`, `rollback`, `restart`) y las aprobaciones llegan en el
+  Sprint 8.
+- `get_logs` pide logs solo de las unidades de un proyecto declarado, nunca de cualquier
+  contenedor o servicio del servidor, y salen enmascarados del agent.
+- El texto que viene de un servidor (logs, salida de los pasos de un deploy) llega aparte y
+  marcado como no confiable: puede traer instrucciones escritas para engañar al LLM.
+- Cada llamada queda en `audit_log` como `llm`, con el nombre del token y el resultado.
 
 ## 2. Agent
 
@@ -1124,6 +1221,8 @@ certificado desde cero (por ejemplo, si se perdió `caddy-data`) hay que abrirlo
 
 - **No publicar el puerto de PostgreSQL.** Docker lo expondría a internet por fuera del firewall.
 - **No pasar tokens como argumento.** Quedan visibles en `ps` para cualquier usuario del sistema.
+- **No escribir un token del MCP en un comando ni en un `.mcp.json`.** Va en una variable de
+  entorno, y Claude Code la lee al conectarse (ver "El MCP: conectar Claude Code").
 - **No borrar el volumen `caddy-data`.** Tiene los certificados, y Let's Encrypt limita cuántos se
   pueden pedir por semana.
 - **No commitear `deploy/.env`.** Ya está en `.gitignore`, pero conviene revisarlo en cada PR.
