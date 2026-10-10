@@ -17,6 +17,11 @@
 #      pisar el .env que dejó una persona, baja lo que levantó si no queda
 #      bien y, una vez que quedó bien, lo que sigue son deploys.
 #   6. Todo quedó en audit_log.
+#   7. El MCP de lectura (ADR-024, ADR-025), con tokens creados como en el
+#      panel: las siete herramientas sobre lo que dejaron los pasos
+#      anteriores, un secreto sembrado en el log de un contenedor que llega
+#      enmascarado, los rechazos (sin token, inventado, desde un navegador,
+#      sin el scope, revocado) y cada llamada en audit_log como llm.
 #
 # Corre con los binarios compilados acá, sin contenedores para el agent: tiene
 # que ver el Docker de la máquina como en un servidor. Hace falta:
@@ -521,6 +526,120 @@ if psql "${DATABASE_URL}" -tAc "DELETE FROM audit_log" >/dev/null 2>&1; then
   falla "se pudo borrar audit_log"
 fi
 verde "ok: ${PEDIDOS} pedidos, ${PRIMEROS} primeros deploys, ${FINALES} finales y ${RECHAZOS} rechazos en audit_log, que no se puede borrar"
+
+# --- 7. MCP de lectura ---
+
+paso "7. el MCP de lectura, con un token del panel (ADR-024, ADR-025)"
+# crear_token crea un token del MCP como lo crea el panel, con un código nuevo
+# de la app, y deja la respuesta en ${TRABAJO}/token.json.
+crear_token() {
+  local nombre="$1" scopes="$2" codigo
+  codigo_nuevo
+  codigo="$(api -o "${TRABAJO}/token.json" -w '%{http_code}' --data \
+    "{\"name\":\"${nombre}\",\"scopes\":${scopes},\"project_ids\":[],\"expires_in_days\":1,\"totp_code\":\"${CODIGO}\"}" \
+    "${URL}/v1/tokens")"
+  [ "${codigo}" = 201 ] || falla "crear el token ${nombre} devolvió ${codigo}: $(cat "${TRABAJO}/token.json")"
+}
+crear_token e2e-claude '["read:staging","logs:staging"]'
+MCP_TOKEN="$(jq -r .token "${TRABAJO}/token.json")"
+ID_TOKEN="$(jq -r .item.id "${TRABAJO}/token.json")"
+[[ "${MCP_TOKEN}" == svmcp_* ]] || falla "el token no tiene el prefijo svmcp_"
+crear_token e2e-produccion '["read:production"]'
+TOKEN_PRODUCCION="$(jq -r .token "${TRABAJO}/token.json")"
+verde "ok: dos tokens creados con un código nuevo cada uno"
+
+# mcp llama una herramienta como Claude Code: JSON-RPC por HTTP, sin estado,
+# así que no hace falta initialize. Deja la respuesta en ${TRABAJO}/mcp.json y
+# devuelve el código HTTP. Los demás argumentos son encabezados extra.
+MCP_ID=0
+mcp() {
+  local token="$1" metodo="$2" params="$3"
+  shift 3
+  MCP_ID=$((MCP_ID + 1))
+  curl -sS -o "${TRABAJO}/mcp.json" -w '%{http_code}' "$@" \
+    -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-06-18' \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":${MCP_ID},\"method\":\"${metodo}\",\"params\":${params}}" \
+    "${URL}/mcp"
+}
+# herramienta llama una herramienta con el token del e2e y devuelve su salida
+# estructurada; falla si la herramienta contestó con un error.
+herramienta() {
+  local codigo
+  codigo="$(mcp "${MCP_TOKEN}" tools/call "{\"name\":\"$1\",\"arguments\":${2:-"{}"}}")"
+  [ "${codigo}" = 200 ] || falla "$1 devolvió ${codigo}: $(cat "${TRABAJO}/mcp.json")"
+  jq -e '.result.isError != true' "${TRABAJO}/mcp.json" >/dev/null || falla "$1 falló: $(jq -c '.result.content' "${TRABAJO}/mcp.json")"
+  jq -c '.result.structuredContent' "${TRABAJO}/mcp.json"
+}
+error_de() { jq -r '.result.content[0].text // .error.message // ""' "${TRABAJO}/mcp.json"; }
+
+codigo="$(mcp "${MCP_TOKEN}" tools/list '{}')"
+[ "${codigo}" = 200 ] || falla "tools/list devolvió ${codigo}"
+HERRAMIENTAS="$(jq -r '[.result.tools[].name] | sort | join(" ")' "${TRABAJO}/mcp.json")"
+[ "${HERRAMIENTAS}" = "get_deploy get_logs get_project_status get_server_metrics list_deploys list_projects list_servers" ] || falla "herramientas: ${HERRAMIENTAS}"
+jq -e '[.result.tools[].annotations.readOnlyHint] | all' "${TRABAJO}/mcp.json" >/dev/null || falla "hay herramientas que no son de solo lectura"
+verde "ok: siete herramientas, todas de solo lectura"
+
+SALIDA="$(herramienta list_servers)"
+[ "$(jq -r ".servers[] | select(.name == \"${SERVER_NAME}\") | .projects | sort | join(\",\")" <<<"${SALIDA}")" = "${PROYECTO},${NUEVO}" ] || falla "list_servers: ${SALIDA}"
+SALIDA="$(herramienta get_server_metrics "{\"server\":\"${SERVER_NAME}\",\"range\":\"1h\"}")"
+jq -e '.samples > 0 and .resolution == "raw" and .cpu_percent.max >= 0 and (.series.timestamps | length) > 0' <<<"${SALIDA}" >/dev/null || falla "get_server_metrics: ${SALIDA}"
+SALIDA="$(herramienta list_projects)"
+[ "$(jq -r '[.projects[].ref] | sort | join(" ")' <<<"${SALIDA}")" = "${SERVER_NAME}/${PROYECTO} ${SERVER_NAME}/${NUEVO}" ] || falla "list_projects: ${SALIDA}"
+verde "ok: servidores, métricas y proyectos"
+
+# La versión que corre sale de la historia: el último deploy (el cortado)
+# volvió atrás a v1.
+SALIDA="$(herramienta get_project_status "{\"project\":\"${PROYECTO}\"}")"
+[ "$(jq -r .version.commit <<<"${SALIDA}")" = "${V1}" ] || falla "versión: $(jq -c .version <<<"${SALIDA}")"
+[ "$(jq -r .last_deploy.id <<<"${SALIDA}")" = "${CORTADO}" ] || falla "último deploy: $(jq -c .last_deploy <<<"${SALIDA}")"
+jq -e '(.containers | length) >= 1 and .runtime_source == "ok"' <<<"${SALIDA}" >/dev/null || falla "get_project_status: ${SALIDA}"
+SALIDA="$(herramienta list_deploys "{\"project\":\"${SERVER_NAME}/${PROYECTO}\",\"limit\":2}")"
+[ "$(jq -r '[.deploys[].id] | join(" ")' <<<"${SALIDA}")" = "${CORTADO} ${DEPLOY}" ] || falla "list_deploys: ${SALIDA}"
+SALIDA="$(herramienta get_deploy "{\"deploy_id\":\"${ROTO}\"}")"
+[ "$(jq -r '.deploy.status + " " + .deploy.code' <<<"${SALIDA}")" = "rolled_back unhealthy" ] || falla "get_deploy: $(jq -c .deploy <<<"${SALIDA}")"
+jq -e '(.steps[] | select(.name == "healthcheck") | .status) == "failed" and (.untrusted_notice | test("no confiable"))' <<<"${SALIDA}" >/dev/null || falla "los pasos del deploy roto: ${SALIDA}"
+verde "ok: estado, versión (${V1:0:8}), historia y pasos de un deploy"
+
+# Un secreto en el log del contenedor sale enmascarado del agent.
+compose_wd exec -T web sh -c 'echo "conectando a postgres://tienda:supersecreto@db/tienda" >/proc/1/fd/1'
+SALIDA="$(herramienta get_logs "{\"project\":\"${PROYECTO}\",\"unit\":\"${COMPOSE_PROJECT}-web-1\",\"lines\":20}")"
+jq -e '[.lines[].text] | any(test("postgres://tienda:\\*\\*\\*@db"))' <<<"${SALIDA}" >/dev/null || falla "el renglón sembrado no llegó enmascarado: ${SALIDA}"
+! grep -q supersecreto <<<"${SALIDA}" || falla "el secreto llegó al MCP"
+jq -e '.untrusted_notice | test("no confiable")' <<<"${SALIDA}" >/dev/null || falla "los logs no traen el aviso"
+verde "ok: get_logs trae el log del contenedor con el secreto enmascarado"
+
+# Los rechazos.
+codigo="$(mcp "" tools/list '{}')"
+[ "${codigo}" = 401 ] || falla "sin token devolvió ${codigo}"
+codigo="$(mcp "svmcp_inventadoinventadoinventadoinventadoinvent" tools/list '{}')"
+[ "${codigo}" = 401 ] || falla "un token inventado devolvió ${codigo}"
+codigo="$(mcp "${MCP_TOKEN}" tools/list '{}' -H 'Origin: https://evil.example')"
+[ "${codigo}" = 403 ] || falla "con Origin devolvió ${codigo}"
+codigo="$(mcp "${TOKEN_PRODUCCION}" tools/call "{\"name\":\"get_project_status\",\"arguments\":{\"project\":\"${PROYECTO}\"}}")"
+[ "${codigo}" = 200 ] && jq -e '.result.isError' "${TRABAJO}/mcp.json" >/dev/null || falla "read:production con un proyecto de staging: ${codigo} $(cat "${TRABAJO}/mcp.json")"
+error_de | grep -q "no hay un proyecto" || falla "el error no es el de un proyecto que no alcanza: $(error_de)"
+codigo="$(mcp "${TOKEN_PRODUCCION}" tools/call "{\"name\":\"get_logs\",\"arguments\":{\"project\":\"${PROYECTO}\",\"unit\":\"web\"}}")"
+error_de | grep -q "no tiene permiso de logs" || falla "sin logs: $(error_de)"
+codigo="$(api -o /dev/null -w '%{http_code}' -X DELETE "${URL}/v1/tokens/${ID_TOKEN}")"
+[ "${codigo}" = 200 ] || falla "revocar el token devolvió ${codigo}"
+codigo="$(mcp "${MCP_TOKEN}" tools/list '{}')"
+[ "${codigo}" = 401 ] || falla "un token revocado devolvió ${codigo}"
+verde "ok: sin token, inventado, desde un navegador, sin el scope y revocado"
+
+# La auditoría tiene cada llamada, con el token como actor de tipo llm, y en
+# ningún lado quedaron ni el secreto ni el valor del token.
+LLAMADAS="$(contar "SELECT count(*) FROM audit_log WHERE actor = 'e2e-claude' AND actor_type = 'llm' AND action LIKE 'mcp.%' AND result = 'ok'")"
+[ "${LLAMADAS}" = 7 ] || falla "hay ${LLAMADAS} llamadas buenas del token en la auditoría y se esperaban 7 (tools/list no es una llamada)"
+DENEGADAS="$(contar "SELECT count(*) FROM audit_log WHERE actor = 'e2e-produccion' AND result IN ('not_found','denied')")"
+[ "${DENEGADAS}" = 2 ] || falla "hay ${DENEGADAS} llamadas rechazadas del token de producción y se esperaban 2"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action = 'mcp.auth' AND result = 'rejected'")" = 1 ] || falla "los tokens que no sirven se anotan una vez por IP"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action IN ('token.create','token.revoke') AND actor = '${USUARIO}'")" = 3 ] || falla "faltan la creación o la revocación de los tokens en la auditoría"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE detail::text LIKE '%supersecreto%' OR detail::text LIKE '%${MCP_TOKEN}%'")" = 0 ] || falla "la auditoría guardó el secreto o el token"
+! grep -qF -e supersecreto -e "${MCP_TOKEN}" "${TRABAJO}/server.log" || falla "los registros del control plane tienen el secreto o el token"
+[ "$(contar "SELECT count(*) FROM api_tokens WHERE token_hash = sha256('${MCP_TOKEN}'::bytea)")" = 1 ] || falla "la base no tiene el hash del token"
+[ "$(contar "SELECT count(*) FROM api_tokens WHERE prefix = '${MCP_TOKEN:0:12}'")" = 1 ] || falla "la base no tiene el prefijo del token"
+verde "ok: ${LLAMADAS} llamadas en audit_log como llm; ni el secreto ni el token quedaron en la base ni en los registros"
 
 paso "listo"
 verde "el deploy de punta a punta anduvo (inicio en ${INICIO_DEPLOY} ms)"

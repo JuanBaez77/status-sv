@@ -10,7 +10,9 @@
 # Los agents simulados usan el cliente de verdad (deploy/../agent/cmd/loadtest):
 # se enrolan, mantienen el canal, mandan lotes y esperan los acuses. El agent de
 # verdad corre en su contenedor y mide su propio consumo, que viaja en el
-# latido: de ahí salen las dos metas del agent.
+# latido: de ahí salen las dos metas del agent. Mientras tanto, cinco clientes
+# del MCP llaman cada segundo y medio cada uno, para que la memoria del control
+# plane se mida con el MCP en uso; ninguna llamada puede fallar.
 #
 #   ./deploy/carga/run.sh              # 2 minutos, lo que corre en cada PR
 #   SEGUNDOS=600 ./deploy/carga/run.sh # la medición larga, la del workflow nocturno
@@ -54,9 +56,16 @@ fi
 export STATUSSV_TOTP_KEY_PATH
 
 TRABAJO="$(mktemp -d)"
+# En Git Bash, curl y jq son programas de Windows, que no entienden /tmp: la
+# ruta va en formato mixto (C:/...), que entienden los dos lados.
+if command -v cygpath >/dev/null 2>&1; then
+  TRABAJO="$(cygpath -m "${TRABAJO}")"
+fi
 MEDICIONES="${TRABAJO}/rss.txt"
 TOKENS="${TRABAJO}/tokens.txt"
 MUESTREADOR=""
+# Los clientes del MCP que corren de fondo durante la carga.
+MCP_PIDS=()
 
 rojo() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 verde() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -64,6 +73,10 @@ paso() { printf '\n=== %s ===\n' "$*"; }
 
 limpiar() {
   local salida=$?
+  touch "${TRABAJO}/mcp-parar" 2>/dev/null || true
+  for pid in "${MCP_PIDS[@]}"; do
+    kill "${pid}" 2>/dev/null || true
+  done
   if [ -n "${MUESTREADOR}" ]; then
     kill "${MUESTREADOR}" 2>/dev/null || true
   fi
@@ -141,7 +154,68 @@ export STATUSSV_ENROLL_TOKEN
 esperar "el agent de verdad está en línea" \
   bash -c "[ \"\$(${COMPOSE[*]} exec -T postgres psql -U statussv -d statussv -tAc \"SELECT count(*) FROM servers WHERE name = '${AGENT_NAME}' AND last_seen_at IS NOT NULL\" | tr -d '[:space:]')\" = '1' ]"
 
-# --- 3. Carga ---
+
+# --- 3. Clientes del MCP ---
+
+# Mientras corren los agents, unos clientes del MCP piden lo que pediría
+# Claude Code: así la meta de memoria del control plane se mide con el MCP en
+# uso (ADR-024). Cada uno llama cada segundo y medio: por debajo del límite de
+# su token (60 por minuto) y, entre todos, del límite por IP (300 por minuto),
+# porque salen todos de la misma.
+MCP_CLIENTES="${MCP_CLIENTES:-5}"
+MCP_URL="http://127.0.0.1:8098/mcp"
+MCP_PARAR="${TRABAJO}/mcp-parar"
+
+# mcp_token guarda un token del MCP directo en la base, con su hash, como lo
+# guarda el panel, y lo devuelve. La prueba no tiene sesión de panel ni
+# código de la app.
+mcp_token() {
+  local valor hash
+  valor="svmcp_$(openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=\n')"
+  hash="$(printf '%s' "${valor}" | sha256sum | cut -d' ' -f1)"
+  psql_query "INSERT INTO api_tokens (id, name, prefix, token_hash, scopes, created_by_name, created_at, expires_at)
+    VALUES (gen_random_uuid(), 'carga-$1', '${valor:0:12}', decode('${hash}', 'hex'), '{read:staging,read:production}',
+            'carga', now(), now() + interval '1 hour')" >/dev/null
+  printf '%s' "${valor}"
+}
+
+# cliente_mcp llama en ronda tres herramientas hasta que aparece MCP_PARAR, y
+# anota en su propio archivo, un renglón por llamada, el código HTTP, cuánto
+# tardó y si la herramienta falló. Las métricas son las del agent de verdad,
+# que ya está en línea.
+cliente_mcp() {
+  local token="$1" resultados="$2" n=0 llamada salida medicion fallo
+  local llamadas=(
+    '{"name":"list_servers","arguments":{}}'
+    "{\"name\":\"get_server_metrics\",\"arguments\":{\"server\":\"${AGENT_NAME}\",\"range\":\"1h\"}}"
+    '{"name":"list_projects","arguments":{}}'
+  )
+  salida="$(mktemp -p "${TRABAJO}")"
+  until [ -e "${MCP_PARAR}" ]; do
+    llamada="${llamadas[$((n % 3))]}"
+    n=$((n + 1))
+    medicion="$(curl -sS -o "${salida}" -w '%{http_code} %{time_total}' \
+      -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' \
+      --data "{\"jsonrpc\":\"2.0\",\"id\":${n},\"method\":\"tools/call\",\"params\":${llamada}}" \
+      "${MCP_URL}" 2>/dev/null)" || medicion="000 0"
+    fallo="$(jq -r '.result.isError // false' "${salida}" 2>/dev/null)" || fallo="error"
+    printf '%s %s\n' "${medicion}" "${fallo}" >>"${resultados}"
+    if [ "${fallo}" != false ]; then
+      cp "${salida}" "${resultados}.ultimo-error"
+    fi
+    sleep 1.5
+  done
+}
+
+paso "levantando ${MCP_CLIENTES} clientes del MCP"
+for i in $(seq 1 "${MCP_CLIENTES}"); do
+  cliente_mcp "$(mcp_token "$i")" "${TRABAJO}/mcp-${i}.txt" &
+  MCP_PIDS+=($!)
+done
+verde "ok: ${MCP_CLIENTES} clientes del MCP llamando cada segundo y medio"
+
+# --- 4. Carga ---
 
 paso "midiendo con ${AGENTS} agents simulados durante ${SEGUNDOS}s"
 
@@ -163,7 +237,12 @@ MUESTREADOR=$!
 kill "${MUESTREADOR}" 2>/dev/null || true
 MUESTREADOR=""
 
-# --- 4. Metas ---
+# Los clientes del MCP terminan la llamada que tienen en curso.
+touch "${MCP_PARAR}"
+wait "${MCP_PIDS[@]}" 2>/dev/null || true
+MCP_PIDS=()
+
+# --- 5. Metas ---
 
 paso "verificando las metas de rendimiento"
 
@@ -199,12 +278,27 @@ MUESTRAS="$(psql_query "SELECT count(*) FROM metrics_raw m JOIN servers s ON s.i
 ESPERADAS=$(( AGENTS * (SEGUNDOS / 10 - 1) ))
 MINIMO=$(( ESPERADAS * 80 / 100 ))
 
+# Las llamadas al MCP: todas tienen que haber salido bien, y alcanza con
+# que cada cliente haya llamado al menos una vez cada tres segundos. Cada
+# cliente anotó en su archivo; acá se juntan.
+MCP_RESULTADOS="${TRABAJO}/mcp.txt"
+cat "${TRABAJO}"/mcp-[0-9]*.txt >"${MCP_RESULTADOS}" 2>/dev/null || true
+MCP_LLAMADAS="$(grep -c . "${MCP_RESULTADOS}" 2>/dev/null || true)"
+MCP_LLAMADAS="${MCP_LLAMADAS:-0}"
+MCP_FALLAS="$(awk '$1 != 200 || $3 != "false"' "${MCP_RESULTADOS}" 2>/dev/null | grep -c . || true)"
+MCP_FALLAS="${MCP_FALLAS:-0}"
+MCP_P95_MS="$(awk '{printf "%d\n", $2 * 1000}' "${MCP_RESULTADOS}" 2>/dev/null | sort -n \
+  | awk '{a[NR] = $1} END {if (NR == 0) print 0; else print a[int((NR * 95 + 99) / 100)]}')"
+MCP_MINIMO=$(( MCP_CLIENTES * SEGUNDOS / 3 ))
+
 paso "resumen"
 printf '  RAM del control plane   %s MB (meta: menos de %s)\n' "${CONTROL_PLANE_MB}" "${MAX_CONTROL_PLANE_MB}"
 printf '  RAM del agent           %s MB (meta: menos de %s)\n' "${AGENT_MB}" "${MAX_AGENT_MB}"
 printf '  CPU del agent           %s%% promedio de %s latidos (meta: menos de %s%%)\n' \
   "${AGENT_CPU}" "${LATIDOS_CONTADOS}" "${MAX_AGENT_CPU}"
 printf '  muestras en la base     %s de %s esperadas\n' "${MUESTRAS}" "${ESPERADAS}"
+printf '  llamadas al MCP         %s de %s clientes, %s con error, p95 %s ms\n' \
+  "${MCP_LLAMADAS}" "${MCP_CLIENTES}" "${MCP_FALLAS}" "${MCP_P95_MS}"
 
 FALLA=0
 if [ "${CONTROL_PLANE_MB}" -ge "${MAX_CONTROL_PLANE_MB}" ]; then
@@ -221,6 +315,12 @@ if awk "BEGIN {exit !(${AGENT_CPU} >= ${MAX_AGENT_CPU})}"; then
 fi
 if [ "${MUESTRAS}" -lt "${MINIMO}" ]; then
   rojo "llegaron ${MUESTRAS} muestras a la base y se esperaban al menos ${MINIMO}"
+  FALLA=1
+fi
+if [ "${MCP_LLAMADAS}" -lt "${MCP_MINIMO}" ] || [ "${MCP_FALLAS}" -ne 0 ]; then
+  rojo "el MCP contestó ${MCP_LLAMADAS} llamadas (al menos ${MCP_MINIMO}) y ${MCP_FALLAS} con error"
+  awk '$1 != 200 || $3 != "false" {print $1, $3}' "${MCP_RESULTADOS}" | sort | uniq -c >&2 || true
+  cat "${TRABAJO}"/mcp-*.ultimo-error >&2 2>/dev/null || true
   FALLA=1
 fi
 
