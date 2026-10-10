@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/mcp"
+	"github.com/JuanBaez77/status-sv/server/internal/store"
 	"github.com/JuanBaez77/status-sv/server/internal/tokens"
 )
 
@@ -136,24 +138,6 @@ func (b mcpBackend) Servers(ctx context.Context) ([]mcp.ServerInfo, error) {
 	return out, nil
 }
 
-func (b mcpBackend) Projects(ctx context.Context) ([]mcp.ProjectInfo, error) {
-	rows, err := b.s.queries.ListProjects(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listar los proyectos: %w", err)
-	}
-	out := make([]mcp.ProjectInfo, len(rows))
-	for i, row := range rows {
-		out[i] = mcp.ProjectInfo{
-			ID:          row.ID,
-			ServerID:    row.ServerID,
-			ServerName:  row.ServerName,
-			Name:        row.Name,
-			Environment: row.Environment,
-		}
-	}
-	return out, nil
-}
-
 func (b mcpBackend) ServerMetrics(ctx context.Context, serverID uuid.UUID, span time.Duration) (mcp.MetricsInfo, error) {
 	now := time.Now().UTC()
 	q := rangeQuery{from: now.Add(-span), to: now, resolution: autoResolution(span)}
@@ -201,4 +185,103 @@ func (b mcpBackend) ServerMetrics(ctx context.Context, serverID uuid.UUID, span 
 		out.Networks[i] = mcp.NetworkSeries{Interface: network.Interface, Points: points}
 	}
 	return out, nil
+}
+
+func (b mcpBackend) Projects(ctx context.Context) ([]mcp.ProjectInfo, error) {
+	list, err := b.s.readProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mcp.ProjectInfo, len(list.Projects))
+	for i, p := range list.Projects {
+		out[i] = projectInfo(p)
+	}
+	return out, nil
+}
+
+func (b mcpBackend) Project(ctx context.Context, id uuid.UUID) (mcp.ProjectDetail, error) {
+	row, err := b.s.queries.GetProject(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mcp.ProjectDetail{}, mcp.ErrNotFound
+	}
+	if err != nil {
+		return mcp.ProjectDetail{}, fmt.Errorf("leer el proyecto: %w", err)
+	}
+	runtime, err := b.s.readRuntime(ctx, row.ServerID)
+	if err != nil {
+		return mcp.ProjectDetail{}, fmt.Errorf("leer el estado de runtime: %w", err)
+	}
+	d := buildDetail(store.ListProjectsRow(row), runtime)
+	out := mcp.ProjectDetail{
+		ProjectInfo:    projectInfo(d.projectSummary),
+		Workdir:        d.Workdir,
+		ComposeFile:    d.ComposeFile,
+		ComposeProject: d.ComposeProject,
+		Containers:     make([]mcp.ContainerInfo, len(d.Containers)),
+		Services:       make([]mcp.ServiceInfo, len(d.Services)),
+		MissingUnits:   d.MissingUnits,
+	}
+	if d.Source != nil {
+		out.SourceStatus = d.Source.Status
+	}
+	if d.Site != nil {
+		out.SiteDomain, out.SitePort = d.Site.Domain, int(d.Site.Port)
+	}
+	if d.Env != nil {
+		out.EnvRequired, out.EnvMissing, out.EnvUnknown = int(d.Env.Required), d.Env.Missing, d.Env.Unknown
+	}
+	for i, c := range d.Containers {
+		cpu, memory := mcpUsage(c.Usage)
+		out.Containers[i] = mcp.ContainerInfo{
+			Name: c.Name, Service: c.ComposeService, Image: c.Image, State: c.State, Health: c.Health,
+			StartedAt: c.StartedAt, CPUPercent: cpu, MemoryBytes: memory,
+		}
+	}
+	for i, svc := range d.Services {
+		cpu, memory := mcpUsage(svc.Usage)
+		out.Services[i] = mcp.ServiceInfo{
+			Unit: svc.Unit, ActiveState: svc.ActiveState, SubState: svc.SubState, Result: svc.Result,
+			ActiveSince: svc.ActiveSince, CPUPercent: cpu, MemoryBytes: memory,
+		}
+	}
+	return out, nil
+}
+
+func (b mcpBackend) ProjectDeploys(ctx context.Context, serverID uuid.UUID, project string, limit int) ([]mcp.DeployInfo, error) {
+	rows, err := b.s.deploys.History(ctx, serverID, project, int32(min(limit, historyLimit))) //nolint:gosec // acotado por historyLimit
+	if err != nil {
+		return nil, fmt.Errorf("leer la historia de deploys: %w", err)
+	}
+	out := make([]mcp.DeployInfo, len(rows))
+	for i, d := range rows {
+		out[i] = mcp.DeployInfo{
+			ID: d.ID, Kind: d.Kind, Status: d.Status, Code: d.Code, Message: d.Message,
+			RequestedCommit: d.RequestedCommit, DeployedCommit: d.DeployedCommit, PreviousCommit: d.PreviousCommit,
+			RequestedBy: d.RequestedByName, RequestedAt: d.RequestedAt, StartedAt: d.StartedAt, FinishedAt: d.FinishedAt,
+		}
+	}
+	return out, nil
+}
+
+func projectInfo(p projectSummary) mcp.ProjectInfo {
+	out := mcp.ProjectInfo{
+		ID: p.ID, ServerID: p.ServerID, ServerName: p.ServerName, Name: p.Name,
+		Environment: p.Environment, Runtime: p.Runtime, Repo: p.Repo, Branch: p.Branch,
+		Status: string(p.Status), UnitsTotal: p.Units.Total, UnitsHealthy: p.Units.Healthy, SeenAt: p.SeenAt,
+	}
+	if h := p.Health; h != nil {
+		out.Health = &mcp.HealthInfo{
+			URL: h.URL, State: h.State, StatusCode: int(h.StatusCode), LatencyMS: int(h.LatencyMS),
+			CheckedAt: h.CheckedAt, Detail: h.Detail,
+		}
+	}
+	return out
+}
+
+func mcpUsage(u *runtimeUsage) (*float64, *int64) {
+	if u == nil {
+		return nil, nil
+	}
+	cpu, memory := float64(u.CPUPercent), u.MemoryBytes
+	return &cpu, &memory
 }

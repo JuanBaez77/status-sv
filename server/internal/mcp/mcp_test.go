@@ -27,11 +27,26 @@ type fakeBackend struct {
 	err      error
 	metrics  MetricsInfo
 	asked    []metricsAsk
+	details  map[uuid.UUID]ProjectDetail
+	deploys  map[string][]DeployInfo
 }
 
 func (b *fakeBackend) Servers(context.Context) ([]ServerInfo, error) { return b.servers, b.err }
 
 func (b *fakeBackend) Projects(context.Context) ([]ProjectInfo, error) { return b.projects, b.err }
+
+func (b *fakeBackend) Project(_ context.Context, id uuid.UUID) (ProjectDetail, error) {
+	d, ok := b.details[id]
+	if !ok {
+		return ProjectDetail{}, ErrNotFound
+	}
+	return d, b.err
+}
+
+func (b *fakeBackend) ProjectDeploys(_ context.Context, _ uuid.UUID, project string, limit int) ([]DeployInfo, error) {
+	list := b.deploys[project]
+	return list[:min(limit, len(list))], b.err
+}
 
 type metricsAsk struct {
 	server uuid.UUID
