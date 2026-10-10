@@ -14,6 +14,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/JuanBaez77/status-sv/proto"
+	"github.com/JuanBaez77/status-sv/server/internal/deploys"
 	"github.com/JuanBaez77/status-sv/server/internal/tokens"
 )
 
@@ -273,5 +274,50 @@ func TestMCPProjects(t *testing.T) {
 	}
 	if strings.Join(actions, ",") != "mcp.list_projects mcp,mcp.get_project_status project" {
 		t.Errorf("auditoría = %v", actions)
+	}
+}
+
+func TestMCPDeploys(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.84"
+	f.createUser(t)
+	projectID := f.declaredProject(t, "vps-deploys", "tienda", "production")
+	project, err := f.queries.GetProject(t.Context(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := f.queries.GetUserByUsername(t.Context(), "juan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployID := uuid.Must(uuid.NewV7())
+	if _, err := deploys.NewService(f.pool).Create(t.Context(), deploys.Request{
+		ID: deployID, ServerID: project.ServerID, ProjectID: projectID, ProjectName: "tienda",
+		Environment: "production", Kind: proto.DeployKindDeploy, UserID: user.ID, Username: "juan",
+	}); err != nil {
+		t.Fatalf("crear el deploy: %v", err)
+	}
+	value, _ := f.mcpToken(t, "deploys", []string{"read:production"})
+	session, err := f.mcpSession(t, value, ip)
+	if err != nil {
+		t.Fatalf("conectar: %v", err)
+	}
+
+	res, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "list_deploys", Arguments: map[string]any{"project": "vps-deploys/tienda"}})
+	if err != nil || res.IsError {
+		t.Fatalf("list_deploys = %+v, %v", res, err)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(raw), deployID.String()) || !strings.Contains(string(raw), `"status":"pending"`) {
+		t.Errorf("list_deploys = %s", raw)
+	}
+
+	res, err = session.CallTool(t.Context(), &sdk.CallToolParams{Name: "get_deploy", Arguments: map[string]any{"deploy_id": deployID.String()}})
+	if err != nil || res.IsError {
+		t.Fatalf("get_deploy = %+v, %v", res, err)
+	}
+	raw, _ = json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(raw), `"project":"vps-deploys/tienda"`) || !strings.Contains(string(raw), `"untrusted_notice"`) {
+		t.Errorf("get_deploy = %s", raw)
 	}
 }
