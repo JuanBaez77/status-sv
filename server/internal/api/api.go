@@ -1,6 +1,5 @@
 // Package api expone la API HTTP del control plane: los chequeos de salud, el
-// enrolamiento de agents, el login del panel y, más adelante, el WebSocket del
-// panel y el MCP.
+// enrolamiento de agents, el login y la API del panel, su WebSocket y el MCP.
 package api
 
 import (
@@ -60,6 +59,7 @@ type Server struct {
 	proposalLimiter *ipLimiter
 	tokens          *tokens.Service
 	tokenLimiter    *ipLimiter
+	mcpLimiter      *ipLimiter
 }
 
 // New arma el servidor de la API.
@@ -90,6 +90,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		proposalLimiter: newIPLimiter(proposalRequestsPerMinute, proposalRequestsBurst, limiterTTL),
 		tokens:          tokens.NewService(pool, log),
 		tokenLimiter:    newIPLimiter(tokenRequestsPerMinute, tokenRequestsBurst, limiterTTL),
+		mcpLimiter:      newIPLimiter(mcpRequestsPerMinute, mcpRequestsBurst, limiterTTL),
 	}
 }
 
@@ -140,6 +141,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tokens", s.requireSession(http.HandlerFunc(s.handleListTokens)))
 	mux.Handle("POST /v1/tokens", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleCreateToken))))
 	mux.Handle("DELETE /v1/tokens/{id}", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRevokeToken))))
+	// El MCP (ADR-024): autenticado con su token, no con la sesión del panel.
+	mux.Handle("/mcp", s.mcpHandler())
 
 	// Todo lo que no es API es el panel, que va último para no taparle ninguna
 	// ruta. Una ruta de /v1 que no existe se contesta como API, en JSON: si
