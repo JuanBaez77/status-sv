@@ -126,12 +126,46 @@ func TestGetLogsWhenTheAgentCannot(t *testing.T) {
 	if _, errText := call[getLogsOutput](t, session, "get_logs", args); !strings.Contains(errText, "not_found: no está en la última foto") {
 		t.Errorf("rechazado: %q", errText)
 	}
+	f.backend.logs = LogsInfo{Status: "failed", Message: "journalctl terminó con 1"}
+	if _, errText := call[getLogsOutput](t, session, "get_logs", args); !strings.Contains(errText, "no pudo leer el log: journalctl terminó con 1") {
+		t.Errorf("falló: %q", errText)
+	}
 
 	results := []string{}
 	for _, e := range f.recorder.all() {
 		results = append(results, e.Result)
 	}
-	if strings.Join(results, ",") != "unavailable,rejected" {
+	if strings.Join(results, ",") != "unavailable,rejected,failed" {
 		t.Errorf("resultados = %v", results)
+	}
+}
+
+func TestGetLogsFromASystemdService(t *testing.T) {
+	f := newFixture(t)
+	withLogs(f)
+	d := f.backend.details[projShop]
+	d.Containers = nil
+	d.Services = []ServiceInfo{{Unit: "tienda-web.service"}, {Unit: "tienda-worker.service"}}
+	f.backend.details[projShop] = d
+	f.addToken("logs", []tokens.Scope{"logs:production"})
+	session := f.connect(t, "logs")
+
+	// Con o sin .service.
+	for _, unit := range []string{"tienda-worker", "tienda-worker.service"} {
+		out, errText := call[getLogsOutput](t, session, "get_logs", map[string]any{"project": "tienda", "unit": unit})
+		if errText != "" || out.Kind != "service" || out.Unit != "tienda-worker.service" {
+			t.Errorf("unit %q: %+v, %q", unit, out, errText)
+		}
+	}
+	want := logAsk{server: serverA, kind: "service", target: "tienda-worker.service", lines: defaultLogLines}
+	if len(f.backend.logAsks) != 2 || f.backend.logAsks[0] != want || f.backend.logAsks[1] != want {
+		t.Errorf("pedidos al agent = %+v", f.backend.logAsks)
+	}
+
+	if _, errText := call[getLogsOutput](t, session, "get_logs", map[string]any{"project": "tienda", "unit": "nginx.service"}); !strings.Contains(errText, "tienda-web.service, tienda-worker.service") {
+		t.Errorf("un servicio que no es del proyecto: %q", errText)
+	}
+	if len(f.backend.logAsks) != 2 {
+		t.Errorf("no se le pidió nada más al agent: %+v", f.backend.logAsks)
 	}
 }
