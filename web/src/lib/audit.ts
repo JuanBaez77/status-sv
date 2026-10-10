@@ -7,6 +7,8 @@ import type { AuditEntry } from '@/lib/api'
  */
 export type AuditFilters = {
   actor_type: string
+  /** actor es quién actuó, tal cual: un usuario, el nombre de un token del MCP. */
+  actor: string
   action: string
   result: string
   target_type: string
@@ -17,6 +19,7 @@ export type AuditFilters = {
 
 export const noFilters: AuditFilters = {
   actor_type: '',
+  actor: '',
   action: '',
   result: '',
   target_type: '',
@@ -71,7 +74,7 @@ function dayStart(value: string, offset: number): string | null {
  */
 export function auditQuery(filters: AuditFilters, before: string | null): string {
   const params = new URLSearchParams()
-  for (const name of ['actor_type', 'action', 'result', 'target_type', 'target_id'] as const) {
+  for (const name of ['actor_type', 'actor', 'action', 'result', 'target_type', 'target_id'] as const) {
     if (filters[name] !== '') params.set(name, filters[name])
   }
   const from = dayStart(filters.from, 0)
@@ -104,6 +107,14 @@ export const actionLabels: Record<string, string> = {
   'enrollment_token.create': 'Generó un token de enrolamiento',
   'token.create': 'Creó un token del MCP',
   'token.revoke': 'Revocó un token del MCP',
+  'mcp.auth': 'Usó un token del MCP que no sirve',
+  'mcp.list_servers': 'Listó los servidores (MCP)',
+  'mcp.get_server_metrics': 'Leyó métricas (MCP)',
+  'mcp.list_projects': 'Listó los proyectos (MCP)',
+  'mcp.get_project_status': 'Leyó el estado de un proyecto (MCP)',
+  'mcp.list_deploys': 'Leyó la historia de deploys (MCP)',
+  'mcp.get_deploy': 'Leyó un deploy (MCP)',
+  'mcp.get_logs': 'Pidió logs (MCP)',
 }
 
 /** actionLabel devuelve la acción en palabras, o su nombre si es una que el panel no conoce. */
@@ -127,6 +138,11 @@ const resultLabels: Record<string, string> = {
   error: 'Error',
   succeeded: 'Desplegado',
   rolled_back: 'Volvió atrás',
+  denied: 'Sin permiso',
+  not_found: 'No encontrado',
+  invalid: 'Pedido inválido',
+  rate_limited: 'Frenado por el límite del token',
+  unavailable: 'Agent no disponible',
 }
 
 /** resultLabel devuelve el resultado en palabras, o tal cual si no se conoce. */
@@ -148,6 +164,9 @@ export function resultTone(result: string): Tone {
     case 'rejected':
     case 'error':
     case 'rolled_back':
+    case 'denied':
+    case 'rate_limited':
+    case 'unavailable':
       return 'bad'
     default:
       return 'neutral'
@@ -170,7 +189,8 @@ export function targetText(entry: AuditEntry): string {
         ? detail.servidor
         : undefined
   if (typeof name === 'string' && name !== '') return name
-  return entry.target_id
+  // "-" es una llamada del MCP sin objetivo, como list_servers.
+  return entry.target_id === '-' ? '' : entry.target_id
 }
 
 /** detailLines aplana el detalle de un renglón para mostrarlo: clave y valor. */

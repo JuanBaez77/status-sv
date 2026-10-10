@@ -1,5 +1,6 @@
 import { KeyRound, Loader2, Plus } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
+import { Link } from 'wouter'
 
 import { CommandBlock, CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
@@ -9,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { useProjects } from '@/hooks/use-projects'
 import { useCreateToken, useRevokeToken, useTokens } from '@/hooks/use-tokens'
 import type { CreatedToken, McpToken, McpTokenList, TokenScope } from '@/lib/api'
+import { noFilters, searchFromFilters } from '@/lib/audit'
 import { validCode } from '@/lib/deploys'
 import { since } from '@/lib/format'
 import {
@@ -399,6 +401,13 @@ function TokenCard({ token }: { token: McpToken }) {
             </div>
           )}
         </dl>
+
+        <Link
+          href={searchFromFilters({ ...noFilters, actor_type: 'llm', actor: token.name })}
+          className="w-fit text-xs text-primary underline"
+        >
+          Ver lo que hizo
+        </Link>
 
         {token.status !== 'revoked' && (
           <div className="flex flex-wrap items-center gap-2">

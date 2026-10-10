@@ -112,6 +112,10 @@ describe('TokensPage', () => {
     expect(within(item).getByText(/sv-gcg\/nbcargo/)).toBeInTheDocument()
     expect(within(item).getByText(/hace 2 min desde 203\.0\.113\.7/)).toBeInTheDocument()
     expect(within(item).getByText('Vence en 10 días')).toBeInTheDocument()
+    expect(within(item).getByRole('link', { name: 'Ver lo que hizo' })).toHaveAttribute(
+      'href',
+      '/audit?actor_type=llm&actor=claude-code',
+    )
   })
 
   it('un proyecto que ya no está figura así, sin pasar a todos', async () => {

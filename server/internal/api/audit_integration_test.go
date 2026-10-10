@@ -338,6 +338,21 @@ func TestAuditListFiltersAndPages(t *testing.T) {
 		t.Errorf("de la última hora = %d renglones", len(recent.Entries))
 	}
 
+	// Por actor, tal cual: lo que hizo un token del MCP.
+	if err := recorder.Record(t.Context(), audit.Entry{
+		Actor: "claude-code en la notebook", ActorType: audit.ActorLLM, Action: "mcp.list_servers",
+		TargetType: "mcp", TargetID: target, Result: audit.ResultOK, IP: "192.0.2.2",
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	byActor := list(url.Values{"target_id": {target}, "actor": {"claude-code en la notebook"}})
+	if len(byActor.Entries) != 1 || byActor.Entries[0].Action != "mcp.list_servers" {
+		t.Errorf("por actor = %+v", byActor.Entries)
+	}
+	if none := list(url.Values{"target_id": {target}, "actor": {"claude-code"}}); len(none.Entries) != 0 {
+		t.Errorf("el actor se compara entero: %+v", none.Entries)
+	}
+
 	// Leer la auditoría no se audita: desde esta IP solo quedó el login.
 	wantAudit(t, f.auditFrom(t, ip), "auth.login ok juan", "auth.totp_enroll ok juan")
 }
@@ -349,7 +364,7 @@ func TestAuditListRejectsBadRequests(t *testing.T) {
 	cookie, _ := f.loginWithTOTP(t, ip)
 
 	for name, query := range map[string]string{
-		"parámetro desconocido": "actor=juan",
+		"parámetro desconocido": "usuario=juan",
 		"parámetro repetido":    "action=auth.login&action=auth.logout",
 		"tipo de actor":         "actor_type=robot",
 		"acción sin formato":    "action=login",

@@ -5,6 +5,7 @@
 SELECT id, at, actor, actor_type, action, target_type, target_id, result, ip, detail
 FROM audit_log
 WHERE (sqlc.narg('actor_type')::text IS NULL OR actor_type = sqlc.narg('actor_type'))
+  AND (sqlc.narg('actor')::text IS NULL OR actor = sqlc.narg('actor'))
   AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
   AND (sqlc.narg('target_type')::text IS NULL OR target_type = sqlc.narg('target_type'))
   AND (sqlc.narg('target_id')::text IS NULL OR target_id = sqlc.narg('target_id'))

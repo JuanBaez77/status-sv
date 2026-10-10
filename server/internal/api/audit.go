@@ -23,7 +23,7 @@ const maxBlockedNotes = 4096
 // auditQueryParams son los parámetros que acepta GET /v1/audit. Uno
 // desconocido es un error: un filtro mal escrito no puede devolver todo.
 var auditQueryParams = map[string]bool{
-	"actor_type": true, "action": true, "target_type": true, "target_id": true,
+	"actor_type": true, "actor": true, "action": true, "target_type": true, "target_id": true,
 	"result": true, "from": true, "to": true, "before": true, "limit": true,
 }
 
@@ -50,6 +50,7 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 
 	filter := audit.Filter{
 		ActorType:  query.Get("actor_type"),
+		Actor:      query.Get("actor"),
 		Action:     query.Get("action"),
 		TargetType: query.Get("target_type"),
 		TargetID:   query.Get("target_id"),
