@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/JuanBaez77/status-sv/proto"
 	"github.com/JuanBaez77/status-sv/server/internal/tokens"
 )
 
@@ -168,5 +169,60 @@ func TestMCPRejectsWithoutAValidToken(t *testing.T) {
 	}
 	if rejected != 1 {
 		t.Errorf("los tokens que no sirven se anotan una vez cada 15 minutos por IP, y se anotaron %d", rejected)
+	}
+}
+
+func TestMCPServerMetrics(t *testing.T) {
+	f := setup(t)
+	const ip = "198.51.100.82"
+	serverID := f.enrolledServer(t, "vps-metricas")
+	now := time.Now().UTC().Truncate(10 * time.Second)
+	var samples []proto.Sample
+	for i := range 30 {
+		at := now.Add(-time.Duration(30-i) * 10 * time.Second)
+		samples = append(samples, sample(at, float64(10+i), 2, 45, uint64(i)*1000))
+	}
+	f.ingest(t, serverID, samples...)
+	value, _ := f.mcpToken(t, "metricas", []string{"read:production"})
+
+	session, err := f.mcpSession(t, value, ip)
+	if err != nil {
+		t.Fatalf("conectar: %v", err)
+	}
+	res, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "get_server_metrics", Arguments: map[string]any{"server": "vps-metricas"}})
+	if err != nil || res.IsError {
+		t.Fatalf("get_server_metrics = %+v, %v", res, err)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out struct {
+		Resolution string `json:"resolution"`
+		Samples    int    `json:"samples"`
+		CPU        struct {
+			Last, Avg, Max float64
+		} `json:"cpu_percent"`
+		Memory struct{ Last float64 } `json:"memory_percent"`
+		Swap   *struct{ Max float64 } `json:"swap_percent"`
+		Disks  []struct {
+			Mountpoint  string  `json:"mountpoint"`
+			LastPercent float64 `json:"last_used_percent"`
+		} `json:"disks"`
+		Series struct {
+			Timestamps []string `json:"timestamps"`
+		} `json:"series"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Resolution != "raw" || out.Samples != 30 || out.CPU.Last != 39 || out.CPU.Max != 39 || out.Memory.Last != 25 {
+		t.Errorf("métricas = %s", raw)
+	}
+	if out.Swap == nil || out.Swap.Max != 0 {
+		t.Errorf("con swap declarado va el campo: %s", raw)
+	}
+	if len(out.Disks) != 2 || out.Disks[0].Mountpoint != "/" || out.Disks[0].LastPercent != 45 {
+		t.Errorf("discos = %+v", out.Disks)
+	}
+	if n := len(out.Series.Timestamps); n == 0 || n > 60 {
+		t.Errorf("la serie tiene %d puntos", n)
 	}
 }

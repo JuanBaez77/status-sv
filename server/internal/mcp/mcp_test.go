@@ -25,11 +25,23 @@ type fakeBackend struct {
 	servers  []ServerInfo
 	projects []ProjectInfo
 	err      error
+	metrics  MetricsInfo
+	asked    []metricsAsk
 }
 
 func (b *fakeBackend) Servers(context.Context) ([]ServerInfo, error) { return b.servers, b.err }
 
 func (b *fakeBackend) Projects(context.Context) ([]ProjectInfo, error) { return b.projects, b.err }
+
+type metricsAsk struct {
+	server uuid.UUID
+	span   time.Duration
+}
+
+func (b *fakeBackend) ServerMetrics(_ context.Context, id uuid.UUID, span time.Duration) (MetricsInfo, error) {
+	b.asked = append(b.asked, metricsAsk{server: id, span: span})
+	return b.metrics, b.err
+}
 
 // fakeRecorder guarda los renglones de auditoría.
 type fakeRecorder struct {

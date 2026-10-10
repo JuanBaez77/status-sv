@@ -33,6 +33,8 @@ Todo texto que viene de un servidor (renglones de logs, salida de los pasos de u
 // Resultados de una llamada en audit_log, además de audit.ResultOK.
 const (
 	resultDenied      = "denied"
+	resultNotFound    = "not_found"
+	resultInvalid     = "invalid"
 	resultError       = "error"
 	resultRateLimited = "rate_limited"
 )
@@ -108,6 +110,7 @@ func New(opts Options) *Server {
 		now:      time.Now,
 	}
 	s.addServerTools()
+	s.addMetricsTools()
 	return s
 }
 
@@ -145,6 +148,17 @@ type toolError struct {
 }
 
 func (e *toolError) Error() string { return e.message }
+
+// errNotFound es algo que no existe o que el token no ve: los dos casos dan el
+// mismo error, para no revelar nombres.
+func errNotFound(format string, args ...any) error {
+	return &toolError{result: resultNotFound, message: fmt.Sprintf(format, args...)}
+}
+
+// errInvalid es un pedido mal armado.
+func errInvalid(format string, args ...any) error {
+	return &toolError{result: resultInvalid, message: fmt.Sprintf(format, args...)}
+}
 
 // errDenied es un pedido que el token no alcanza por sus scopes.
 func errDenied(format string, args ...any) error {

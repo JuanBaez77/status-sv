@@ -125,14 +125,7 @@ func parseRange(r *http.Request, now time.Time) (rangeQuery, error) {
 
 	switch raw := r.URL.Query().Get("resolution"); raw {
 	case "":
-		switch span := q.to.Sub(q.from); {
-		case span <= rawRangeLimit:
-			q.resolution = resolutionRaw
-		case span <= minuteRangeLimit:
-			q.resolution = resolutionMinute
-		default:
-			q.resolution = resolutionHour
-		}
+		q.resolution = autoResolution(q.to.Sub(q.from))
 	case resolutionRaw, resolutionMinute, resolutionHour:
 		q.resolution = raw
 	default:
@@ -141,6 +134,19 @@ func parseRange(r *http.Request, now time.Time) (rangeQuery, error) {
 	}
 
 	return q, nil
+}
+
+// autoResolution elige la resolución por el largo del rango: hasta 3 h en
+// crudo, hasta 48 h por minuto y más por hora. La usan el panel y el MCP.
+func autoResolution(span time.Duration) string {
+	switch {
+	case span <= rawRangeLimit:
+		return resolutionRaw
+	case span <= minuteRangeLimit:
+		return resolutionMinute
+	default:
+		return resolutionHour
+	}
 }
 
 // readSeries arma la respuesta leyendo las tres tablas de la resolución pedida.
