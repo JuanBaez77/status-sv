@@ -11,6 +11,7 @@ import { ProjectsPage } from '@/pages/projects'
 import { ProposalPage } from '@/pages/proposal'
 import { ServerPage } from '@/pages/server'
 import { ServersPage } from '@/pages/servers'
+import { TokensPage } from '@/pages/tokens'
 import { TotpEnrollPage, TotpVerifyPage } from '@/pages/totp'
 
 /**
@@ -67,6 +68,8 @@ export default function App() {
         <Route path="/proposals/:id">{(params) => <ProposalPage id={params.id} />}</Route>
 
         <Route path="/audit" component={AuditPage} />
+
+        <Route path="/tokens" component={TokensPage} />
 
         <Route>
           <Card>

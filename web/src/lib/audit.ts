@@ -102,6 +102,8 @@ export const actionLabels: Record<string, string> = {
   'user.password': 'Cambió una contraseña',
   'user.totp_reset': 'Borró un segundo factor',
   'enrollment_token.create': 'Generó un token de enrolamiento',
+  'token.create': 'Creó un token del MCP',
+  'token.revoke': 'Revocó un token del MCP',
 }
 
 /** actionLabel devuelve la acción en palabras, o su nombre si es una que el panel no conoce. */

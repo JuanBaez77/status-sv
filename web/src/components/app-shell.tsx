@@ -61,7 +61,7 @@ export function AppShell({ session, children }: AppShellProps) {
     <div className="min-h-dvh">
       <header className="border-b border-border">
         {/* En una pantalla angosta las secciones bajan a un segundo renglón:
-            con tres ya no entran al lado del nombre y del botón de salir. */}
+            con cuatro ya no entran al lado del nombre y del botón de salir. */}
         <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:py-0">
           <Link href="/" className="flex items-center gap-2 font-medium whitespace-nowrap">
             <Server className="size-4 text-primary" aria-hidden />
@@ -75,6 +75,7 @@ export function AppShell({ session, children }: AppShellProps) {
             <NavLink href="/">Servidores</NavLink>
             <NavLink href="/projects">Proyectos</NavLink>
             <NavLink href="/audit">Auditoría</NavLink>
+            <NavLink href="/tokens">Tokens</NavLink>
           </nav>
 
           <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">

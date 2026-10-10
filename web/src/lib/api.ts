@@ -612,3 +612,63 @@ export const proposals = {
   get: (id: string) => api.get<ProposalDetail>(`/v1/proposals/${encodeURIComponent(id)}`),
   withdraw: (id: string) => api.del<ProposalSummary>(`/v1/proposals/${encodeURIComponent(id)}`),
 }
+
+/** TokenScope es un permiso de un token del MCP, de una lista cerrada (ADR-025). */
+export type TokenScope = 'read:staging' | 'read:production' | 'logs:staging' | 'logs:production'
+
+/** TokenStatus sale de las fechas del token. */
+export type TokenStatus = 'active' | 'expired' | 'revoked'
+
+/** TokenProject es un proyecto de la lista de un token; missing es uno que ya no está declarado. */
+export type TokenProject = {
+  id: string
+  name?: string
+  server_name?: string
+  environment?: 'production' | 'staging'
+  missing?: boolean
+}
+
+/** McpToken es un token del MCP como lo muestra el panel: sin su valor. */
+export type McpToken = {
+  id: string
+  name: string
+  prefix: string
+  status: TokenStatus
+  scopes: TokenScope[]
+  all_projects: boolean
+  projects: TokenProject[]
+  created_by_name: string
+  created_at: string
+  expires_at: string
+  revoked_at: string | null
+  revoked_by_name?: string
+  last_used_at: string | null
+  last_used_ip?: string
+}
+
+export type McpTokenList = {
+  tokens: McpToken[]
+  max_days: number
+  default_days: number
+  scopes: TokenScope[]
+}
+
+export type CreateTokenRequest = {
+  name: string
+  scopes: TokenScope[]
+  project_ids: string[]
+  expires_in_days: number
+  totp_code: string
+}
+
+/** CreatedToken trae el valor del token, la única vez que viaja. */
+export type CreatedToken = {
+  token: string
+  item: McpToken
+}
+
+export const mcpTokens = {
+  list: () => api.get<McpTokenList>('/v1/tokens'),
+  create: (req: CreateTokenRequest) => api.post<CreatedToken>('/v1/tokens', req),
+  revoke: (id: string) => api.del<McpToken>(`/v1/tokens/${encodeURIComponent(id)}`),
+}
