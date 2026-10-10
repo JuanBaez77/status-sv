@@ -30,6 +30,9 @@ type fakeBackend struct {
 	details  map[uuid.UUID]ProjectDetail
 	deploys  map[string][]DeployInfo
 	detailed map[uuid.UUID]DeployDetail
+	logs     LogsInfo
+	logsErr  error
+	logAsks  []logAsk
 }
 
 func (b *fakeBackend) Servers(context.Context) ([]ServerInfo, error) { return b.servers, b.err }
@@ -55,6 +58,17 @@ func (b *fakeBackend) Deploy(_ context.Context, id uuid.UUID) (DeployDetail, err
 		return DeployDetail{}, ErrNotFound
 	}
 	return d, b.err
+}
+
+type logAsk struct {
+	server       uuid.UUID
+	kind, target string
+	lines        int
+}
+
+func (b *fakeBackend) Logs(_ context.Context, server uuid.UUID, kind, target string, lines int) (LogsInfo, error) {
+	b.logAsks = append(b.logAsks, logAsk{server: server, kind: kind, target: target, lines: lines})
+	return b.logs, b.logsErr
 }
 
 type metricsAsk struct {

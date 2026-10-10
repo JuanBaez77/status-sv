@@ -23,7 +23,7 @@ const (
 	callsPerMinute = 60
 	callsBurst     = 20
 	logsPerMinute  = 10
-	logsBurst      = 3
+	logsBurst      = 5
 	// idleTTL es cuánto se recuerda un token sin llamadas.
 	idleTTL = 15 * time.Minute
 	// blockedNoteEvery es cada cuánto se anota en audit_log que un token está
