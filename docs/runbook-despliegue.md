@@ -349,9 +349,14 @@ read -rs STATUSSV_MCP_TOKEN && printf "export STATUSSV_MCP_TOKEN='%s'\n" "${STAT
 claude mcp add --transport http --scope user status-sv https://<DOMINIO>/mcp --header 'Authorization: Bearer ${STATUSSV_MCP_TOKEN}'
 ```
 
-- Las comillas **simples** son a propósito: `${STATUSSV_MCP_TOKEN}` queda escrito tal cual en la
-  configuración y Claude Code lo reemplaza cada vez que se conecta. El token no queda en ningún
-  archivo de Claude Code.
+- **El comando se copia tal cual.** `${STATUSSV_MCP_TOKEN}` es el nombre de la variable, no un lugar
+  para pegar el token. Las comillas **simples** son a propósito: queda escrito así en la
+  configuración, y Claude Code pone el valor cada vez que se conecta. Si se pega el token ahí, queda
+  en texto plano en `~/.claude.json` y en el historial de la terminal, y además no anda (Claude Code
+  busca una variable con ese nombre). En ese caso: revocar el token, `claude mcp remove status-sv
+  --scope user`, y empezar de nuevo con uno nuevo.
+- La salida de `claude mcp add` tiene que mostrar `"Authorization": "Bearer ${STATUSSV_MCP_TOKEN}"`,
+  con el nombre de la variable y no el token.
 - `--scope user` lo deja en la configuración de la cuenta, no en un repo. **Nunca** va en un
   `.mcp.json` que se commitea; un escáner de secretos reconoce el prefijo `svmcp_`.
 
