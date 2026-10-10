@@ -15,7 +15,6 @@
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build && npm run size-check"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.103.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -23,11 +22,11 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwind-merge": "^3.7.0",
-    "tailwindcss": "^4.3.3",
     "uplot": "^1.6.32",
     "wouter": "^3.11.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
@@ -38,6 +37,7 @@
     "@vitest/coverage-v8": "^5.0.1",
     "jsdom": "^29.1.1",
     "oxlint": "^1.81.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
