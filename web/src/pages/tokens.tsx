@@ -304,12 +304,16 @@ function CreatedTokenCard({ created, onClose }: { created: CreatedToken; onClose
             <CommandBlock command={envCommand} label="Copiar el comando de la variable" />
           </li>
           <li className="flex flex-col gap-1.5">
-            <span>En una terminal nueva, conectá Claude Code:</span>
+            <span>
+              En una terminal nueva, conectá Claude Code con este comando <strong>tal cual</strong>,
+              sin pegar el token: <code className="font-mono">{`\${${tokenVariable}}`}</code> es el
+              nombre de la variable, y Claude Code pone su valor al conectarse.
+            </span>
             <CommandBlock command={command} label="Copiar el comando para Claude Code" />
             <span className="text-xs text-muted-foreground">
-              El token no va en el comando: Claude Code lee la variable al conectarse. Queda en tu
-              configuración de usuario, no en un repo; no lo pegues en un{' '}
-              <code className="font-mono">.mcp.json</code> que se commitea.
+              Queda en tu configuración de usuario, no en un repo; no lo pegues en un{' '}
+              <code className="font-mono">.mcp.json</code> que se commitea. Si el token llegó a
+              quedar escrito en un comando, un archivo o un chat, revocalo y creá otro.
             </span>
           </li>
         </ol>

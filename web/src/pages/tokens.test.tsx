@@ -160,6 +160,9 @@ describe('TokensPage', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText(/SetEnvironmentVariable\('STATUSSV_MCP_TOKEN', \(Get-Clipboard\), 'User'\)/)).toBeInTheDocument()
+    // El comando se copia tal cual: ${STATUSSV_MCP_TOKEN} no se reemplaza por el token.
+    expect(screen.getByText(`\${STATUSSV_MCP_TOKEN}`)).toBeInTheDocument()
+    expect(screen.getByText(/tal cual/)).toBeInTheDocument()
 
     const post = calls.find((c) => c.init?.method === 'POST')
     expect(JSON.parse(String(post?.init?.body))).toEqual({
