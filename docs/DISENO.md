@@ -186,12 +186,13 @@ El MCP es remoto, usa transporte Streamable HTTP y vive dentro del control plane
 | `get_logs` | Lectura | Últimas N líneas de una unidad de un proyecto declarado, con secretos enmascarados. | No |
 | `list_deploys` | Lectura | Historial de deploys de un proyecto. | No |
 | `get_deploy` | Lectura | Un deploy con sus pasos y los últimos renglones de cada uno. | No |
-| `deploy` | Escritura | Despliega una referencia con healthcheck y rollback automático. | Sí |
+| `get_approval` | Lectura | En qué quedó un pedido de escritura y, si salió, su deploy. | No |
+| `deploy` | Escritura | Despliega un commit de la rama declarada con healthcheck y rollback automático. | Sí |
 | `rollback` | Escritura | Vuelve a la versión anterior conocida. | Sí |
 | `restart` | Escritura | Reinicia un proyecto declarado. | Sí |
 | `smoke_test` | Verificación | Abre la URL con Playwright y valida checks definidos. | No |
 
-Las de lectura llegan en el Sprint 7, y las de escritura, con las aprobaciones, en el Sprint 8. `smoke_test` necesita el worker de Playwright, de la Fase 4. El texto que viene de un servidor (logs, salida de pasos) viaja aparte y marcado como no confiable, y cada llamada queda en `audit_log` con el token como actor de tipo `llm` ([ADR-024](adr/ADR-024-mcp-remoto.md)).
+Las de lectura llegan en el Sprint 7, y las de escritura, con las aprobaciones, en el Sprint 8 ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md)). `smoke_test` necesita el worker de Playwright, de la Fase 4. El texto que viene de un servidor (logs, salida de pasos) viaja aparte y marcado como no confiable, y cada llamada queda en `audit_log` con el token como actor de tipo `llm` ([ADR-024](adr/ADR-024-mcp-remoto.md)).
 
 **Autenticación**
 
@@ -200,7 +201,7 @@ Las de lectura llegan en el Sprint 7, y las de escritura, con las aprobaciones, 
 
 **Aprobaciones**
 
-Las herramientas de escritura sobre entornos de producción devuelven `pending_approval` con un ID. Vos aprobás o rechazás desde el panel (o con un enlace firmado), y recién ahí el control plane envía el comando al agent. Los entornos de staging pueden configurarse sin aprobación.
+Las herramientas de escritura devuelven `pending_approval` con un ID y no le mandan nada al agent. Vos aprobás desde el panel, con el nombre del proyecto escrito y un código TOTP nuevo, o rechazás. Recién ahí el control plane envía el comando. Un `deploy` lleva el commit completo, y se aprueba y se despliega exactamente ese. El pedido vence a la hora, y ningún token puede aprobar. En el Sprint 8 también staging pide aprobación ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md)).
 
 **Flujo completo con Claude Code**
 
@@ -214,16 +215,17 @@ sequenceDiagram
   J->>CC: el cliente pide tal cambio
   CC->>GH: rama, commit, PR
   GH-->>CC: CI verde, merge
-  CC->>M: deploy(proyecto, ref)
-  M-->>J: pide aprobación (producción)
-  J->>M: aprueba
+  CC->>M: deploy(proyecto, commit)
+  M-->>CC: pending_approval
+  M-->>J: pedido en el panel
+  J->>M: aprueba con TOTP
   M->>A: command deploy
   A-->>M: healthcheck ok o rollback
-  CC->>M: smoke_test(url, checks)
+  CC->>M: get_approval, get_deploy
   M-->>CC: resultado
 ```
 
-Claude Code hace el trabajo de git y PR con `git` y `gh` locales. El MCP se ocupa de lo que Claude Code no puede hacer solo: desplegar, ver el estado real del servidor y verificar la web.
+Claude Code hace el trabajo de git y PR con `git` y `gh` locales. El MCP se ocupa de lo que Claude Code no puede hacer solo: desplegar, ver el estado real del servidor y, en la Fase 4, verificar la web con `smoke_test`.
 
 ## Deploy desde cero
 
@@ -434,7 +436,7 @@ Gestión de backups, renovación y estado de certificados, comparación entre en
 
 ## Sprints 0 a 7
 
-El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy, el Sprint 6 cierra la Fase 2 con el alta de proyectos nuevos, y el Sprint 7 abre la Fase 3 con el MCP de lectura.
+El Sprint 0 deja la base funcionando de punta a punta con lo mínimo, el Sprint 1 entrega la primera vista útil (las métricas de un servidor en vivo), el Sprint 2 suma lo que corre adentro (contenedores, servicios y procesos), el Sprint 3 cierra la Fase 1 con los proyectos y un segundo servidor, el Sprint 4 abre la Fase 2 con el deploy de proyectos Docker, el Sprint 5 suma el de proyectos systemd, la vista de auditoría y el primer deploy, el Sprint 6 cierra la Fase 2 con el alta de proyectos nuevos, el Sprint 7 abre la Fase 3 con el MCP de lectura, y el Sprint 8 la cierra con las escrituras y sus aprobaciones.
 
 **Sprint 0 (1 semana): fundaciones**
 
@@ -1153,6 +1155,91 @@ Quedan abiertos, fuera del sprint:
 - **El consumo del CI.** Con la cuota de 3.000 minutos por mes, el CI de cada PR no entra: hay que
   achicarlo (por ejemplo, los e2e pesados solo en main y de noche) o subir el presupuesto de Actions.
 
+**Sprint 8 (2 semanas): MCP de escritura y aprobaciones**
+
+Objetivo: que Claude Code arregle un error real del cotizador (`cristales-baez`) de punta a punta:
+
+- diagnostica con los logs;
+- arregla y abre el PR;
+- pide el deploy por MCP;
+- Juan lo aprueba en el panel con un código TOTP;
+- el agent lo despliega y lo verifica.
+
+Es el criterio de salida de la Fase 3 y del MVP. Las siete decisiones que lo abrían las tomó Juan
+el 2026-10-12, aceptando las recomendaciones del plan:
+
+- [ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md): las escrituras piden aprobación en
+  el panel, con TOTP y sobre un commit fijo, también en staging, y vencen a la hora;
+- un CI más liviano;
+- el deploy prendido en `cristales-baez-prod`.
+
+Tres reglas ordenan el sprint:
+
+- **El Sprint 8 se despliega en el VPS dedicado**
+  ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). Si el VPS no llega, el
+  código entra igual y producción sigue en solo lectura.
+- **El cotizador no espera al MCP.** El deploy desde el panel existe desde el Sprint 4: se prende al
+  principio del sprint, con un deploy del mismo commit que ya corre. El rollback ya lo cubre el e2e
+  del CI con Docker real, así que no se prueba un deploy roto en producción de un cliente.
+- **El CI se achica.** Con la cuota de minutos de Actions, las pruebas de punta a punta van a `main`
+  y a la corrida nocturna.
+
+CI y cotizador
+
+- [ ] En cada PR, los jobs de Go, integración y panel. Las pruebas de punta a punta (deploy,
+      systemd, alta, laboratorio y carga) y las metas del panel, en `main` y de noche.
+- [ ] `cristales-baez` con el deploy prendido:
+  - deploy key de solo lectura y permisos del agent;
+  - el healthcheck en `/api/health/ready` (base y Redis);
+  - `deploy-check` en verde;
+  - un deploy del mismo commit desde el panel.
+
+Aprobaciones
+
+- [ ] Migración 00014 con `approvals`, y el paquete que crea los pedidos, los decide, los vence y
+      los cancela.
+- [ ] Scopes `deploy`, `rollback` y `restart` por entorno, en la base, la API y el panel de tokens.
+- [ ] API de aprobaciones: listar, aprobar con TOTP y el nombre escrito, y rechazar. Al aprobar, el
+      mismo camino que un deploy del panel.
+- [ ] **Aprobaciones** en el panel:
+  - los pedidos pendientes, en vivo;
+  - lo que se va a ejecutar;
+  - el motivo del LLM, marcado como no confiable.
+
+Agent
+
+- [ ] `restart` en el agent y en el ayudante root, solo de unidades de un proyecto declarado.
+
+MCP
+
+- [ ] `deploy` y `rollback` con `pending_approval`, y `get_approval`.
+- [ ] `restart`.
+- [ ] `register_project` y `bootstrap_project`.
+
+Calidad y despliegue
+
+- [ ] Prueba de punta a punta del flujo: pedido, aprobación con TOTP, deploy y verificación. También
+      un pedido rechazado, uno vencido, uno sin el scope, uno cuyo token se revoca mientras espera, y
+      `restart`.
+- [ ] Runbook:
+  - aprobaciones y scopes de escritura;
+  - qué hacer si un LLM pide algo raro;
+  - proyectos que migran la base al arrancar.
+- [ ] Mudar el control plane al VPS dedicado y desplegar el sprint ahí, con los agents actualizados.
+- [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code.
+
+Terminado cuando:
+
+- un error real del cotizador se arregla desde Claude Code, con el deploy pedido por MCP, aprobado en
+  el panel con TOTP y verificado con `/api/health/ready`;
+- un pedido sin el scope, vencido, rechazado o de un token revocado no ejecuta nada;
+- la auditoría muestra quién pidió y quién aprobó;
+- el control plane corre en el VPS dedicado;
+- el CI está verde, con el e2e del flujo completo.
+
+Si el sprint se estira, la línea de corte es `register_project` y `bootstrap_project` por MCP: pasan
+a la Fase 4, y el alta sigue por el panel.
+
 **Sprints siguientes (resumen)**
 
 | Sprint | Foco | Entregable |
@@ -1190,11 +1277,11 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 **Decisiones abiertas**
 
 - [ ] ¿Alertas por correo, Telegram o ambos? Se decide en la Fase 4, al construirlas.
-- [ ] ¿Las aprobaciones de producción se hacen solo desde el panel o también por un enlace firmado en el celular? Se decide en el Sprint 8.
-- [ ] ¿Se mantiene la aprobación humana también en staging, o solo en producción? Se decide en el Sprint 8.
 - [x] ¿Dónde se cargan los valores de los secretos de un proyecto nuevo? **En el servidor**, en el comando que acepta el alta; al control plane llegan solo los nombres que faltan ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), 2026-10-08).
 - [x] ¿Puede el control plane declarar un proyecto (`register_project`)? **No: lo propone**, y una persona lo acepta en el servidor ([ADR-022](adr/ADR-022-alta-de-proyectos-propuesta-y-aceptacion.md), 2026-10-08).
 - [x] ¿Las plantillas de systemd y del proxy viven en el control plane o en cada servidor? **En el repo**, con un reemplazo de root en cada servidor; el panel solo las muestra. Cambia la regla 7 ([ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md), 2026-10-08).
 - [x] ¿El protocolo del MCP con el SDK oficial o con un transporte propio? **El SDK oficial**, sin estado y con respuestas JSON ([ADR-024](adr/ADR-024-mcp-remoto.md), 2026-10-09).
 - [x] ¿Dónde se crean los tokens del MCP y cómo son sus scopes? **En el panel, con un código TOTP nuevo**; scopes `read` y `logs` por entorno, y una lista opcional de proyectos ([ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md), 2026-10-09).
 - [x] ¿Se mantiene el control plane en el servidor compartido cuando haya tokens con escritura? **No**: se muda al VPS dedicado al cierre del Sprint 7, como pide [ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md) (2026-10-09).
+- [x] ¿Las aprobaciones se hacen solo desde el panel o también por un enlace firmado en el celular? **Solo desde el panel**, con un código TOTP nuevo: el panel ya anda en el celular ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md), 2026-10-12).
+- [x] ¿Se mantiene la aprobación humana también en staging? **Sí, en el Sprint 8**: no hay proyectos de staging; si los hay, se revisa con otro ADR ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md), 2026-10-12).
