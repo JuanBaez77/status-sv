@@ -1,15 +1,31 @@
 name: CI
 
+# Qué corre y cuándo. La cuota de minutos de Actions no alcanza para correr
+# todo en cada push de cada PR: un run completo son unos 38 minutos, y 31 son de
+# las pruebas de punta a punta. Así que:
+#
+#   - En cada PR, los jobs livianos: Go, integración y panel (unos 7 minutos).
+#   - Los pesados (carga, punta a punta, deploy, deploy de systemd, alta,
+#     laboratorio y metas) corren en main, a mano desde Actions
+#     (workflow_dispatch, sobre cualquier rama) y en los PR con la etiqueta
+#     e2e. Un PR que toca el deploy, el agent o el protocolo lleva la etiqueta.
+#
+# Agregar una etiqueta vuelve a disparar el workflow: los livianos no se
+# repiten, y los pesados corren solo si la etiqueta que se agregó es e2e.
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Un run disparado por la etiqueta va en su propio grupo: si cayera en el del
+# PR, cancelaría los livianos que estén corriendo.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event.action == 'labeled' && 'etiqueta' || 'push' }}
   cancel-in-progress: true
 
 # Las imágenes oficiales de Docker Hub se bajan por mirror.gcr.io, la caché de
@@ -22,6 +38,7 @@ env:
 jobs:
   go:
     name: "Go: formato, lint, tests y build"
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -78,6 +95,7 @@ jobs:
 
   integracion:
     name: "Integración: migraciones y acceso a datos"
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -110,6 +128,7 @@ jobs:
 
   web:
     name: "Panel: lint, tipos, tests, build y tamaño"
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -144,6 +163,10 @@ jobs:
 
   carga:
     name: "Carga: 10 agents simulados y metas de rendimiento"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -162,6 +185,10 @@ jobs:
 
   e2e:
     name: "Punta a punta: control plane, base y agent en Docker"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -173,6 +200,10 @@ jobs:
 
   deploy:
     name: "Deploy de punta a punta: bueno, roto, rollback y agent reiniciado"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -210,6 +241,10 @@ jobs:
 
   deploy-systemd:
     name: "Deploy de systemd de punta a punta: ayudante root, roto, rollback y agent reiniciado"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -253,6 +288,10 @@ jobs:
 
   alta:
     name: "Alta de punta a punta: propuesta, aceptación, sitio y primer deploy"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -301,6 +340,10 @@ jobs:
 
   laboratorio:
     name: "Laboratorio: la unidad del agent con el drop-in de deploy"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -331,6 +374,10 @@ jobs:
 
   metas:
     name: "Metas del panel: Lighthouse y latencia métrica → pantalla"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

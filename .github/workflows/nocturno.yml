@@ -4,6 +4,9 @@ name: Nocturno
 # minutos, que alcanzan para ver un problema grueso sin hacer esperar a nadie;
 # acá corre los diez minutos completos contra main, que es el número que dice
 # docs/DISENO.md para el CPU del agent.
+#
+# Si main no cambió desde la noche anterior, no corre: mediría lo mismo, y la
+# cuota de minutos de Actions es chica (ver ci.yml). A mano corre siempre.
 
 on:
   schedule:
@@ -23,8 +26,33 @@ env:
   IMAGENES: mirror.gcr.io/library
 
 jobs:
+  cambios:
+    name: "¿Cambió main desde anoche?"
+    runs-on: ubuntu-latest
+    outputs:
+      hay: ${{ steps.mirar.outputs.hay }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 50
+
+      - id: mirar
+        name: Commits de las últimas 25 horas
+        env:
+          EVENTO: ${{ github.event_name }}
+        run: |
+          if [ "${EVENTO}" = workflow_dispatch ] || [ -n "$(git log --since="25 hours ago" --format=%H -1)" ]; then
+            echo "hay=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "main no cambió desde anoche: la carga larga no corre"
+            echo "hay=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   carga:
     name: "Carga larga: 10 agents durante 10 minutos"
+    needs: cambios
+    if: needs.cambios.outputs.hay == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
