@@ -57,6 +57,18 @@ roadmap de [DISENO.md](DISENO.md).
   restaurados solo se probaron a mano, el día de la mudanza. Un job que lo haga con la base de la
   prueba de punta a punta lo cubriría.
 
+## Lo que deja afuera el MCP de escritura del Sprint 8
+
+- **Staging sin aprobación.** En el Sprint 8 todas las escrituras piden aprobación, porque no hay
+  proyectos de staging. Cuando haya, se decide con otro ADR si staging puede andar sin ella
+  ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md)).
+- **Aprobar con un enlace firmado** desde el celular. Descartado por ahora: el panel ya anda en el
+  celular, y el enlace pediría el código igual.
+- **Avisos del avance de un deploy por MCP** (SSE). Hoy el LLM sigue el pedido con `get_approval`
+  y `get_deploy`.
+- **Un respaldo automático de la base antes de un deploy que trae migraciones.** Hoy lo dice el
+  runbook y lo hace una persona.
+
 ## Lo que deja afuera el MCP de lectura del Sprint 7
 
 - **Alerta ante el uso de un token desde una IP nueva.** El diseño la pide; llega con las alertas

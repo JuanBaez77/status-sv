@@ -54,3 +54,4 @@ Qué más se evaluó y por qué se descartó.
 | [023](ADR-023-plantillas-sitio-y-certificado.md) | Las plantillas viven en el repo, y el sitio y el certificado los hace el comando de aceptación | aceptada |
 | [024](ADR-024-mcp-remoto.md) | El MCP remoto: SDK oficial, sin estado, en `/mcp`, y lo que devuelve | aceptada |
 | [025](ADR-025-tokens-del-mcp-y-scopes.md) | Tokens del MCP: se crean en el panel con TOTP, vencen y llevan scopes por entorno y proyecto | aceptada |
+| [026](ADR-026-escrituras-por-mcp-y-aprobaciones.md) | Las escrituras por MCP piden aprobación en el panel, con TOTP, sobre un commit fijo | aceptada |
