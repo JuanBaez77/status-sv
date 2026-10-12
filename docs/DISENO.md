@@ -1038,33 +1038,33 @@ se audita) y [ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md) (los tokens y sus
 
 Tokens
 
-- [ ] Migración 00013 con `api_tokens` y el paquete que los genera, los verifica y lee sus scopes.
-- [ ] `GET`, `POST` y `DELETE` de `/v1/tokens`, con un código TOTP nuevo para crear;
+- [x] Migración 00013 con `api_tokens` y el paquete que los genera, los verifica y lee sus scopes.
+- [x] `GET`, `POST` y `DELETE` de `/v1/tokens`, con un código TOTP nuevo para crear;
       `token.create` y `token.revoke` en `audit_log`; `server token-revoke` por SSH.
-- [ ] **Tokens del MCP** en el panel: crear con scopes, proyectos y vencimiento, mostrarlo una vez
+- [x] **Tokens del MCP** en el panel: crear con scopes, proyectos y vencimiento, mostrarlo una vez
       con el comando para Claude Code, la lista con el último uso y su IP, y revocar.
 
 MCP
 
-- [ ] `/mcp` con el SDK: el token en `Authorization`, el rechazo de `Origin`, el límite por token y
+- [x] `/mcp` con el SDK: el token en `Authorization`, el rechazo de `Origin`, el límite por token y
       un renglón de `audit_log` por llamada.
-- [ ] `list_servers` y `get_server_metrics`.
-- [ ] `list_projects` y `get_project_status`, filtrados por los scopes y la lista de proyectos.
-- [ ] `list_deploys` y `get_deploy`.
-- [ ] `get_logs`, con el texto del servidor aparte y marcado como no confiable.
+- [x] `list_servers` y `get_server_metrics`.
+- [x] `list_projects` y `get_project_status`, filtrados por los scopes y la lista de proyectos.
+- [x] `list_deploys` y `get_deploy`.
+- [x] `get_logs`, con el texto del servidor aparte y marcado como no confiable.
 
 Panel
 
-- [ ] La auditoría filtra por tipo de actor y muestra las llamadas del MCP.
+- [x] La auditoría filtra por tipo de actor y muestra las llamadas del MCP.
 
 Calidad y despliegue
 
-- [ ] Prueba de punta a punta del MCP en el CI, con un cliente MCP de verdad: cada herramienta, y un
+- [x] Prueba de punta a punta del MCP en el CI, con un cliente MCP de verdad: cada herramienta, y un
       rechazo para un pedido sin token, con un token vencido, revocado, sin el scope, con un
       proyecto fuera de su lista o con `Origin`. Un secreto sembrado en un log sale enmascarado.
-- [ ] Llamadas al MCP durante la prueba de carga, con la meta de 100 MB del control plane.
-- [ ] Runbook: "Conectar Claude Code al MCP", y rotar y revocar un token.
-- [ ] Desplegar el sprint y conectar Claude Code al control plane real.
+- [x] Llamadas al MCP durante la prueba de carga, con la meta de 100 MB del control plane.
+- [x] Runbook: "Conectar Claude Code al MCP", y rotar y revocar un token.
+- [x] Desplegar el sprint y conectar Claude Code al control plane real.
 - [ ] Mudar el control plane al VPS dedicado, antes del primer token con escritura.
 
 Terminado cuando Claude Code, conectado al control plane real con un token de solo lectura, lista
@@ -1075,6 +1075,83 @@ control plane sigue por debajo de 100 MB con 10 agents; y el CI está verde, con
 
 Si el sprint se estira, la línea de corte es la página de tokens del panel: los tokens se crean por
 SSH en el servidor del control plane, con un subcomando, hasta el Sprint 8.
+
+**Cerrado el 2026-10-11** (en producción, el commit `3a5c8d9`). Se entregó en doce PR del plan
+(#111, #112, #115, #117, #118, #120 a #124, #114 y #119) y tres fuera de él, sin usar la línea de
+corte: la página de tokens entró.
+
+- **#113:** el CI baja las imágenes de Docker Hub por `mirror.gcr.io`, porque los runners recibían
+  429 y 500.
+- **#116:** el agent enmascara también los tokens del MCP (`svmcp_`). Fue el único cambio del agent.
+- **#125:** el panel y el runbook dicen que el comando de Claude Code se copia tal cual (ver más
+  abajo). Entra en producción con el próximo despliegue.
+
+El control plane de `srv936263` pasó a `3a5c8d9` con la migración 00013, con un respaldo antes. Los
+dos agents pasaron a `3a5c8d9` y reconectaron en un segundo. El deploy sigue prendido solo en
+`sv-gcg`.
+
+**Claude Code ya consulta el control plane real.** Se conectó con un token de solo lectura creado
+en el panel y guardado en la variable `STATUSSV_MCP_TOKEN`. `list_servers` devolvió los dos
+servidores en línea, con el agent en `3a5c8d9`, sus proyectos y su consumo.
+
+**Desde el 2026-10-09 a la noche, GitHub Actions no arranca jobs.** Todo indica que se agotó la cuota
+mensual de minutos del repo: unos 3.080 en los primeros nueve días de octubre, con picos de 900 y
+1.000 en los días de cierre de sprint. Juan autorizó mergear con el CI corrido en local, y así
+entraron los PR desde #117:
+
+- **Lo que se corrió en local:**
+  - en un contenedor Linux con Go 1.27, nginx, systemd-analyze y el Docker de la máquina:
+    `sqlc diff`, `gofmt`, `go vet`, los tests con `-race`, `golangci-lint`, el tamaño del agent,
+    `go mod tidy` y la integración contra PostgreSQL 17;
+  - `npm run ci` del panel;
+  - las pruebas de punta a punta, la de deploy (con la etapa del MCP) y la de carga.
+- **Lo que no se corrió:** los e2e de systemd (`deploy-systemd`, `alta`, `laboratorio`) y las metas
+  del panel (Lighthouse). Ningún PR del sprint toca lo que miden.
+- **Queda pendiente** correr el CI en main cuando vuelva Actions.
+
+**Lo que mide el MCP:**
+
+- **Etapa del MCP en el e2e de deploy.** Llama como Claude Code (JSON-RPC por HTTP, sin estado)
+  con dos tokens creados con un código nuevo de la app, y verifica:
+  - cada herramienta, sobre lo que dejaron las etapas anteriores;
+  - un secreto sembrado en el log de un contenedor, que llega enmascarado;
+  - los rechazos: sin token, con uno inventado, con `Origin`, sin el scope y revocado;
+  - siete llamadas como `llm` en `audit_log`.
+
+  Ni el secreto ni el token aparecen en la base ni en los registros.
+- **Otros niveles de prueba.** El token vencido se prueba en la integración de `tokens`, y el
+  proyecto fuera de la lista de un token, en los tests de cada herramienta con el cliente del SDK.
+- **Carga.** Con diez agents simulados y cinco clientes del MCP llamando cada segundo y medio, el
+  control plane quedó en 26 MB: 535 llamadas, ninguna con error, p95 de 29 ms.
+- **Producción.** `POST /mcp` sin token o con uno inventado da 401. Cloudflare Access no está
+  delante del panel, así que `/mcp` no necesita una excepción. nginx toma la IP real de
+  `CF-Connecting-IP`, así que el límite por IP ve al cliente.
+
+**Lo que encontraron las pruebas:**
+
+- **La carga mezclaba renglones.** Los clientes del MCP escribían en un mismo archivo y se mezclaban
+  sus renglones. Ahora cada uno escribe en el suyo.
+- **La carga topaba el límite por IP.** Cinco clientes llamando cada segundo desde la misma IP
+  llegaban a los 300 por minuto. Ahora llaman cada segundo y medio.
+- **El cupo de `get_logs` frenaba de más.** Con una ráfaga de 3, un LLM que buscaba la unidad
+  correcta se quedaba sin cupo enseguida. Ahora es de 5, con el mismo límite de 10 por minuto.
+- **El `curl` de Windows no entiende `/tmp`.** Desde Git Bash, la carga anotaba como error llamadas
+  que el control plane había contestado bien. Ahora la carpeta de trabajo va en formato `C:/...`.
+
+**La conexión con el control plane real encontró un problema de texto, no de código.** En el comando
+para Claude Code, `${STATUSSV_MCP_TOKEN}` parecía un lugar para completar, y el token se pegó ahí.
+Quedó en texto plano en `~/.claude.json` y en el historial, pasó por el chat, y además no andaba.
+Se revocó, se sacó la configuración y se empezó de nuevo con otro token. #125 lo dice en la tarjeta
+del token y en el runbook: el comando va tal cual, y un token que quedó escrito se revoca.
+
+Quedan abiertos, fuera del sprint:
+
+- **La mudanza al VPS dedicado**, antes del primer token con escritura del Sprint 8
+  ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). El VPS lo contrata Juan.
+- **El alta en un servidor real**, como al cierre del Sprint 6.
+- **`bot-ypf` y `gcg-alertas` sin pasar `deploy-check`** en `sv-gcg`, como al cierre del Sprint 5.
+- **El consumo del CI.** Con la cuota de 3.000 minutos por mes, el CI de cada PR no entra: hay que
+  achicarlo (por ejemplo, los e2e pesados solo en main y de noche) o subir el presupuesto de Actions.
 
 **Sprints siguientes (resumen)**
 
