@@ -72,6 +72,15 @@ type Querier interface {
 	// recibido ninguna foto (seq 0: rechazado o sin respuesta) sí puede revivir,
 	// porque el agent pudo haberlo empezado igual.
 	ApplyDeployEvent(ctx context.Context, arg ApplyDeployEventParams) (Deploy, error)
+	// CancelApproval cancela un pedido pendiente: el sistema lo decide, sin
+	// persona.
+	CancelApproval(ctx context.Context, arg CancelApprovalParams) (uuid.UUID, error)
+	// CancelApprovalsOfDeadTokens cancela los pendientes cuyo token se revocó,
+	// venció o ya no está: un pedido no sobrevive a la credencial que lo hizo.
+	CancelApprovalsOfDeadTokens(ctx context.Context, now time.Time) ([]uuid.UUID, error)
+	// CancelApprovalsWithoutProject cancela los pendientes de un proyecto que dejó
+	// de estar declarado.
+	CancelApprovalsWithoutProject(ctx context.Context, now time.Time) ([]uuid.UUID, error)
 	// CloseProposal cierra una propuesta abierta: rechazada por el agent,
 	// retirada, vencida o aceptada.
 	CloseProposal(ctx context.Context, arg CloseProposalParams) (ProjectProposal, error)
@@ -89,6 +98,9 @@ type Querier interface {
 	// las sesiones, para que los plazos se midan con el mismo reloj.
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateAgentCredential(ctx context.Context, arg CreateAgentCredentialParams) (AgentCredential, error)
+	// Los pedidos de escritura del MCP y su aprobación (ADR-026). Los instantes los
+	// pone la aplicación, para que el vencimiento se mida con el mismo reloj.
+	CreateApproval(ctx context.Context, arg CreateApprovalParams) error
 	// Deploys y auditoría (ADR-015 y ADR-017, migración 00009).
 	// CreateDeploy anota un deploy pedido, antes de mandárselo al agent. Si ya
 	// hay uno activo en el proyecto, el índice único lo rechaza.
@@ -101,6 +113,9 @@ type Querier interface {
 	// los vencimientos, para que los plazos se midan todos con el mismo reloj.
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// DecideApproval aprueba o rechaza un pedido que sigue pendiente y no venció.
+	// Sin filas es que ya se había decidido o que venció.
+	DecideApproval(ctx context.Context, arg DecideApprovalParams) (uuid.UUID, error)
 	DeleteExpiredEnrollmentTokens(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
 	// DeleteInvalidProjectFiles borra los archivos inválidos de un servidor, antes
@@ -136,6 +151,8 @@ type Querier interface {
 	// ExistingProjectIDs devuelve cuáles de los IDs son proyectos declarados hoy,
 	// para no guardar un token con una lista que no sirve.
 	ExistingProjectIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
+	// ExpireApprovals vence los pendientes cuyo plazo pasó.
+	ExpireApprovals(ctx context.Context, now time.Time) ([]uuid.UUID, error)
 	// ExpirePendingDeploys cierra los deploys que siguen pendientes pasado el
 	// plazo: el agent nunca confirmó que los recibió.
 	ExpirePendingDeploys(ctx context.Context, arg ExpirePendingDeploysParams) ([]Deploy, error)
@@ -151,6 +168,7 @@ type Querier interface {
 	// GetActiveSession busca la sesión de un token si sigue viva: ni pasó su
 	// vencimiento absoluto ni se usó por última vez antes de idle_cutoff.
 	GetActiveSession(ctx context.Context, arg GetActiveSessionParams) (GetActiveSessionRow, error)
+	GetApproval(ctx context.Context, id uuid.UUID) (GetApprovalRow, error)
 	// GetDeploy devuelve un deploy con el nombre de su servidor.
 	GetDeploy(ctx context.Context, id uuid.UUID) (GetDeployRow, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash []byte) (EnrollmentToken, error)
@@ -191,6 +209,9 @@ type Querier interface {
 	// ese servidor: las demás, el agent las tiene que borrar.
 	KnownProposals(ctx context.Context, arg KnownProposalsParams) ([]uuid.UUID, error)
 	ListAPITokens(ctx context.Context) ([]ApiToken, error)
+	// ListApprovals devuelve los pedidos, los más nuevos primero. Con status vacío,
+	// de todos los estados.
+	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]ListApprovalsRow, error)
 	// ListAudit lee la auditoría del más nuevo al más viejo (ADR-020). Cada filtro
 	// es opcional. El cursor es el instante y el ID del último renglón que ya se
 	// vio: así un renglón que entra mientras tanto no corre los que siguen.
@@ -255,6 +276,9 @@ type Querier interface {
 	// OpenProposals devuelve las propuestas abiertas de un servidor, que el agent
 	// tiene que tener guardadas.
 	OpenProposals(ctx context.Context, arg OpenProposalsParams) ([]ProjectProposal, error)
+	// PendingApprovalForProject es el pedido que espera sobre un proyecto, para
+	// nombrarlo cuando llega otro.
+	PendingApprovalForProject(ctx context.Context, projectID *uuid.UUID) (uuid.UUID, error)
 	// ProjectDeclaredOnServer dice si ese servidor ya declara un proyecto con ese
 	// nombre: entonces no se puede proponer.
 	ProjectDeclaredOnServer(ctx context.Context, arg ProjectDeclaredOnServerParams) (bool, error)
@@ -271,6 +295,8 @@ type Querier interface {
 	// RevokeAllAPITokens revoca todos los que siguen sin revocar. Es el freno de
 	// emergencia de `server token-revoke --all`.
 	RevokeAllAPITokens(ctx context.Context, arg RevokeAllAPITokensParams) (int64, error)
+	// SetApprovalDeploy anota el deploy que salió de un pedido aprobado.
+	SetApprovalDeploy(ctx context.Context, arg SetApprovalDeployParams) (int64, error)
 	// SetPendingTOTP guarda el secreto cifrado de un alta en curso. Pisa el de un
 	// alta anterior que no se confirmó.
 	SetPendingTOTP(ctx context.Context, arg SetPendingTOTPParams) (int64, error)
