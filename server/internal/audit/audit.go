@@ -62,6 +62,14 @@ const (
 	// ActionMCPAuth es un pedido al MCP con un token que no sirve. Cada
 	// llamada a una herramienta se anota como "mcp.<herramienta>" (ADR-024).
 	ActionMCPAuth = "mcp.auth"
+	// Los pedidos de escritura del MCP (ADR-026). Los pide un token, como
+	// llm; los aprueba o los rechaza una persona; los vence o los cancela el
+	// sistema.
+	ActionApprovalRequest = "approval.request"
+	ActionApprovalApprove = "approval.approve"
+	ActionApprovalReject  = "approval.reject"
+	ActionApprovalExpire  = "approval.expire"
+	ActionApprovalCancel  = "approval.cancel"
 )
 
 // Resultados de las acciones de acceso. Las de deploy usan el estado del

@@ -38,6 +38,30 @@ type ApiToken struct {
 	LastUsedIp    *string
 }
 
+type Approval struct {
+	ID                uuid.UUID
+	Operation         string
+	ServerID          uuid.UUID
+	ProjectID         *uuid.UUID
+	ProjectName       string
+	Environment       string
+	CommitSha         string
+	Unit              string
+	Reason            string
+	RequestedByToken  *uuid.UUID
+	RequestedByName   string
+	RequestedByPrefix string
+	RequestedIp       string
+	RequestedAt       time.Time
+	ExpiresAt         time.Time
+	Status            string
+	DecidedAt         *time.Time
+	DecidedBy         *uuid.UUID
+	DecidedByName     *string
+	DecisionNote      string
+	DeployID          *uuid.UUID
+}
+
 type AuditLog struct {
 	ID         uuid.UUID
 	At         time.Time
