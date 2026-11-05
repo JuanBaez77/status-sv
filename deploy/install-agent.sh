@@ -127,7 +127,15 @@ fi
 
 paso "instalando el binario y la unidad"
 # El servicio corre con otro usuario que no puede modificar su propio binario.
-install -o root -g root -m 0755 "${BINARY_SRC}" "${BINARY_DEST}"
+# Con el binario ya instalado (para prender o apagar el deploy, o sumar un
+# proyecto), install se niega a copiarlo sobre sí mismo: alcanza con dejarle
+# el dueño y los permisos.
+if [ "${BINARY_SRC}" -ef "${BINARY_DEST}" ]; then
+  chown root:root "${BINARY_DEST}"
+  chmod 0755 "${BINARY_DEST}"
+else
+  install -o root -g root -m 0755 "${BINARY_SRC}" "${BINARY_DEST}"
+fi
 install -o root -g root -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0700 "${STATE_DIR}"
 install -d -o root -g root -m 0755 "$(dirname "${PROJECTS_DIR}")"

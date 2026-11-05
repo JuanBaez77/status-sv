@@ -613,8 +613,10 @@ verde "ok: el agent ocupa $((MEMORIA / 1024 / 1024)) MiB después de siete deplo
 
 # --- 8. Apagar el deploy ---
 
+# Con el binario ya instalado, como dice el runbook: el instalador no puede
+# copiarlo sobre sí mismo.
 paso "8. --disable-deploy saca el drop-in, el ayudante y su socket"
-if ! APAGADO="$(bash "${RAIZ}/deploy/install-agent.sh" --disable-deploy "${AGENT_BIN}" 2>&1)"; then
+if ! APAGADO="$(bash "${RAIZ}/deploy/install-agent.sh" --disable-deploy /usr/local/bin/statussv-agent 2>&1)"; then
   printf '%s\n' "${APAGADO}"
   falla "el instalador falló al apagar el deploy"
 fi
