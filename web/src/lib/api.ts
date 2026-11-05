@@ -613,8 +613,18 @@ export const proposals = {
   withdraw: (id: string) => api.del<ProposalSummary>(`/v1/proposals/${encodeURIComponent(id)}`),
 }
 
-/** TokenScope es un permiso de un token del MCP, de una lista cerrada (ADR-025). */
-export type TokenScope = 'read:staging' | 'read:production' | 'logs:staging' | 'logs:production'
+/** TokenScope es un permiso de un token del MCP, de una lista cerrada (ADR-025, ADR-026). */
+export type TokenScope =
+  | 'read:staging'
+  | 'read:production'
+  | 'logs:staging'
+  | 'logs:production'
+  | 'deploy:staging'
+  | 'deploy:production'
+  | 'rollback:staging'
+  | 'rollback:production'
+  | 'restart:staging'
+  | 'restart:production'
 
 /** TokenStatus sale de las fechas del token. */
 export type TokenStatus = 'active' | 'expired' | 'revoked'

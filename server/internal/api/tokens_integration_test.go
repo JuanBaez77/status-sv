@@ -90,7 +90,8 @@ func TestTokensCreateListRevoke(t *testing.T) {
 	if len(empty.Tokens) != 0 || empty.MaxDays != 90 || empty.DefaultDays != 30 {
 		t.Errorf("lista vacía = %+v", empty)
 	}
-	if strings.Join(empty.Scopes, ",") != "read:staging,read:production,logs:staging,logs:production" {
+	if strings.Join(empty.Scopes, ",") != "read:staging,read:production,logs:staging,logs:production,"+
+		"deploy:staging,deploy:production,rollback:staging,rollback:production,restart:staging,restart:production" {
 		t.Errorf("scopes ofrecidos = %v", empty.Scopes)
 	}
 

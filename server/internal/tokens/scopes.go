@@ -9,7 +9,9 @@ import (
 // Capability es lo que un scope deja hacer.
 type Capability string
 
-// Capacidades del Sprint 7. Las de escritura llegan en el Sprint 8.
+// Capacidades: las de lectura del Sprint 7 y las de escritura del Sprint 8.
+// Una de escritura deja pedir, no ejecutar: cada pedido espera la aprobación
+// de una persona en el panel (ADR-026).
 const (
 	// CapRead son las herramientas de lectura sobre los proyectos y sus
 	// deploys, y las de servidores.
@@ -17,6 +19,13 @@ const (
 	// CapLogs es get_logs: va aparte porque los logs son lo más sensible que
 	// el MCP puede mostrar.
 	CapLogs Capability = "logs"
+	// CapDeploy es pedir un deploy de un commit, o el primer deploy de un
+	// proyecto aceptado.
+	CapDeploy Capability = "deploy"
+	// CapRollback es pedir volver al último estado bueno.
+	CapRollback Capability = "rollback"
+	// CapRestart es pedir reiniciar las unidades de un proyecto.
+	CapRestart Capability = "restart"
 )
 
 // Entornos de un proyecto, los mismos del project.yaml.
@@ -28,13 +37,28 @@ const (
 // Scope es un permiso: una capacidad sobre un entorno, como "read:staging".
 type Scope string
 
-// Scopes que existen, en el orden en que se guardan. La migración 00013
+// Scopes que existen, en el orden en que se guardan. La migración 00015
 // rechaza cualquier otro.
 var knownScopes = []Scope{
 	"read:staging",
 	"read:production",
 	"logs:staging",
 	"logs:production",
+	"deploy:staging",
+	"deploy:production",
+	"rollback:staging",
+	"rollback:production",
+	"restart:staging",
+	"restart:production",
+}
+
+// Writes dice si el scope deja pedir una escritura.
+func (s Scope) Writes() bool {
+	switch s.Capability() {
+	case CapDeploy, CapRollback, CapRestart:
+		return true
+	}
+	return false
 }
 
 // KnownScopes devuelve la lista cerrada de scopes, en su orden.

@@ -22,6 +22,7 @@ import {
   requestError,
   scopeGroups,
   scopeLabel,
+  writes,
   statusLabel,
   tokenVariable,
   validDays,
@@ -192,6 +193,13 @@ function NewTokenForm({ list, onDone }: { list: McpTokenList; onDone: (created: 
           Leer es el estado, las métricas y los deploys. Los logs van aparte: son lo más sensible
           que el MCP puede mostrar.
         </p>
+        {scopes.some(writes) && (
+          <p role="note" className="rounded-md border border-status-warning/40 bg-status-warning/10 p-2 text-xs">
+            Con deploy, rollback o reiniciar, el LLM puede <strong>pedir</strong> esas operaciones.
+            Ninguna se ejecuta sola: cada pedido espera que lo apruebes en <strong>Aprobaciones</strong>{' '}
+            con un código de la app. Dale solo los entornos y los proyectos que necesite.
+          </p>
+        )}
       </fieldset>
 
       <fieldset className="flex flex-col gap-2">

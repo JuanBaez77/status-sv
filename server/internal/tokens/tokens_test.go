@@ -11,11 +11,11 @@ import (
 )
 
 func TestParseScopes(t *testing.T) {
-	got, err := ParseScopes([]string{"logs:production", "read:staging", "read:staging"})
+	got, err := ParseScopes([]string{"restart:production", "logs:production", "read:staging", "deploy:staging", "read:staging"})
 	if err != nil {
 		t.Fatalf("ParseScopes: %v", err)
 	}
-	want := []Scope{"read:staging", "logs:production"}
+	want := []Scope{"read:staging", "logs:production", "deploy:staging", "restart:production"}
 	if !slices.Equal(got, want) {
 		t.Errorf("ParseScopes = %v, se esperaba %v (sin repetidos y en el orden de la lista)", got, want)
 	}
@@ -25,13 +25,36 @@ func TestParseScopes(t *testing.T) {
 		{},
 		{"read"},
 		{"read:*"},
-		{"deploy:staging"},
+		{"deploy"},
+		{"exec:production"},
+		{"approve:production"},
 		{"READ:staging"},
 		{"read:staging", "read:dev"},
 	} {
 		if _, err := ParseScopes(raw); !errors.Is(err, ErrInvalid) {
 			t.Errorf("ParseScopes(%q) = %v, se esperaba ErrInvalid", raw, err)
 		}
+	}
+}
+
+func TestWriteScopes(t *testing.T) {
+	writes := 0
+	for _, known := range KnownScopes() {
+		if known.Writes() {
+			writes++
+		}
+	}
+	if writes != 6 {
+		t.Errorf("hay %d scopes de escritura y se esperaban 6", writes)
+	}
+	for _, s := range []Scope{"read:production", "logs:staging"} {
+		if s.Writes() {
+			t.Errorf("%q no escribe", s)
+		}
+	}
+	tok := Token{Scopes: []Scope{"read:production", "deploy:production"}}
+	if !tok.Allows(CapDeploy, EnvProduction) || tok.Allows(CapDeploy, EnvStaging) || tok.Allows(CapRollback, EnvProduction) {
+		t.Error("deploy:production deja pedir deploys en producción y nada más")
 	}
 }
 
