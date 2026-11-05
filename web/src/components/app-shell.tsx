@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Link, useLocation } from 'wouter'
 
 import { Button } from '@/components/ui/button'
+import { useApprovals } from '@/hooks/use-approvals'
 import { useLogout } from '@/hooks/use-session'
 import type { Session } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -53,6 +54,24 @@ function NavLink({ href, children }: { href: string; children: ReactNode }) {
   )
 }
 
+/**
+ * PendingBadge cuenta los pedidos del MCP que esperan una aprobación
+ * (ADR-026): un LLM los pide en cualquier momento.
+ */
+function PendingBadge() {
+  const pending = useApprovals('pending')
+  const count = pending.data?.length ?? 0
+  if (count === 0) return null
+  return (
+    <span
+      aria-label={`${count} pendientes`}
+      className="ml-1 rounded-full bg-status-warning px-1.5 text-xs font-medium text-background"
+    >
+      {count}
+    </span>
+  )
+}
+
 /** AppShell es el marco del panel: la barra de arriba y el contenido. */
 export function AppShell({ session, children }: AppShellProps) {
   const logout = useLogout()
@@ -61,7 +80,8 @@ export function AppShell({ session, children }: AppShellProps) {
     <div className="min-h-dvh">
       <header className="border-b border-border">
         {/* En una pantalla angosta las secciones bajan a un segundo renglón:
-            con cuatro ya no entran al lado del nombre y del botón de salir. */}
+            ya no entran al lado del nombre y del botón de salir. Y si en un
+            teléfono tampoco entran en ese renglón, siguen en otro. */}
         <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:py-0">
           <Link href="/" className="flex items-center gap-2 font-medium whitespace-nowrap">
             <Server className="size-4 text-primary" aria-hidden />
@@ -70,10 +90,14 @@ export function AppShell({ session, children }: AppShellProps) {
 
           <nav
             aria-label="Secciones"
-            className="order-last flex w-full items-center gap-1 text-sm sm:order-none sm:w-auto"
+            className="order-last flex w-full flex-wrap items-center gap-1 text-sm sm:order-none sm:w-auto"
           >
             <NavLink href="/">Servidores</NavLink>
             <NavLink href="/projects">Proyectos</NavLink>
+            <NavLink href="/approvals">
+              Aprobaciones
+              <PendingBadge />
+            </NavLink>
             <NavLink href="/audit">Auditoría</NavLink>
             <NavLink href="/tokens">Tokens</NavLink>
           </nav>
