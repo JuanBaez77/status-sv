@@ -1067,7 +1067,8 @@ Calidad y despliegue
 - [x] Llamadas al MCP durante la prueba de carga, con la meta de 100 MB del control plane.
 - [x] Runbook: "Conectar Claude Code al MCP", y rotar y revocar un token.
 - [x] Desplegar el sprint y conectar Claude Code al control plane real.
-- [ ] Mudar el control plane al VPS dedicado, antes del primer token con escritura.
+- [ ] Mudar el control plane al VPS dedicado, antes del primer token con escritura. *(Descartado el
+      2026-11-05: se queda en `srv936263`, ver [ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md).)*
 
 Terminado cuando Claude Code, conectado al control plane real con un token de solo lectura, lista
 los servidores y los proyectos, lee las métricas, el estado y los deploys de un proyecto y los logs
@@ -1175,9 +1176,9 @@ el 2026-10-12, aceptando las recomendaciones del plan:
 
 Tres reglas ordenan el sprint:
 
-- **El Sprint 8 se despliega en el VPS dedicado**
-  ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). Si el VPS no llega, el
-  código entra igual y producción sigue en solo lectura.
+- **El Sprint 8 se despliega en `srv936263`**, donde ya corre el control plane. El 2026-11-05 Juan
+  decidió no mudarlo a un VPS dedicado ([ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md)): lo que gana quien se adueña del control plane está
+  acotado por el agent, que no ejecuta texto libre y trae solo commits de la rama declarada.
 - **El cotizador no espera al MCP.** El deploy desde el panel existe desde el Sprint 4: se prende al
   principio del sprint, con un deploy del mismo commit que ya corre. El rollback ya lo cubre el e2e
   del CI con Docker real, así que no se prueba un deploy roto en producción de un cliente.
@@ -1225,7 +1226,7 @@ Calidad y despliegue
   - aprobaciones y scopes de escritura;
   - qué hacer si un LLM pide algo raro;
   - proyectos que migran la base al arrancar.
-- [ ] Mudar el control plane al VPS dedicado y desplegar el sprint ahí, con los agents actualizados.
+- [ ] Desplegar el sprint en `srv936263`, con los agents actualizados.
 - [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code.
 
 Terminado cuando:
@@ -1234,7 +1235,6 @@ Terminado cuando:
   el panel con TOTP y verificado con `/api/health/ready`;
 - un pedido sin el scope, vencido, rechazado o de un token revocado no ejecuta nada;
 - la auditoría muestra quién pidió y quién aprobó;
-- el control plane corre en el VPS dedicado;
 - el CI está verde, con el e2e del flujo completo.
 
 Si el sprint se estira, la línea de corte es `register_project` y `bootstrap_project` por MCP: pasan
@@ -1282,6 +1282,6 @@ El mayor riesgo es de alcance: la idea es grande y el MVP tiene que seguir siend
 - [x] ¿Las plantillas de systemd y del proxy viven en el control plane o en cada servidor? **En el repo**, con un reemplazo de root en cada servidor; el panel solo las muestra. Cambia la regla 7 ([ADR-023](adr/ADR-023-plantillas-sitio-y-certificado.md), 2026-10-08).
 - [x] ¿El protocolo del MCP con el SDK oficial o con un transporte propio? **El SDK oficial**, sin estado y con respuestas JSON ([ADR-024](adr/ADR-024-mcp-remoto.md), 2026-10-09).
 - [x] ¿Dónde se crean los tokens del MCP y cómo son sus scopes? **En el panel, con un código TOTP nuevo**; scopes `read` y `logs` por entorno, y una lista opcional de proyectos ([ADR-025](adr/ADR-025-tokens-del-mcp-y-scopes.md), 2026-10-09).
-- [x] ¿Se mantiene el control plane en el servidor compartido cuando haya tokens con escritura? **No**: se muda al VPS dedicado al cierre del Sprint 7, como pide [ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md) (2026-10-09).
+- [x] ¿Se mantiene el control plane en el servidor compartido cuando haya tokens con escritura? **Sí**: se queda en `srv936263` ([ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md), 2026-11-05). El 2026-10-09 se había decidido mudarlo al VPS dedicado al cierre del Sprint 7, como pedía [ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md).
 - [x] ¿Las aprobaciones se hacen solo desde el panel o también por un enlace firmado en el celular? **Solo desde el panel**, con un código TOTP nuevo: el panel ya anda en el celular ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md), 2026-10-12).
 - [x] ¿Se mantiene la aprobación humana también en staging? **Sí, en el Sprint 8**: no hay proyectos de staging; si los hay, se revisa con otro ADR ([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md), 2026-10-12).

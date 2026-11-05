@@ -1,7 +1,8 @@
 # ADR-018: El control plane vive en un servidor propio compartido, detrás de su nginx
 
 - **Estado:** aceptada. La mudanza se hizo el 2026-10-02 (runbook, sección 6): el control plane
-  corre en `srv936263`.
+  corre en `srv936263`. **Enmendada por [ADR-027](ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md)**:
+  las escrituras por MCP ya no piden mudarlo al VPS dedicado.
 - **Fecha:** 2026-10-01
 - **Reemplaza a:** [ADR-007](ADR-007-control-plane-en-servidor-de-cliente.md)
 
@@ -92,7 +93,8 @@ Pasar al VPS dedicado de [ADR-014](ADR-014-control-plane-en-vps-propio.md), que 
 destino, **antes** de cualquiera de estas cosas:
 
 - Que existan las alertas de la Fase 4.
-- Que haya tokens del MCP con permiso de escritura (Fase 3).
+- ~~Que haya tokens del MCP con permiso de escritura (Fase 3).~~ Sacado por
+  [ADR-027](ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md), que suma sus propios motivos para revisarla.
 - Que haga falta desplegar con status-sv algún proyecto de `srv936263`.
 
 En el VPS dedicado, con el Docker común, `no-new-privileges` vuelve solo: es el compose de

@@ -965,6 +965,17 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d server
 En `srv936263` el directorio es `/root/status-sv/deploy` y cada comando lleva además
 `-f docker-compose.snap.yml` (sección 1, *Si el Docker del servidor es el de snap*).
 
+**En `srv936263`, antes de actualizar: ningún vecino con el socket de Docker ni `privileged`.** El
+control plane se queda en ese servidor compartido con esa condición
+([ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md)). El chequeo es de solo
+lectura y no tiene que imprimir nada:
+
+```bash
+docker ps -q | xargs docker inspect --format '{{.Name}} privileged={{.HostConfig.Privileged}} {{range .Mounts}}{{.Source}} {{end}}' | grep -E 'privileged=true|docker.sock'
+```
+
+Si imprime algo, no se actualiza: se avisa y se revisa ADR-027.
+
 Los agents se desconectan durante el reinicio y reconectan solos con backoff: no hace falta
 tocarlos.
 
