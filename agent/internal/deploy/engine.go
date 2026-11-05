@@ -105,6 +105,7 @@ type (
 		Build(ctx context.Context, tail *runner.Tail) error
 		Up(ctx context.Context, tail *runner.Tail) error
 		Down(ctx context.Context, tail *runner.Tail) error
+		Restart(ctx context.Context, service string, tail *runner.Tail) error
 		Run(ctx context.Context, step projectspec.Step, tail *runner.Tail) error
 		Snapshot(ctx context.Context, api compose.ImageAPI) ([]compose.ServiceImage, error)
 		Retain(ctx context.Context, api compose.ImageAPI, commit string, images []compose.ServiceImage) error
@@ -180,15 +181,16 @@ func (e *Engine) Wait() {
 	e.wg.Wait()
 }
 
-// Start acepta o rechaza un deploy, un rollback o un primer deploy. Si lo
-// acepta, lo corre aparte y contesta enseguida: el avance sale por la bandeja.
+// Start acepta o rechaza un deploy, un rollback, un primer deploy o un
+// reinicio. Si lo acepta, lo corre aparte y contesta enseguida: el avance sale
+// por la bandeja.
 //
 // El ID del comando es el del deploy. Un comando repetido (el control plane
 // no recibió el acuse) se contesta igual, sin volver a ejecutarlo.
 func (e *Engine) Start(id uuid.UUID, cmd proto.Command) proto.CommandAck {
 	var (
-		kind         = proto.DeployKindDeploy
-		name, commit string
+		kind               = proto.DeployKindDeploy
+		name, commit, unit string
 	)
 	switch {
 	case cmd.Operation == proto.OpDeploy && cmd.Deploy != nil:
@@ -197,6 +199,8 @@ func (e *Engine) Start(id uuid.UUID, cmd proto.Command) proto.CommandAck {
 		kind, name = proto.DeployKindRollback, cmd.Rollback.Project
 	case cmd.Operation == proto.OpBootstrap && cmd.Bootstrap != nil:
 		kind, name = proto.DeployKindBootstrap, cmd.Bootstrap.Project
+	case cmd.Operation == proto.OpRestart && cmd.Restart != nil:
+		kind, name, unit = proto.DeployKindRestart, cmd.Restart.Project, cmd.Restart.Unit
 	default:
 		return reject(id, proto.CommandUnknownOperation, "el motor de deploy no atiende esa operación")
 	}
@@ -250,7 +254,7 @@ func (e *Engine) Start(id uuid.UUID, cmd proto.Command) proto.CommandAck {
 
 	e.wg.Go(func() {
 		defer e.release(id)
-		r := &run{e: e, j: j, spec: spec, commit: commit}
+		r := &run{e: e, j: j, spec: spec, commit: commit, unit: unit}
 		r.execute()
 	})
 	return proto.CommandAck{CommandID: id, Status: proto.CommandOK, Message: "deploy aceptado"}

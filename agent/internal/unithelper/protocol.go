@@ -46,7 +46,8 @@ const (
 	OpRunStep Op = "run_step"
 	// OpStopStep para un paso que quedó corriendo.
 	OpStopStep Op = "stop_step"
-	// OpRestartUnits reinicia las unidades declaradas del proyecto.
+	// OpRestartUnits reinicia las unidades declaradas del proyecto, o una
+	// sola de ellas si el pedido la nombra (ADR-026).
 	OpRestartUnits Op = "restart_units"
 	// OpStopUnits para las unidades declaradas del proyecto. Es lo que deshace
 	// un primer deploy que no quedó bien (ADR-021).
@@ -76,6 +77,9 @@ type Request struct {
 	Phase  Phase  `json:"phase,omitempty"`
 	Index  int    `json:"index,omitempty"`
 	Deploy string `json:"deploy,omitempty"`
+	// Unit va solo en restart_units, y es el nombre de una unidad declarada
+	// del proyecto: el ayudante no reinicia ninguna otra.
+	Unit string `json:"unit,omitempty"`
 }
 
 // Validate revisa la forma del pedido: la operación, el nombre del proyecto
@@ -84,10 +88,16 @@ func (r Request) Validate() error {
 	if !proto.ValidProjectName(r.Project) {
 		return errors.New("proyecto inválido")
 	}
+	if r.Unit != "" && r.Op != OpRestartUnits {
+		return errors.New("solo restart_units lleva unidad")
+	}
 	switch r.Op {
 	case OpCheck, OpRestartUnits, OpStopUnits, OpEnableUnits:
 		if r.Phase != "" || r.Index != 0 || r.Deploy != "" {
 			return errors.New("esa operación lleva solo el proyecto")
+		}
+		if r.Unit != "" && (proto.RestartParams{Project: r.Project, Unit: r.Unit}).Validate() != nil {
+			return errors.New("unidad inválida")
 		}
 	case OpRunStep, OpStopStep:
 		switch r.Phase {

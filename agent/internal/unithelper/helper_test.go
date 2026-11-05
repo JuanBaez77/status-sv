@@ -250,28 +250,30 @@ func TestRejectedRequestsNeverReachSystemd(t *testing.T) {
 		request  string
 		wantCode Code
 	}{
-		"no es JSON":                  {`run_step facturas build 0`, CodeInvalidRequest},
-		"operación inventada":         {`{"op":"shell","project":"facturas"}`, CodeInvalidRequest},
-		"sin operación":               {`{"project":"facturas"}`, CodeInvalidRequest},
-		"con un comando":              {`{"op":"run_step","project":"facturas",` + step + `,"command":["/bin/sh"]}`, CodeInvalidRequest},
-		"con un usuario":              {`{"op":"run_step","project":"facturas",` + step + `,"user":"root"}`, CodeInvalidRequest},
-		"con una unidad":              {`{"op":"restart_units","project":"facturas","unit":"ssh.service"}`, CodeInvalidRequest},
-		"dos pedidos":                 {`{"op":"check","project":"facturas"}{"op":"check","project":"facturas"}`, CodeInvalidRequest},
-		"fase inventada":              {`{"op":"run_step","project":"facturas","phase":"shell","index":0,"deploy":"` + deployID + `"}`, CodeInvalidRequest},
-		"paso negativo":               {`{"op":"run_step","project":"facturas","phase":"build","index":-1,"deploy":"` + deployID + `"}`, CodeInvalidRequest},
-		"deploy que no es un UUID":    {`{"op":"run_step","project":"facturas","phase":"build","index":0,"deploy":"../../etc"}`, CodeInvalidRequest},
-		"deploy en mayúsculas":        {`{"op":"run_step","project":"facturas","phase":"build","index":0,"deploy":"` + strings.ToUpper(deployID) + `"}`, CodeInvalidRequest},
-		"reinicio con datos de paso":  {`{"op":"restart_units","project":"facturas",` + step + `}`, CodeInvalidRequest},
-		"parada con una unidad":       {`{"op":"stop_units","project":"facturas","unit":"ssh.service"}`, CodeInvalidRequest},
-		"parada con datos de paso":    {`{"op":"stop_units","project":"facturas",` + step + `}`, CodeInvalidRequest},
-		"parada de uno de Docker":     {`{"op":"stop_units","project":"tienda"}`, CodeNotDeclared},
-		"proyecto con barra":          {`{"op":"check","project":"../facturas"}`, CodeInvalidRequest},
-		"pedido enorme":               {`{"op":"check","project":"` + strings.Repeat("a", maxRequestBytes) + `"}`, CodeInvalidRequest},
-		"proyecto sin declarar":       {`{"op":"restart_units","project":"otro"}`, CodeNotDeclared},
-		"proyecto de Docker":          {`{"op":"restart_units","project":"tienda"}`, CodeNotDeclared},
-		"paso que no existe":          {`{"op":"run_step","project":"facturas","phase":"build","index":2,"deploy":"` + deployID + `"}`, CodeNoSuchStep},
-		"fase sin pasos":              {`{"op":"run_step","project":"facturas","phase":"post","index":0,"deploy":"` + deployID + `"}`, CodeNoSuchStep},
-		"parar un paso que no existe": {`{"op":"stop_step","project":"facturas","phase":"post","index":0,"deploy":"` + deployID + `"}`, CodeNoSuchStep},
+		"no es JSON":                   {`run_step facturas build 0`, CodeInvalidRequest},
+		"operación inventada":          {`{"op":"shell","project":"facturas"}`, CodeInvalidRequest},
+		"sin operación":                {`{"project":"facturas"}`, CodeInvalidRequest},
+		"con un comando":               {`{"op":"run_step","project":"facturas",` + step + `,"command":["/bin/sh"]}`, CodeInvalidRequest},
+		"con un usuario":               {`{"op":"run_step","project":"facturas",` + step + `,"user":"root"}`, CodeInvalidRequest},
+		"con una unidad ajena":         {`{"op":"restart_units","project":"facturas","unit":"ssh.service"}`, CodeInvalidRequest},
+		"con una unidad que es opción": {`{"op":"restart_units","project":"facturas","unit":"--all"}`, CodeInvalidRequest},
+		"con una unidad con espacios":  {`{"op":"restart_units","project":"facturas","unit":"a b.service"}`, CodeInvalidRequest},
+		"dos pedidos":                  {`{"op":"check","project":"facturas"}{"op":"check","project":"facturas"}`, CodeInvalidRequest},
+		"fase inventada":               {`{"op":"run_step","project":"facturas","phase":"shell","index":0,"deploy":"` + deployID + `"}`, CodeInvalidRequest},
+		"paso negativo":                {`{"op":"run_step","project":"facturas","phase":"build","index":-1,"deploy":"` + deployID + `"}`, CodeInvalidRequest},
+		"deploy que no es un UUID":     {`{"op":"run_step","project":"facturas","phase":"build","index":0,"deploy":"../../etc"}`, CodeInvalidRequest},
+		"deploy en mayúsculas":         {`{"op":"run_step","project":"facturas","phase":"build","index":0,"deploy":"` + strings.ToUpper(deployID) + `"}`, CodeInvalidRequest},
+		"reinicio con datos de paso":   {`{"op":"restart_units","project":"facturas",` + step + `}`, CodeInvalidRequest},
+		"parada con una unidad":        {`{"op":"stop_units","project":"facturas","unit":"ssh.service"}`, CodeInvalidRequest},
+		"parada con datos de paso":     {`{"op":"stop_units","project":"facturas",` + step + `}`, CodeInvalidRequest},
+		"parada de uno de Docker":      {`{"op":"stop_units","project":"tienda"}`, CodeNotDeclared},
+		"proyecto con barra":           {`{"op":"check","project":"../facturas"}`, CodeInvalidRequest},
+		"pedido enorme":                {`{"op":"check","project":"` + strings.Repeat("a", maxRequestBytes) + `"}`, CodeInvalidRequest},
+		"proyecto sin declarar":        {`{"op":"restart_units","project":"otro"}`, CodeNotDeclared},
+		"proyecto de Docker":           {`{"op":"restart_units","project":"tienda"}`, CodeNotDeclared},
+		"paso que no existe":           {`{"op":"run_step","project":"facturas","phase":"build","index":2,"deploy":"` + deployID + `"}`, CodeNoSuchStep},
+		"fase sin pasos":               {`{"op":"run_step","project":"facturas","phase":"post","index":0,"deploy":"` + deployID + `"}`, CodeNoSuchStep},
+		"parar un paso que no existe":  {`{"op":"stop_step","project":"facturas","phase":"post","index":0,"deploy":"` + deployID + `"}`, CodeNoSuchStep},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -305,6 +307,25 @@ func TestRestartUnitsInDeclaredOrder(t *testing.T) {
 	}
 	if len(sd.restarts) != 1 {
 		t.Errorf("siguió reiniciando después de la falla: %v", sd.restarts)
+	}
+}
+
+// Un reinicio de una sola unidad (ADR-026): solo esa, y tiene que ser una de
+// las declaradas.
+func TestRestartOneDeclaredUnit(t *testing.T) {
+	sd := &fakeSystemd{}
+	resp := ask(t, newHelper(t, sd), `{"op":"restart_units","project":"facturas","unit":"facturas-worker.service"}`)
+	if !resp.OK {
+		t.Fatalf("respuesta = %+v", resp)
+	}
+	if got := strings.Join(sd.restarts, " "); got != "facturas-worker.service" {
+		t.Errorf("reinicios = %q", got)
+	}
+
+	sd = &fakeSystemd{}
+	resp = ask(t, newHelper(t, sd), `{"op":"restart_units","project":"facturas","unit":"ssh.service"}`)
+	if resp.OK || resp.Code != CodeInvalidRequest || len(sd.restarts) != 0 {
+		t.Errorf("una unidad ajena: respuesta %+v, reinicios %v", resp, sd.restarts)
 	}
 }
 

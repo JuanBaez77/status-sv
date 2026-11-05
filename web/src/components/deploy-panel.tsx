@@ -336,6 +336,9 @@ const formTitles: Record<DeployKind, string> = {
   deploy: 'Desplegar',
   rollback: 'Volver atrás',
   bootstrap: 'Primer deploy',
+  // Un reinicio se pide por MCP y se aprueba en Aprobaciones (ADR-026): el
+  // panel no tiene un formulario para pedirlo.
+  restart: 'Reiniciar',
 }
 
 const toneText: Record<ReturnType<typeof statusTone>, string> = {

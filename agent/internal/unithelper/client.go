@@ -66,6 +66,11 @@ func (c *Client) RestartUnits(ctx context.Context, project string) error {
 	return c.do(ctx, Request{Op: OpRestartUnits, Project: project})
 }
 
+// RestartUnit reinicia una sola de las unidades declaradas del proyecto.
+func (c *Client) RestartUnit(ctx context.Context, project, unit string) error {
+	return c.do(ctx, Request{Op: OpRestartUnits, Project: project, Unit: unit})
+}
+
 // StopUnits para las unidades declaradas del proyecto.
 func (c *Client) StopUnits(ctx context.Context, project string) error {
 	return c.do(ctx, Request{Op: OpStopUnits, Project: project})

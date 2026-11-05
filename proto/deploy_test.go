@@ -170,6 +170,20 @@ func TestDeployCommandValidate(t *testing.T) {
 			cmd:     proto.Command{Operation: proto.OpBootstrap, Deploy: &proto.DeployParams{Project: "web"}},
 			wantErr: true,
 		},
+		// Un reinicio (ADR-026): el proyecto y, si se quiere, una unidad suya.
+		{name: "reinicio", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "web"}}},
+		{name: "reinicio de un servicio", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "web", Unit: "worker"}}},
+		{name: "reinicio de una unidad de systemd", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "web", Unit: "web@2.service"}}},
+		{name: "reinicio sin parámetros", cmd: proto.Command{Operation: proto.OpRestart}, wantErr: true},
+		{name: "reinicio de un proyecto inválido", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "../web"}}, wantErr: true},
+		{name: "reinicio con una unidad con espacios", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "web", Unit: "web; reboot"}}, wantErr: true},
+		{name: "reinicio con una unidad que parece una opción", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "web", Unit: "--all"}}, wantErr: true},
+		{name: "reinicio con una unidad con barras", cmd: proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: "web", Unit: "../../etc"}}, wantErr: true},
+		{
+			name:    "reinicio con los parámetros de deploy",
+			cmd:     proto.Command{Operation: proto.OpRestart, Deploy: &proto.DeployParams{Project: "web"}},
+			wantErr: true,
+		},
 		{
 			name: "primer deploy con parámetros de más",
 			cmd: proto.Command{
@@ -229,6 +243,18 @@ func TestDeployEventValidate(t *testing.T) {
 				e.Status, e.Code = proto.DeployFailed, proto.DeployAlreadyDeployed
 				e.Steps = e.Steps[:1]
 			},
+		},
+		// Un reinicio no trae código: su commit es el que corre, sin anterior,
+		// y no vuelve atrás.
+		{name: "reinicio", mutate: func(e *proto.DeployEvent) { e.Kind, e.PreviousCommit = proto.DeployKindRestart, "" }},
+		{name: "reinicio con commit anterior", mutate: func(e *proto.DeployEvent) { e.Kind = proto.DeployKindRestart }, wantErr: true},
+		{
+			name: "reinicio que vuelve atrás",
+			mutate: func(e *proto.DeployEvent) {
+				e.Kind, e.PreviousCommit = proto.DeployKindRestart, ""
+				e.Status, e.Code = proto.DeployRolledBack, proto.DeployUnhealthy
+			},
+			wantErr: true,
 		},
 		{name: "sin ID", mutate: func(e *proto.DeployEvent) { e.DeployID = uuid.Nil }, wantErr: true},
 		{name: "secuencia cero", mutate: func(e *proto.DeployEvent) { e.Seq = 0 }, wantErr: true},

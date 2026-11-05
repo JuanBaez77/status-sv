@@ -3,6 +3,7 @@ package proto
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,6 +77,26 @@ func (p BootstrapParams) Validate() error {
 	return nil
 }
 
+// RestartParams es lo que se pide reiniciar: un proyecto declarado y, si se
+// quiere una sola, una unidad suya. En Docker la unidad es un servicio del
+// proyecto de Compose; en systemd, una de las unidades declaradas. Sin unidad,
+// todas. El agent verifica que sea del proyecto.
+type RestartParams struct {
+	Project string `json:"project"`
+	Unit    string `json:"unit,omitempty"`
+}
+
+// Validate revisa el nombre del proyecto y el de la unidad.
+func (p RestartParams) Validate() error {
+	if !ValidProjectName(p.Project) {
+		return fmt.Errorf("proyecto inválido %q", p.Project)
+	}
+	if p.Unit != "" && (!validName(p.Unit, MaxRuntimeNameLen, isUnitRune) || strings.HasPrefix(p.Unit, "-")) {
+		return fmt.Errorf("unidad inválida %q", p.Unit)
+	}
+	return nil
+}
+
 // ValidCommit dice si s es un SHA-1 completo de git, en minúscula. No se
 // aceptan abreviaturas ni nombres de ramas: lo que se despliega es exacto.
 func ValidCommit(s string) bool {
@@ -101,11 +122,14 @@ const (
 	// DeployKindBootstrap es el primer deploy (ADR-021): no tiene un estado
 	// anterior al que volver. Si falla después de levantar algo, lo baja.
 	DeployKindBootstrap DeployKind = "bootstrap"
+	// DeployKindRestart es un reinicio (ADR-026): no trae código ni tiene
+	// vuelta atrás. Su commit es el que corre, y no tiene commit anterior.
+	DeployKindRestart DeployKind = "restart"
 )
 
 // Valid dice si es un tipo de deploy conocido.
 func (k DeployKind) Valid() bool {
-	return k == DeployKindDeploy || k == DeployKindRollback || k == DeployKindBootstrap
+	return k == DeployKindDeploy || k == DeployKindRollback || k == DeployKindBootstrap || k == DeployKindRestart
 }
 
 // DeployStatus es cómo va un deploy. Los tres últimos son finales.
@@ -265,6 +289,10 @@ func (e DeployEvent) Validate() error {
 		return fmt.Errorf("tipo de deploy desconocido %q", e.Kind)
 	case e.Kind == DeployKindBootstrap && e.PreviousCommit != "":
 		return errors.New("un primer deploy no tiene commit anterior")
+	case e.Kind == DeployKindRestart && e.PreviousCommit != "":
+		return errors.New("un reinicio no tiene commit anterior")
+	case e.Kind == DeployKindRestart && e.Status == DeployRolledBack:
+		return errors.New("un reinicio no vuelve atrás")
 	case e.Commit != "" && !ValidCommit(e.Commit):
 		return errors.New("commit inválido")
 	case e.PreviousCommit != "" && !ValidCommit(e.PreviousCommit):

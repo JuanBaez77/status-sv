@@ -124,6 +124,18 @@ func (p *Project) Up(ctx context.Context, tail *runner.Tail) error {
 	return runner.Run(ctx, p.command(UpTimeout, "up", "--detach", "--no-build"), tail)
 }
 
+// Restart reinicia los contenedores del proyecto, o los de un servicio, sin
+// recrearlos ni compilar (ADR-026). El nombre del servicio lo valida antes el
+// motor contra los que corren; acá va después de "--", así nunca se lee como
+// una opción.
+func (p *Project) Restart(ctx context.Context, service string, tail *runner.Tail) error {
+	args := []string{"restart"}
+	if service != "" {
+		args = append(args, "--", service)
+	}
+	return runner.Run(ctx, p.command(UpTimeout, args...), tail)
+}
+
 // Down baja el proyecto: saca sus contenedores y sus redes. Los volúmenes y
 // las imágenes quedan. Es lo que deshace un primer deploy que no quedó bien
 // (ADR-021).

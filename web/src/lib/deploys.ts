@@ -25,9 +25,11 @@ const statusLabels: Record<DeployStatus, string> = {
 /**
  * statusLabel es el nombre de un estado para mostrar. Un primer deploy
  * (ADR-021) que no quedó bien no vuelve a nada: baja lo que había levantado.
+ * Un reinicio (ADR-026) que quedó bien no desplegó nada.
  */
 export function statusLabel(status: DeployStatus, kind: DeployKind = 'deploy'): string {
   if (kind === 'bootstrap' && status === 'rolled_back') return 'Se bajó'
+  if (kind === 'restart' && status === 'succeeded') return 'Reiniciado'
   return statusLabels[status] ?? status
 }
 
@@ -35,6 +37,8 @@ const kindLabels: Record<DeployKind, string> = {
   deploy: 'deploy',
   rollback: 'rollback',
   bootstrap: 'primer deploy',
+  // Un reinicio (ADR-026) no trae código ni vuelve atrás.
+  restart: 'reinicio',
 }
 
 /** kindLabel es el tipo de un deploy, en palabras. */

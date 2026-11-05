@@ -202,3 +202,49 @@ func TestDeployHistorySurvivesTheProject(t *testing.T) {
 		t.Fatalf("historia = %+v, %v", history, err)
 	}
 }
+
+// Un reinicio (ADR-026) va en la misma historia: sin commit pedido ni
+// anterior, y sin vuelta atrás.
+func TestRestartsGoInTheSameHistory(t *testing.T) {
+	f := newDeployFixture(t)
+	ctx := t.Context()
+	now := time.Now().UTC()
+	restart := func(commit string) (uuid.UUID, error) {
+		id := uuid.Must(uuid.NewV7())
+		return id, f.q.CreateDeploy(ctx, store.CreateDeployParams{
+			ID: id, ServerID: f.serverID, ProjectID: &f.projectID, ProjectName: "tienda", Environment: "production",
+			Kind: "restart", RequestedCommit: commit, RequestedBy: &f.userID, RequestedByName: "juan", RequestedAt: now,
+		})
+	}
+	if _, err := restart("4f1c9a2b7d3e4f1c9a2b7d3e4f1c9a2b7d3e4f1c"); err == nil {
+		t.Error("la base aceptó un reinicio con commit pedido")
+	}
+	id, err := restart("")
+	if err != nil {
+		t.Fatalf("un reinicio: %v", err)
+	}
+	// Mientras corre, es el deploy activo del proyecto: no se pide otro.
+	if _, err := f.create(t, now); err == nil {
+		t.Error("se pidió un deploy mientras corría un reinicio")
+	}
+
+	finished := now.Add(time.Minute)
+	steps := []byte(`[]`)
+	apply := func(status, previous string, seq int32) error {
+		_, err := f.q.ApplyDeployEvent(ctx, store.ApplyDeployEventParams{
+			ID: id, ServerID: f.serverID, Status: status, DeployedCommit: "89abcdef0123456789abcdef0123456789abcdef",
+			PreviousCommit: previous, Code: "unhealthy", StartedAt: &now, FinishedAt: &finished, Seq: seq,
+			Steps: steps, UpdatedAt: finished,
+		})
+		return err
+	}
+	if err := apply("rolled_back", "", 1); err == nil {
+		t.Error("la base aceptó un reinicio que vuelve atrás")
+	}
+	if err := apply("failed", "4f1c9a2b7d3e4f1c9a2b7d3e4f1c9a2b7d3e4f1c", 1); err == nil {
+		t.Error("la base aceptó un reinicio con commit anterior")
+	}
+	if err := apply("failed", "", 1); err != nil {
+		t.Errorf("un reinicio que no quedó bien: %v", err)
+	}
+}

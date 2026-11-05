@@ -31,6 +31,10 @@ const (
 	// OpBootstrap es el primer deploy de un proyecto declarado que todavía no
 	// corre: trae el código a un workdir sin clonar y lo levanta (ADR-021).
 	OpBootstrap Operation = "bootstrap"
+	// OpRestart reinicia las unidades de un proyecto declarado, o una sola, y
+	// espera la verificación (ADR-026). No cambia el código ni tiene vuelta
+	// atrás. Corre en el motor de deploy, de a uno con los deploys.
+	OpRestart Operation = "restart"
 )
 
 // Límites de los comandos y sus respuestas.
@@ -65,6 +69,7 @@ type Command struct {
 	Deploy    *DeployParams    `json:"deploy,omitempty"`
 	Rollback  *RollbackParams  `json:"rollback,omitempty"`
 	Bootstrap *BootstrapParams `json:"bootstrap,omitempty"`
+	Restart   *RestartParams   `json:"restart,omitempty"`
 }
 
 // Type implementa Message.
@@ -74,7 +79,7 @@ func (Command) Type() MessageType { return TypeCommand }
 // y ningún otro: parámetros de más son un error, no algo que se ignora.
 func (c Command) Validate() error {
 	params := 0
-	for _, present := range []bool{c.GetLogs != nil, c.Deploy != nil, c.Rollback != nil, c.Bootstrap != nil} {
+	for _, present := range []bool{c.GetLogs != nil, c.Deploy != nil, c.Rollback != nil, c.Bootstrap != nil, c.Restart != nil} {
 		if present {
 			params++
 		}
@@ -104,6 +109,11 @@ func (c Command) Validate() error {
 			return errors.New("bootstrap sin parámetros")
 		}
 		return c.Bootstrap.Validate()
+	case OpRestart:
+		if c.Restart == nil {
+			return errors.New("restart sin parámetros")
+		}
+		return c.Restart.Validate()
 	case "":
 		return errors.New("falta la operación")
 	default:

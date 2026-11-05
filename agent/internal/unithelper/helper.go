@@ -166,7 +166,7 @@ func (h *Helper) handle(ctx context.Context, req Request) Response {
 		}
 		return Response{OK: true}
 	case OpRestartUnits:
-		return h.restart(ctx, spec)
+		return h.restart(ctx, spec, req.Unit)
 	case OpEnableUnits:
 		return h.enable(ctx, spec)
 	case OpStopUnits:
@@ -279,8 +279,17 @@ func (h *Helper) runStep(ctx context.Context, req Request, spec projectspec.Spec
 	}
 }
 
-func (h *Helper) restart(ctx context.Context, spec projectspec.Spec) Response {
-	for _, unit := range spec.Project.Units {
+// restart reinicia las unidades declaradas, o solo la que se nombra, que
+// tiene que ser una de ellas.
+func (h *Helper) restart(ctx context.Context, spec projectspec.Spec, only string) Response {
+	units := spec.Project.Units
+	if only != "" {
+		if !slices.Contains(units, only) {
+			return Response{Code: CodeInvalidRequest, Message: "el proyecto no declara esa unidad"}
+		}
+		units = []string{only}
+	}
+	for _, unit := range units {
 		unitCtx, cancel := context.WithTimeout(ctx, restartTimeout)
 		err := h.Systemd.Restart(unitCtx, unit)
 		cancel()

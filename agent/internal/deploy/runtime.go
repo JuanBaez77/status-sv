@@ -62,6 +62,12 @@ type runtime interface {
 	StartLabel() string
 	// Up pone a correr lo que quedó preparado.
 	Up(ctx context.Context, tail *runner.Tail) error
+	// Units son las unidades que se pueden reiniciar: los servicios de
+	// Compose que tienen contenedores, o las unidades declaradas de systemd.
+	Units(ctx context.Context) ([]string, error)
+	// Restart reinicia lo que corre, o una sola unidad (ADR-026), sin
+	// compilar ni cambiar de imagen. El motor ya revisó que sea de Units.
+	Restart(ctx context.Context, unit string, tail *runner.Tail) error
 	// Check mira una vez si lo que corre está bien.
 	Check(ctx context.Context) (compose.Status, error)
 	// Restore deja preparado lo anotado, para que el próximo Up lo levante.
@@ -187,6 +193,25 @@ func (d dockerRuntime) StartLabel() string { return "" }
 func (d dockerRuntime) Up(ctx context.Context, tail *runner.Tail) error {
 	if err := d.project.Up(ctx, tail); err != nil {
 		return stepFailure(err, proto.DeployUpFailed, "docker compose up falló")
+	}
+	return nil
+}
+
+func (d dockerRuntime) Units(ctx context.Context) ([]string, error) {
+	images, err := d.project.Snapshot(ctx, d.api)
+	if err != nil {
+		return nil, fmt.Errorf("mirar los contenedores: %w", err)
+	}
+	services := make([]string, 0, len(images))
+	for _, img := range images {
+		services = append(services, img.Service)
+	}
+	return services, nil
+}
+
+func (d dockerRuntime) Restart(ctx context.Context, service string, tail *runner.Tail) error {
+	if err := d.project.Restart(ctx, service, tail); err != nil {
+		return stepFailure(err, proto.DeployRestartFailed, "docker compose restart falló")
 	}
 	return nil
 }
