@@ -136,7 +136,7 @@ func TestCreateValidates(t *testing.T) {
 	cases := map[string]func(r *NewToken){
 		"sin nombre":           func(r *NewToken) { r.Name = " " },
 		"sin scopes":           func(r *NewToken) { r.Scopes = nil },
-		"scope inventado":      func(r *NewToken) { r.Scopes = []string{"deploy:production"} },
+		"scope inventado":      func(r *NewToken) { r.Scopes = []string{"exec:production"} },
 		"más de 90 días":       func(r *NewToken) { r.TTL = MaxTTL + time.Second },
 		"vencimiento negativo": func(r *NewToken) { r.TTL = -time.Hour },
 		"proyecto que no está": func(r *NewToken) { r.ProjectIDs = []uuid.UUID{uuid.Must(uuid.NewV7())} },
@@ -189,8 +189,13 @@ func TestDatabaseRejectsWhatTheServiceWouldNot(t *testing.T) {
 	if err := insert([]string{"read:staging"}, now.Add(MaxTTL)); err != nil {
 		t.Fatalf("un token válido tiene que entrar: %v", err)
 	}
-	if err := insert([]string{"deploy:staging"}, now.Add(time.Hour)); err == nil {
-		t.Error("la base aceptó un scope fuera de la lista")
+	if err := insert(scopeStrings(KnownScopes()), now.Add(time.Hour)); err != nil {
+		t.Errorf("un token con todos los scopes, también los de escritura, tiene que entrar: %v", err)
+	}
+	for _, scope := range []string{"exec:production", "approve:production", "deploy:dev"} {
+		if err := insert([]string{scope}, now.Add(time.Hour)); err == nil {
+			t.Errorf("la base aceptó el scope %q, fuera de la lista", scope)
+		}
 	}
 	if err := insert([]string{}, now.Add(time.Hour)); err == nil {
 		t.Error("la base aceptó un token sin scopes")

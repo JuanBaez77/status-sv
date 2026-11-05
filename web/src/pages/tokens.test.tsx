@@ -51,7 +51,18 @@ function list(tokens: McpToken[]): McpTokenList {
     tokens,
     max_days: 90,
     default_days: 30,
-    scopes: ['read:staging', 'read:production', 'logs:staging', 'logs:production'],
+    scopes: [
+      'read:staging',
+      'read:production',
+      'logs:staging',
+      'logs:production',
+      'deploy:staging',
+      'deploy:production',
+      'rollback:staging',
+      'rollback:production',
+      'restart:staging',
+      'restart:production',
+    ],
   }
 }
 
@@ -176,6 +187,33 @@ describe('TokensPage', () => {
     await user.click(screen.getByRole('button', { name: 'Ya lo copié' }))
     expect(screen.queryByText('svmcp_ValorDelTokenQueSeMuestraUnaSolaVez1234567')).not.toBeInTheDocument()
     expect(await screen.findByText('svmcp_AbCdEf…')).toBeInTheDocument()
+  })
+
+  it('con un permiso de escritura avisa que cada pedido espera la aprobación', async () => {
+    const user = userEvent.setup()
+    const { calls } = answer([])
+    renderWithQuery(<TokensPage />)
+
+    await user.click(await screen.findByRole('button', { name: 'Nuevo token' }))
+    const form = screen.getByRole('form', { name: 'Nuevo token' })
+    await user.type(within(form).getByLabelText('Nombre'), 'claude-code con deploy')
+    await user.click(within(form).getByLabelText('Leer producción'))
+    expect(within(form).queryByRole('note')).not.toBeInTheDocument()
+
+    await user.click(within(form).getByLabelText('Deploy en producción'))
+    expect(within(form).getByRole('note')).toHaveTextContent('espera que lo apruebes en Aprobaciones')
+    await user.click(within(form).getByLabelText('Rollback en producción'))
+    await user.type(within(form).getByLabelText('Código de la app de autenticación'), '123456')
+    await user.click(within(form).getByRole('button', { name: 'Crear token' }))
+
+    expect(await screen.findByText('Token creado: claude-code con deploy')).toBeInTheDocument()
+    const post = calls.find((c) => c.init?.method === 'POST')
+    // En el orden de la lista cerrada, no en el de los clics.
+    expect(JSON.parse(String(post?.init?.body)).scopes).toEqual([
+      'read:production',
+      'deploy:production',
+      'rollback:production',
+    ])
   })
 
   it('con un código que no sirve lo dice y no muestra ningún token', async () => {

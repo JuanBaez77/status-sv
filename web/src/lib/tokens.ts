@@ -11,6 +11,9 @@ export const scopeGroups: { environment: string; label: string; scopes: { scope:
     scopes: [
       { scope: 'read:staging', label: 'Leer' },
       { scope: 'logs:staging', label: 'Logs' },
+      { scope: 'deploy:staging', label: 'Deploy' },
+      { scope: 'rollback:staging', label: 'Rollback' },
+      { scope: 'restart:staging', label: 'Reiniciar' },
     ],
   },
   {
@@ -19,6 +22,9 @@ export const scopeGroups: { environment: string; label: string; scopes: { scope:
     scopes: [
       { scope: 'read:production', label: 'Leer' },
       { scope: 'logs:production', label: 'Logs' },
+      { scope: 'deploy:production', label: 'Deploy' },
+      { scope: 'rollback:production', label: 'Rollback' },
+      { scope: 'restart:production', label: 'Reiniciar' },
     ],
   },
 ]
@@ -28,6 +34,17 @@ const scopeLabels: Record<TokenScope, string> = {
   'read:production': 'Leer producción',
   'logs:staging': 'Logs de staging',
   'logs:production': 'Logs de producción',
+  'deploy:staging': 'Deploy en staging',
+  'deploy:production': 'Deploy en producción',
+  'rollback:staging': 'Rollback en staging',
+  'rollback:production': 'Rollback en producción',
+  'restart:staging': 'Reiniciar en staging',
+  'restart:production': 'Reiniciar en producción',
+}
+
+/** writes dice si un permiso deja pedir una escritura: deploy, rollback o reinicio. */
+export function writes(scope: TokenScope): boolean {
+  return /^(deploy|rollback|restart):/.test(scope)
 }
 
 /** scopeLabel dice un permiso en palabras. */
