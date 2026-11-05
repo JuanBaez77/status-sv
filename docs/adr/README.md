@@ -46,7 +46,7 @@ Qué más se evaluó y por qué se descartó.
 | [015](ADR-015-motor-de-deploy-docker.md) | Motor de deploy de proyectos Docker | aceptada |
 | [016](ADR-016-pasos-declarados-del-deploy.md) | Pasos declarados del deploy (`deploy.pre` y `deploy.post`) | aceptada |
 | [017](ADR-017-deploy-desde-el-panel-y-auditoria.md) | El deploy se dispara desde el panel, con confirmación, y queda en `audit_log` | aceptada |
-| [018](ADR-018-control-plane-en-servidor-propio-compartido.md) | El control plane vive en un servidor propio compartido, detrás de su nginx | aceptada |
+| [018](ADR-018-control-plane-en-servidor-propio-compartido.md) | El control plane vive en un servidor propio compartido, detrás de su nginx | aceptada, enmendada por 027 |
 | [019](ADR-019-deploy-de-proyectos-systemd.md) | Deploy de proyectos systemd, con un ayudante root de operaciones fijas | aceptada |
 | [020](ADR-020-que-se-audita-y-como-se-lee.md) | Qué se audita y cómo se lee la auditoría | aceptada |
 | [021](ADR-021-primer-deploy-y-reparto-del-deploy-desde-cero.md) | El deploy desde cero se parte: primer deploy ahora, lo que necesita root después | aceptada |
@@ -55,3 +55,4 @@ Qué más se evaluó y por qué se descartó.
 | [024](ADR-024-mcp-remoto.md) | El MCP remoto: SDK oficial, sin estado, en `/mcp`, y lo que devuelve | aceptada |
 | [025](ADR-025-tokens-del-mcp-y-scopes.md) | Tokens del MCP: se crean en el panel con TOTP, vencen y llevan scopes por entorno y proyecto | aceptada |
 | [026](ADR-026-escrituras-por-mcp-y-aprobaciones.md) | Las escrituras por MCP piden aprobación en el panel, con TOTP, sobre un commit fijo | aceptada |
+| [027](ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md) | El control plane sigue en `srv936263` también con escrituras por MCP | aceptada |
