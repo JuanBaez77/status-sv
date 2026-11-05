@@ -61,7 +61,10 @@ type Request struct {
 	Environment string
 	Kind        proto.DeployKind
 	// Commit vacío es la punta de la rama declarada.
-	Commit   string
+	Commit string
+	// UserID es la persona que lo pidió desde el panel. Uno que sale de una
+	// aprobación (ADR-026) lo pidió un token: va uuid.Nil, y Username es el
+	// nombre del token.
 	UserID   uuid.UUID
 	Username string
 }
@@ -69,10 +72,14 @@ type Request struct {
 // Create anota un deploy pendiente. Si el proyecto ya tiene uno activo,
 // devuelve ErrActive.
 func (s *Service) Create(ctx context.Context, r Request) (store.GetDeployRow, error) {
+	var requestedBy *uuid.UUID
+	if r.UserID != uuid.Nil {
+		requestedBy = &r.UserID
+	}
 	err := s.q.CreateDeploy(ctx, store.CreateDeployParams{
 		ID: r.ID, ServerID: r.ServerID, ProjectID: &r.ProjectID, ProjectName: r.ProjectName,
 		Environment: r.Environment, Kind: string(r.Kind), RequestedCommit: r.Commit,
-		RequestedBy: &r.UserID, RequestedByName: r.Username, RequestedAt: s.now().UTC(),
+		RequestedBy: requestedBy, RequestedByName: r.Username, RequestedAt: s.now().UTC(),
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {

@@ -212,62 +212,14 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 		}
 	}
 
-	if s.hub.get(project.ServerID) == nil {
-		record("rejected", map[string]any{"motivo": "agent desconectado"})
-		writeJSON(ctx, w, http.StatusConflict, errorResponse{Error: "agent_offline", Message: "el agent de ese servidor no está conectado"})
-		return
-	}
-
-	id, err := uuid.NewV7()
-	if err != nil {
-		writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
-		return
-	}
-	created, err := s.deploys.Create(ctx, deploys.Request{
-		ID: id, ServerID: project.ServerID, ProjectID: project.ID, ProjectName: project.Name,
-		Environment: project.Environment, Kind: kind, Commit: req.Commit, UserID: session.UserID, Username: session.Username,
+	id, failure := s.dispatch(ctx, dispatchRequest{
+		project: project, kind: kind, commit: req.Commit,
+		userID: session.UserID, requestedBy: session.Username, record: record,
 	})
-	if errors.Is(err, deploys.ErrActive) {
-		record("rejected", map[string]any{"motivo": "ya hay un deploy en curso"})
-		writeJSON(ctx, w, http.StatusConflict, errorResponse{Error: "deploy_in_progress", Message: "ese proyecto ya tiene un deploy en curso"})
+	if failure != nil {
+		writeJSON(ctx, w, failure.status, errorResponse{Error: failure.code, Message: failure.message})
 		return
 	}
-	if err != nil {
-		s.log.ErrorContext(ctx, "no se pudo anotar el deploy", "error", err)
-		writeJSON(ctx, w, http.StatusInternalServerError, errorResponse{Error: "internal", Message: "error interno"})
-		return
-	}
-	s.publishDeploy(ctx, created.ServerID, created.ProjectID, created.ID, created.Status)
-
-	cmd := proto.Command{Operation: proto.OpDeploy, Deploy: &proto.DeployParams{Project: project.Name, Commit: req.Commit}}
-	switch kind {
-	case proto.DeployKindRollback:
-		cmd = proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: project.Name}}
-	case proto.DeployKindBootstrap:
-		cmd = proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: project.Name}}
-	}
-	ack, err := s.sendCommandWithID(ctx, project.ServerID, id, cmd)
-	detail := map[string]any{"deploy": id.String()}
-	switch {
-	case errors.Is(err, errNoAnswer):
-		// Puede que el agent lo haya recibido: queda pendiente, y si no manda
-		// ninguna foto se cierra solo (deploys.PendingTimeout).
-		record("no_answer", detail)
-	case err != nil:
-		s.log.WarnContext(ctx, "no se pudo mandar el deploy al agent", "deploy", id, "error", err)
-		s.rejectDeploy(ctx, id, "agent_offline", "no se pudo mandar el pedido al agent")
-		record("rejected", map[string]any{"deploy": id.String(), "motivo": "agent desconectado"})
-	case ack.Status != proto.CommandOK:
-		s.rejectDeploy(ctx, id, string(ack.Code), ack.Message)
-		detail["codigo"] = string(ack.Code)
-		record("rejected", detail)
-	default:
-		record("accepted", detail)
-	}
-
-	s.log.InfoContext(ctx, "deploy pedido",
-		"usuario", session.Username, "servidor", project.ServerName, "proyecto", project.Name,
-		"tipo", kind, "deploy", id, "estado", ack.Status, "codigo", ack.Code, "error", err)
 
 	current, err := s.deploys.Get(ctx, id)
 	if err != nil {
@@ -276,6 +228,96 @@ func (s *Server) startDeploy(w http.ResponseWriter, r *http.Request, kind proto.
 		return
 	}
 	writeJSON(ctx, w, http.StatusCreated, detailFrom(current))
+}
+
+// dispatchRequest es un deploy, un rollback, un primer deploy o un reinicio
+// listo para mandar: ya se verificó quién lo pide (la persona con su código,
+// o una aprobación). Lo usan el botón del panel y las aprobaciones (ADR-026).
+type dispatchRequest struct {
+	project store.GetProjectRow
+	kind    proto.DeployKind
+	commit  string
+	unit    string
+	// userID es la persona que lo pidió desde el panel, o uuid.Nil si sale de
+	// una aprobación; requestedBy es el nombre que queda en el deploy: la
+	// persona, o el token que lo pidió por MCP.
+	userID      uuid.UUID
+	requestedBy string
+	// record anota el pedido en la auditoría, con su resultado.
+	record func(result string, detail map[string]any)
+}
+
+// dispatchFailure es por qué no salió: lo que se le contesta a quien lo pidió.
+type dispatchFailure struct {
+	status  int
+	code    string
+	message string
+}
+
+// dispatch anota el deploy y se lo manda al agent. Devuelve su ID: el deploy
+// existe aunque el agent lo haya rechazado, cerrado con el motivo.
+func (s *Server) dispatch(ctx context.Context, d dispatchRequest) (uuid.UUID, *dispatchFailure) {
+	project := d.project
+	if s.hub.get(project.ServerID) == nil {
+		d.record("rejected", map[string]any{"motivo": "agent desconectado"})
+		return uuid.Nil, &dispatchFailure{http.StatusConflict, "agent_offline", "el agent de ese servidor no está conectado"}
+	}
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return uuid.Nil, &dispatchFailure{http.StatusInternalServerError, "internal", "error interno"}
+	}
+	created, err := s.deploys.Create(ctx, deploys.Request{
+		ID: id, ServerID: project.ServerID, ProjectID: project.ID, ProjectName: project.Name,
+		Environment: project.Environment, Kind: d.kind, Commit: d.commit, UserID: d.userID, Username: d.requestedBy,
+	})
+	if errors.Is(err, deploys.ErrActive) {
+		d.record("rejected", map[string]any{"motivo": "ya hay un deploy en curso"})
+		return uuid.Nil, &dispatchFailure{http.StatusConflict, "deploy_in_progress", "ese proyecto ya tiene un deploy en curso"}
+	}
+	if err != nil {
+		s.log.ErrorContext(ctx, "no se pudo anotar el deploy", "error", err)
+		return uuid.Nil, &dispatchFailure{http.StatusInternalServerError, "internal", "error interno"}
+	}
+	s.publishDeploy(ctx, created.ServerID, created.ProjectID, created.ID, created.Status)
+
+	ack, err := s.sendCommandWithID(ctx, project.ServerID, id, commandFor(d.kind, project.Name, d.commit, d.unit))
+	detail := map[string]any{"deploy": id.String()}
+	switch {
+	case errors.Is(err, errNoAnswer):
+		// Puede que el agent lo haya recibido: queda pendiente, y si no manda
+		// ninguna foto se cierra solo (deploys.PendingTimeout).
+		d.record("no_answer", detail)
+	case err != nil:
+		s.log.WarnContext(ctx, "no se pudo mandar el deploy al agent", "deploy", id, "error", err)
+		s.rejectDeploy(ctx, id, "agent_offline", "no se pudo mandar el pedido al agent")
+		d.record("rejected", map[string]any{"deploy": id.String(), "motivo": "agent desconectado"})
+	case ack.Status != proto.CommandOK:
+		s.rejectDeploy(ctx, id, string(ack.Code), ack.Message)
+		detail["codigo"] = string(ack.Code)
+		d.record("rejected", detail)
+	default:
+		d.record("accepted", detail)
+	}
+
+	s.log.InfoContext(ctx, "deploy pedido",
+		"pedido_por", d.requestedBy, "servidor", project.ServerName, "proyecto", project.Name,
+		"tipo", d.kind, "deploy", id, "estado", ack.Status, "codigo", ack.Code, "error", err)
+	return id, nil
+}
+
+// commandFor arma el comando de un tipo de deploy, con sus parámetros tipados.
+func commandFor(kind proto.DeployKind, project, commit, unit string) proto.Command {
+	switch kind {
+	case proto.DeployKindRollback:
+		return proto.Command{Operation: proto.OpRollback, Rollback: &proto.RollbackParams{Project: project}}
+	case proto.DeployKindBootstrap:
+		return proto.Command{Operation: proto.OpBootstrap, Bootstrap: &proto.BootstrapParams{Project: project}}
+	case proto.DeployKindRestart:
+		return proto.Command{Operation: proto.OpRestart, Restart: &proto.RestartParams{Project: project, Unit: unit}}
+	default:
+		return proto.Command{Operation: proto.OpDeploy, Deploy: &proto.DeployParams{Project: project, Commit: commit}}
+	}
 }
 
 // rejectDeploy cierra un deploy que el agent no aceptó y avisa a los paneles.

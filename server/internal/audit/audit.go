@@ -35,8 +35,11 @@ const (
 	// ActionBootstrapRequest es el pedido del primer deploy de un proyecto
 	// (ADR-021).
 	ActionBootstrapRequest = "bootstrap.request"
-	ActionDeployFinish     = "deploy.finish"
-	ActionLogsRequest      = "logs.request"
+	// ActionRestartRequest es el pedido de un reinicio, que sale de una
+	// aprobación (ADR-026).
+	ActionRestartRequest = "restart.request"
+	ActionDeployFinish   = "deploy.finish"
+	ActionLogsRequest    = "logs.request"
 
 	// Las del alta de proyectos (ADR-022): la propuesta, su retiro, y que se
 	// aceptó en el servidor (la informa el agent).
