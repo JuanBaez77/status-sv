@@ -14,6 +14,7 @@ import (
 
 	"github.com/JuanBaez77/status-sv/internal/buildinfo"
 	"github.com/JuanBaez77/status-sv/proto"
+	"github.com/JuanBaez77/status-sv/server/internal/approvals"
 	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/auth"
 	"github.com/JuanBaez77/status-sv/server/internal/deploys"
@@ -348,4 +349,36 @@ func (b mcpBackend) Logs(ctx context.Context, serverID uuid.UUID, kind, target s
 		}
 	}
 	return out, nil
+}
+
+// RequestApproval guarda un pedido de escritura y lo anota en la auditoría
+// como el token que lo pidió (ADR-026). No le manda nada al agent.
+func (b mcpBackend) RequestApproval(ctx context.Context, req approvals.Request) (approvals.Approval, error) {
+	a, err := b.s.approvals.Create(ctx, req)
+	if err != nil {
+		return approvals.Approval{}, err
+	}
+	detail := map[string]any{
+		"operacion": string(a.Operation), "servidor": a.ServerName, "proyecto": a.ProjectName, "token": a.RequestedByPrefix,
+	}
+	if a.Commit != "" {
+		detail["commit"] = a.Commit
+	}
+	if a.Unit != "" {
+		detail["unidad"] = a.Unit
+	}
+	b.s.record(ctx, audit.Entry{
+		Actor: a.RequestedByName, ActorType: audit.ActorLLM, Action: audit.ActionApprovalRequest,
+		TargetType: "approval", TargetID: a.ID.String(), Result: "pending_approval", IP: req.IP, Detail: detail,
+	})
+	return a, nil
+}
+
+// Approval devuelve un pedido.
+func (b mcpBackend) Approval(ctx context.Context, id uuid.UUID) (approvals.Approval, error) {
+	a, err := b.s.approvals.Get(ctx, id)
+	if errors.Is(err, approvals.ErrNotFound) {
+		return approvals.Approval{}, mcp.ErrNotFound
+	}
+	return a, err
 }

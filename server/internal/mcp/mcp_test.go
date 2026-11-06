@@ -16,6 +16,7 @@ import (
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/JuanBaez77/status-sv/server/internal/approvals"
 	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/tokens"
 )
@@ -33,6 +34,10 @@ type fakeBackend struct {
 	logs     LogsInfo
 	logsErr  error
 	logAsks  []logAsk
+	// Los pedidos de escritura (ADR-026).
+	requests   []approvals.Request
+	approvals  map[uuid.UUID]approvals.Approval
+	pendingFor map[uuid.UUID]uuid.UUID
 }
 
 func (b *fakeBackend) Servers(context.Context) ([]ServerInfo, error) { return b.servers, b.err }
@@ -79,6 +84,42 @@ type metricsAsk struct {
 func (b *fakeBackend) ServerMetrics(_ context.Context, id uuid.UUID, span time.Duration) (MetricsInfo, error) {
 	b.asked = append(b.asked, metricsAsk{server: id, span: span})
 	return b.metrics, b.err
+}
+
+// RequestApproval guarda el pedido como lo haría la base: uno pendiente por
+// proyecto.
+func (b *fakeBackend) RequestApproval(_ context.Context, req approvals.Request) (approvals.Approval, error) {
+	b.requests = append(b.requests, req)
+	if id, ok := b.pendingFor[req.ProjectID]; ok {
+		return approvals.Approval{}, &approvals.PendingExistsError{ID: id}
+	}
+	if b.approvals == nil {
+		b.approvals, b.pendingFor = map[uuid.UUID]approvals.Approval{}, map[uuid.UUID]uuid.UUID{}
+	}
+	server := ""
+	for _, p := range b.projects {
+		if p.ID == req.ProjectID {
+			server = p.ServerName
+		}
+	}
+	now := time.Now().UTC()
+	a := approvals.Approval{
+		ID: uuid.Must(uuid.NewV7()), Operation: req.Operation, ServerID: req.ServerID, ServerName: server,
+		ProjectID: &req.ProjectID, ProjectName: req.ProjectName, Environment: req.Environment, Commit: req.Commit,
+		Unit: req.Unit, Reason: req.Reason, RequestedByToken: &req.TokenID, RequestedByName: req.TokenName,
+		RequestedByPrefix: req.TokenPrefix, RequestedIP: req.IP, RequestedAt: now, ExpiresAt: now.Add(approvals.TTL),
+		Status: approvals.StatusPending,
+	}
+	b.approvals[a.ID], b.pendingFor[req.ProjectID] = a, a.ID
+	return a, nil
+}
+
+func (b *fakeBackend) Approval(_ context.Context, id uuid.UUID) (approvals.Approval, error) {
+	a, ok := b.approvals[id]
+	if !ok {
+		return approvals.Approval{}, ErrNotFound
+	}
+	return a, nil
 }
 
 // fakeRecorder guarda los renglones de auditoría.
@@ -223,7 +264,7 @@ func call[Out any](t *testing.T, session *sdk.ClientSession, name string, args a
 	return out, ""
 }
 
-func TestToolsAreListedAsReadOnly(t *testing.T) {
+func TestToolAnnotations(t *testing.T) {
 	f := newFixture(t)
 	f.addToken("lector", []tokens.Scope{"read:staging"})
 	session := f.connect(t, "lector")
@@ -235,16 +276,30 @@ func TestToolsAreListedAsReadOnly(t *testing.T) {
 	if len(res.Tools) == 0 {
 		t.Fatal("no hay herramientas")
 	}
+	// Las escrituras (ADR-026) se marcan como tales; todas las demás leen.
+	writes := map[string]bool{"deploy": true, "rollback": true, "restart": true}
 	for _, tool := range res.Tools {
-		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+		switch {
+		case tool.Annotations == nil:
+			t.Errorf("%s no tiene anotaciones", tool.Name)
+		case writes[tool.Name] && (tool.Annotations.ReadOnlyHint || tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint):
+			t.Errorf("%s escribe y no está marcada así", tool.Name)
+		case !writes[tool.Name] && !tool.Annotations.ReadOnlyHint:
 			t.Errorf("%s no está marcada como de solo lectura", tool.Name)
 		}
 		if tool.Description == "" {
 			t.Errorf("%s no tiene descripción", tool.Name)
 		}
 	}
-	if got := session.InitializeResult(); got == nil || !strings.Contains(got.Instructions, "no confiable") {
+	if len(res.Tools) != 11 {
+		t.Errorf("hay %d herramientas y se esperaban 11", len(res.Tools))
+	}
+	got := session.InitializeResult()
+	if got == nil || !strings.Contains(got.Instructions, "no confiable") {
 		t.Error("las instrucciones tienen que avisar que el texto de los servidores no es confiable")
+	}
+	if got == nil || !strings.Contains(got.Instructions, "pending_approval") {
+		t.Error("las instrucciones tienen que decir que una escritura espera una aprobación")
 	}
 }
 

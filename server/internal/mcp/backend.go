@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/JuanBaez77/status-sv/server/internal/approvals"
 )
 
 // Errores de Backend.
@@ -40,6 +42,12 @@ type Backend interface {
 	// ServerMetrics devuelve las series de un servidor desde span atrás hasta
 	// ahora, con la resolución que corresponde al largo del rango.
 	ServerMetrics(ctx context.Context, serverID uuid.UUID, span time.Duration) (MetricsInfo, error)
+	// RequestApproval guarda un pedido de escritura pendiente y lo anota en la
+	// auditoría (ADR-026). No le manda nada al agent. Si el proyecto ya tiene
+	// uno esperando, devuelve *approvals.PendingExistsError.
+	RequestApproval(ctx context.Context, req approvals.Request) (approvals.Approval, error)
+	// Approval devuelve un pedido, o ErrNotFound.
+	Approval(ctx context.Context, id uuid.UUID) (approvals.Approval, error)
 }
 
 // ServerInfo es un servidor con su estado derivado del último contacto.

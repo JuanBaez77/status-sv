@@ -3,6 +3,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/JuanBaez77/status-sv/proto"
 	"github.com/JuanBaez77/status-sv/server/internal/approvals"
@@ -261,5 +263,61 @@ func TestARequestWaitsForTheAgent(t *testing.T) {
 	got := decodeJSON[approvalBody](t, f.do(t, http.MethodGet, "/v1/approvals/"+a.ID.String(), "", f.ip, f.cookie, nil))
 	if got.Status != "pending" {
 		t.Errorf("con el agent desconectado el pedido sigue pendiente, y está %s", got.Status)
+	}
+}
+
+// El flujo entero (ADR-026): el LLM pide un deploy por MCP, una persona lo
+// aprueba en el panel, al agent le llega exactamente ese commit, y el LLM lo
+// sigue con get_approval.
+func TestFromTheMCPToTheAgentThroughAnApproval(t *testing.T) {
+	f := newApprovalFixture(t, "198.51.100.127")
+	value, _ := f.mcpToken(t, "claude-code-mcp", []string{"read:production", "deploy:production"})
+	session, err := f.mcpSession(t, value, "198.51.100.200")
+	if err != nil {
+		t.Fatalf("conectar: %v", err)
+	}
+
+	res, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: "deploy", Arguments: map[string]any{
+		"project": "vps-aprobaciones/tienda", "commit": commitB, "reason": "arregla el total del PDF",
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("deploy = %+v, %v", res, err)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var pending struct {
+		Status     string `json:"status"`
+		ApprovalID string `json:"approval_id"`
+	}
+	if err := json.Unmarshal(raw, &pending); err != nil || pending.Status != "pending_approval" {
+		t.Fatalf("deploy = %s", raw)
+	}
+	// Pedir no ejecuta nada.
+	select {
+	case cmd := <-f.agent.commands:
+		t.Fatalf("sin aprobar, al agent le llegó %+v", cmd)
+	case <-time.After(200 * time.Millisecond):
+	}
+	var actor, actorType, result string
+	if err := f.pool.QueryRow(t.Context(), `SELECT actor, actor_type, result FROM audit_log WHERE action = 'approval.request' AND target_id = $1`,
+		pending.ApprovalID).Scan(&actor, &actorType, &result); err != nil || actor != "claude-code-mcp" || actorType != "llm" || result != "pending_approval" {
+		t.Errorf("approval.request = %s %s %s, %v", actor, actorType, result, err)
+	}
+
+	id := uuid.MustParse(pending.ApprovalID)
+	if resp := f.approve(t, id, `{"confirm":"tienda","totp_code":"`+f.code(1)+`"}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("aprobar = %d %s", resp.StatusCode, resp.body)
+	}
+	cmd, err := proto.Decode[proto.Command](<-f.agent.commands)
+	if err != nil || cmd.Operation != proto.OpDeploy || cmd.Deploy.Commit != commitB {
+		t.Fatalf("comando = %+v, %v", cmd, err)
+	}
+
+	res, err = session.CallTool(t.Context(), &sdk.CallToolParams{Name: "get_approval", Arguments: map[string]any{"id": pending.ApprovalID}})
+	if err != nil || res.IsError {
+		t.Fatalf("get_approval = %+v, %v", res, err)
+	}
+	raw, _ = json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(raw), `"status":"approved"`) || !strings.Contains(string(raw), `"decided_by":"juan"`) || !strings.Contains(string(raw), `"deploy_id":"`) {
+		t.Errorf("get_approval = %s", raw)
 	}
 }
