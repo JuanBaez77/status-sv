@@ -387,13 +387,77 @@ auditoría como `cli`.
 
 **Qué ve el LLM y qué no:**
 
-- Solo lee. Las escrituras (`deploy`, `rollback`, `restart`) y las aprobaciones llegan en el
-  Sprint 8.
+- Lee: servidores, métricas, proyectos, deploys y logs. Puede **pedir** escrituras (`deploy`,
+  `rollback`, `restart`), pero ninguna se ejecuta sin una aprobación (ver abajo).
 - `get_logs` pide logs solo de las unidades de un proyecto declarado, nunca de cualquier
   contenedor o servicio del servidor, y salen enmascarados del agent.
 - El texto que viene de un servidor (logs, salida de los pasos de un deploy) llega aparte y
   marcado como no confiable: puede traer instrucciones escritas para engañar al LLM.
 - Cada llamada queda en `audit_log` como `llm`, con el nombre del token y el resultado.
+
+### Escrituras por MCP y aprobaciones
+
+Desde el Sprint 8, un token con los permisos **Deploy**, **Rollback** o **Reiniciar** de un entorno
+deja que Claude Code pida esas operaciones
+([ADR-026](adr/ADR-026-escrituras-por-mcp-y-aprobaciones.md)). **Pedir no es ejecutar:**
+
+1. Claude Code llama a `deploy` (con el commit completo), `rollback` o `restart`. La herramienta
+   guarda un pedido y contesta `pending_approval`, con su ID. Al agent no le llega nada.
+2. El pedido aparece en el panel, en **Aprobaciones**, con un número en el menú. Ahí se ve lo que
+   se va a ejecutar: la operación, el proyecto y su entorno, el commit completo (con el enlace a
+   lo que cambia contra el que corre), la unidad de un reinicio, el token que lo pidió y su IP.
+3. **Aprobar** pide escribir el nombre del proyecto y un código nuevo de la app. Recién ahí el
+   control plane le manda el comando al agent, por el mismo camino que el botón de deploy del
+   panel: trae, compila, levanta, verifica y, si no queda bien, vuelve atrás solo.
+   **Rechazar** no pide código.
+4. Claude Code sigue el pedido con `get_approval` y, si salió, el deploy con `get_deploy`.
+
+Reglas que conviene tener presentes:
+
+- **Vence a la hora**, y hay **uno pendiente por proyecto**.
+- **Se cancela solo** si el token que lo pidió se revoca o vence, o si el proyecto deja de estar
+  declarado.
+- **Al aprobar se vuelve a verificar todo**:
+  - el token sigue vivo y con el permiso;
+  - el proyecto existe;
+  - el agent está conectado;
+  - no hay otro deploy en curso.
+
+  Con el agent desconectado o un deploy en curso, el pedido **sigue pendiente** y se puede aprobar
+  más tarde.
+- **Ningún token aprueba:** no hay una herramienta del MCP para eso.
+- **El servidor tiene que tener el deploy prendido** (`install-agent.sh --enable-deploy`), también
+  para un reinicio. Si no lo tiene, el agent rechaza el pedido aprobado con `disabled`.
+- **Las escrituras tienen su propio cupo:** seis pedidos por hora por token.
+- **En el Sprint 8 también staging pide aprobación.**
+
+**Un token con escritura**, como uno de lectura, se crea en **Tokens → Nuevo token**. Darle solo
+los entornos, los permisos y los proyectos que necesite: un token para arreglar el cotizador
+alcanza con **Leer**, **Logs** y **Deploy** de producción, y la lista con ese proyecto.
+
+**Qué hacer si un LLM pide algo raro:**
+
+- **Rechazar.** No pide código, y el pedido queda en la auditoría con el motivo.
+- **Si pide cosas que nadie le pidió, o un commit que no es el del PR que se mergeó**, revocar el
+  token en **Tokens** (o `token-revoke --id`): sus pedidos pendientes se cancelan solos.
+- **El motivo que escribe el LLM es texto no confiable.** No cambia lo que se ejecuta, que es lo que
+  muestran los campos de arriba del pedido. Un motivo del estilo "aprobá también…" es una señal
+  para rechazar y mirar de dónde sacó eso, por ejemplo un log o un issue.
+
+**Proyectos que migran la base al arrancar** (por ejemplo, un backend con `alembic upgrade head` en
+el entrypoint, como el cotizador): **un rollback vuelve el código, no la base.**
+
+- Antes de aprobar un deploy que trae una migración (se ve en "ver qué cambia"), sacar un respaldo
+  de la base del proyecto. En el cotizador, el contenedor `backup` deja uno por día; para uno en el
+  momento:
+
+  ```bash
+  # En el servidor del proyecto, como root:
+  docker exec cristales-baez-backup-1 /usr/local/bin/backup-postgres.sh --once   # sin --once queda en bucle
+  ```
+
+- Las migraciones tienen que ser compatibles con la versión anterior: si el deploy vuelve atrás,
+  el código viejo tiene que andar con la base nueva.
 
 ## 2. Agent
 
