@@ -16,6 +16,9 @@ const (
 	classRead limitClass = iota
 	// classLogs es get_logs, que además le pide algo al agent del servidor.
 	classLogs
+	// classWrite son las escrituras: cada una le pide a una persona que
+	// apruebe algo, así que van con un cupo chico (ADR-026).
+	classWrite
 )
 
 // Límites por token (ADR-024).
@@ -24,6 +27,9 @@ const (
 	callsBurst     = 20
 	logsPerMinute  = 10
 	logsBurst      = 5
+	// writesPerHour son los pedidos de escritura por hora de un token.
+	writesPerHour = 6
+	writesBurst   = 6
 	// idleTTL es cuánto se recuerda un token sin llamadas.
 	idleTTL = 15 * time.Minute
 	// blockedNoteEvery es cada cuánto se anota en audit_log que un token está
@@ -34,6 +40,7 @@ const (
 type tokenLimits struct {
 	calls       *rate.Limiter
 	logs        *rate.Limiter
+	writes      *rate.Limiter
 	lastSeen    time.Time
 	lastBlocked time.Time
 }
@@ -59,16 +66,23 @@ func (l *limiter) allow(id uuid.UUID, class limitClass, now time.Time) bool {
 	t, ok := l.tokens[id]
 	if !ok {
 		t = &tokenLimits{
-			calls: rate.NewLimiter(rate.Limit(callsPerMinute/60.0), callsBurst),
-			logs:  rate.NewLimiter(rate.Limit(logsPerMinute/60.0), logsBurst),
+			calls:  rate.NewLimiter(rate.Limit(callsPerMinute/60.0), callsBurst),
+			logs:   rate.NewLimiter(rate.Limit(logsPerMinute/60.0), logsBurst),
+			writes: rate.NewLimiter(rate.Limit(writesPerHour/3600.0), writesBurst),
 		}
 		l.tokens[id] = t
 	}
 	t.lastSeen = now
 
-	if class == classLogs {
-		// Primero el de logs: si no hay cupo ahí, la llamada no gasta del general.
+	// Primero el de la clase: si no hay cupo ahí, la llamada no gasta del
+	// general.
+	switch class {
+	case classLogs:
 		if !t.logs.AllowN(now, 1) {
+			return false
+		}
+	case classWrite:
+		if !t.writes.AllowN(now, 1) {
 			return false
 		}
 	}

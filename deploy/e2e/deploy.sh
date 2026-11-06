@@ -576,9 +576,11 @@ error_de() { jq -r '.result.content[0].text // .error.message // ""' "${TRABAJO}
 codigo="$(mcp "${MCP_TOKEN}" tools/list '{}')"
 [ "${codigo}" = 200 ] || falla "tools/list devolvió ${codigo}"
 HERRAMIENTAS="$(jq -r '[.result.tools[].name] | sort | join(" ")' "${TRABAJO}/mcp.json")"
-[ "${HERRAMIENTAS}" = "get_deploy get_logs get_project_status get_server_metrics list_deploys list_projects list_servers" ] || falla "herramientas: ${HERRAMIENTAS}"
-jq -e '[.result.tools[].annotations.readOnlyHint] | all' "${TRABAJO}/mcp.json" >/dev/null || falla "hay herramientas que no son de solo lectura"
-verde "ok: siete herramientas, todas de solo lectura"
+[ "${HERRAMIENTAS}" = "deploy get_approval get_deploy get_logs get_project_status get_server_metrics list_deploys list_projects list_servers restart rollback" ] || falla "herramientas: ${HERRAMIENTAS}"
+# Las tres escrituras (ADR-026) van marcadas como tales; las demás, de solo lectura.
+jq -e '[.result.tools[] | select(.name | IN("deploy", "rollback", "restart") | not) | .annotations.readOnlyHint] | all' "${TRABAJO}/mcp.json" >/dev/null || falla "hay lecturas que no son de solo lectura"
+jq -e '[.result.tools[] | select(.name | IN("deploy", "rollback", "restart")) | .annotations.destructiveHint] | all' "${TRABAJO}/mcp.json" >/dev/null || falla "hay escrituras que no están marcadas"
+verde "ok: once herramientas: ocho de lectura y tres escrituras marcadas"
 
 SALIDA="$(herramienta list_servers)"
 [ "$(jq -r ".servers[] | select(.name == \"${SERVER_NAME}\") | .projects | sort | join(\",\")" <<<"${SALIDA}")" = "${PROYECTO},${NUEVO}" ] || falla "list_servers: ${SALIDA}"
