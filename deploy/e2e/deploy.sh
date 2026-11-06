@@ -665,11 +665,14 @@ escritura() {
 }
 ultimo_deploy() { api "${URL}/v1/projects/${ID_PROYECTO}/deploys" | jq -r '.deploys[0].id'; }
 # aprobar aprueba un pedido como en el panel: el nombre del proyecto y un
-# código nuevo de la app. Deja la respuesta en ${TRABAJO}/aprobacion.json.
+# código nuevo de la app. Deja el código HTTP en ${APROBACION} y la respuesta
+# en ${TRABAJO}/aprobacion.json. No va dentro de $(...): en un subshell,
+# codigo_nuevo no anota el paso usado, y la aprobación siguiente, si llega
+# antes de 30 s, repite un código que el control plane ya no acepta.
 aprobar() {
   codigo_nuevo
-  api -o "${TRABAJO}/aprobacion.json" -w '%{http_code}' \
-    --data "{\"confirm\":\"${PROYECTO}\",\"totp_code\":\"${CODIGO}\"}" "${URL}/v1/approvals/$1/approve"
+  APROBACION="$(api -o "${TRABAJO}/aprobacion.json" -w '%{http_code}' \
+    --data "{\"confirm\":\"${PROYECTO}\",\"totp_code\":\"${CODIGO}\"}" "${URL}/v1/approvals/$1/approve")"
 }
 
 # Pedir no ejecuta nada.
@@ -687,8 +690,8 @@ error_de | grep -q "ya tiene un pedido esperando (${PEDIDO})" || falla "un segun
 verde "ok: el deploy por MCP quedó pendiente, sin tocar nada"
 
 # Aprobado, se despliega exactamente ese commit, pedido por el token.
-codigo="$(aprobar "${PEDIDO}")"
-[ "${codigo}" = 200 ] || falla "aprobar devolvió ${codigo}: $(cat "${TRABAJO}/aprobacion.json")"
+aprobar "${PEDIDO}"
+[ "${APROBACION}" = 200 ] || falla "aprobar devolvió ${APROBACION}: $(cat "${TRABAJO}/aprobacion.json")"
 APROBADO="$(jq -r .deploy_id "${TRABAJO}/aprobacion.json")"
 esperar "terminó el deploy aprobado" 180 termino "${APROBADO}"
 DETALLE="$(detalle "${APROBADO}")"
@@ -704,8 +707,8 @@ verde "ok: aprobado con TOTP, desplegó v2 y get_approval lo sigue"
 SALIDA="$(escritura restart "{\"project\":\"${PROYECTO}\",\"unit\":\"${COMPOSE_PROJECT}-web-1\"}")"
 [ "$(jq -r .unit <<<"${SALIDA}")" = web ] || falla "restart por MCP: ${SALIDA}"
 REINICIO_PEDIDO="$(jq -r .approval_id <<<"${SALIDA}")"
-codigo="$(aprobar "${REINICIO_PEDIDO}")"
-[ "${codigo}" = 200 ] || falla "aprobar el reinicio devolvió ${codigo}: $(cat "${TRABAJO}/aprobacion.json")"
+aprobar "${REINICIO_PEDIDO}"
+[ "${APROBACION}" = 200 ] || falla "aprobar el reinicio devolvió ${APROBACION}: $(cat "${TRABAJO}/aprobacion.json")"
 REINICIO="$(jq -r .deploy_id "${TRABAJO}/aprobacion.json")"
 esperar "terminó el reinicio" 120 termino "${REINICIO}"
 DETALLE="$(detalle "${REINICIO}")"
