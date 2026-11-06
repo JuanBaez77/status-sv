@@ -88,7 +88,9 @@ func TestProposalFromThePanel(t *testing.T) {
 	cookie := f.login(t, ip)
 	conn, serverID := connectAgent(t, f, "sv-alta", "203.0.113.110")
 	agent := newDeployAgent(t, conn, acceptAll)
-	agent.declare(t)
+	// Hasta que termine la comparación de propuestas: si se atrasa, ve abierta
+	// la propuesta que se hace más abajo y se la vuelve a mandar.
+	agent.declareWith(t, proto.ProjectsState{})
 	base := "/v1/servers/" + serverID.String() + "/proposals"
 
 	// La vista previa muestra lo que se va a escribir y no guarda nada.
@@ -143,9 +145,11 @@ func TestProposalFromThePanel(t *testing.T) {
 		t.Errorf("entregada = %+v", delivered)
 	}
 
-	// El agent la informa guardada: no se la vuelve a mandar. Lo próximo que
-	// le llega es el retiro.
-	agent.declareWith(t, proto.ProjectsState{Proposals: []proto.PendingProposal{{ProposalID: sent.ProposalID, Name: "svdemo", Hash: proto.SpecHash([]byte(sent.YAML))}}})
+	// El agent la informa guardada: no se la vuelve a mandar.
+	stored := proto.ProjectsState{Proposals: []proto.PendingProposal{{ProposalID: sent.ProposalID, Name: "svdemo", Hash: proto.SpecHash([]byte(sent.YAML))}}}
+	if resent := agent.declareWith(t, stored); len(resent) != 0 {
+		t.Fatalf("al informarla guardada le llegó %+v", resent)
+	}
 	resp = f.do(t, http.MethodDelete, "/v1/proposals/"+created.ID.String(), "", ip, cookie, nil)
 	if resp.StatusCode != http.StatusOK || decodeJSON[proposalBody](t, resp).Status != "withdrawn" {
 		t.Fatalf("retirar = %d %s", resp.StatusCode, resp.body)
@@ -155,6 +159,12 @@ func TestProposalFromThePanel(t *testing.T) {
 	}
 	if resp := f.do(t, http.MethodDelete, "/v1/proposals/"+created.ID.String(), "", ip, cookie, nil); resp.StatusCode != http.StatusConflict {
 		t.Fatalf("retirar dos veces = %d", resp.StatusCode)
+	}
+	// Si el agent la sigue informando guardada (por ejemplo, porque el retiro
+	// se cruzó con un projects_state viejo), se le vuelve a pedir que la borre.
+	if withdraw := agent.declareWith(t, stored); len(withdraw) != 1 ||
+		withdraw[0].ProposalID != created.ID || withdraw[0].Action != proto.ProposalWithdraw {
+		t.Fatalf("la sigue teniendo y le llegó %+v", withdraw)
 	}
 
 	// Se propone de nuevo y una persona la acepta en el servidor: el agent
@@ -200,14 +210,37 @@ func TestProposalFromThePanel(t *testing.T) {
 	}
 }
 
-// declareWith manda un projects_state con lo que traiga y espera su acuse.
-func (a *deployAgent) declareWith(t *testing.T, state proto.ProjectsState) {
+// declareWith manda un projects_state con lo que traiga, espera su acuse y
+// devuelve las propuestas que el control plane le mandó al compararlas.
+//
+// El acuse sale antes de esa comparación, así que con el acuse solo no alcanza:
+// un retiro hecho enseguida puede cruzarse con ella. Por eso le sigue un latido:
+// el canal atiende los mensajes del agent de a uno, y el acuse del latido llega
+// recién cuando la comparación terminó.
+func (a *deployAgent) declareWith(t *testing.T, state proto.ProjectsState) []proto.ProjectProposal {
 	t.Helper()
 	state.TakenAt = time.Now().UTC()
 	state.Source = proto.RuntimeSource{Status: proto.SourceOK}
 	sendEnvelope(t, a.conn, state)
 	if envelope := a.next(t); envelope.Type != proto.TypeProjectsStateAck {
 		t.Fatalf("llegó %q, se esperaba projects_state_ack", envelope.Type)
+	}
+	sendEnvelope(t, a.conn, proto.Heartbeat{AgentVersion: "test"})
+	var sent []proto.ProjectProposal
+	for {
+		envelope := a.next(t)
+		switch envelope.Type {
+		case proto.TypeHeartbeatAck:
+			return sent
+		case proto.TypeProjectProposal:
+			p, err := proto.Decode[proto.ProjectProposal](envelope)
+			if err != nil {
+				t.Fatalf("leer la propuesta: %v", err)
+			}
+			sent = append(sent, p)
+		default:
+			t.Fatalf("llegó %q, se esperaba project_proposal o heartbeat_ack", envelope.Type)
+		}
 	}
 }
 
