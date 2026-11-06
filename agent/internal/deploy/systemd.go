@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ type (
 		Check(ctx context.Context, project string) error
 		RunStep(ctx context.Context, project string, phase unithelper.Phase, index int, deploy uuid.UUID) error
 		RestartUnits(ctx context.Context, project string) error
+		RestartUnit(ctx context.Context, project, unit string) error
 		StopUnits(ctx context.Context, project string) error
 		EnableUnits(ctx context.Context, project string) error
 	}
@@ -255,7 +257,30 @@ func (s *systemdRuntime) Up(ctx context.Context, tail *runner.Tail) error {
 	s.mu.Unlock()
 
 	tail.Add("reiniciando " + s.StartLabel())
-	err := s.deps.Helper.RestartUnits(ctx, s.spec.Project.Name)
+	return restartError(s.deps.Helper.RestartUnits(ctx, s.spec.Project.Name))
+}
+
+// Units son las unidades declaradas del proyecto.
+func (s *systemdRuntime) Units(context.Context) ([]string, error) {
+	return slices.Clone(s.spec.Project.Units), nil
+}
+
+// Restart le pide al ayudante que reinicie las unidades del proyecto, o una
+// sola (ADR-026). El ayudante también verifica que sea del proyecto.
+func (s *systemdRuntime) Restart(ctx context.Context, unit string, tail *runner.Tail) error {
+	if unit == "" {
+		return s.Up(ctx, tail)
+	}
+	s.mu.Lock()
+	clear(s.seen)
+	s.mu.Unlock()
+
+	tail.Add("reiniciando " + unit)
+	return restartError(s.deps.Helper.RestartUnit(ctx, s.spec.Project.Name, unit))
+}
+
+// restartError traduce lo que contestó el ayudante a un reinicio.
+func restartError(err error) error {
 	var helperErr *unithelper.Error
 	switch {
 	case err == nil:

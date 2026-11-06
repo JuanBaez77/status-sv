@@ -104,7 +104,8 @@ func (e *Executor) Handle(ctx context.Context, id uuid.UUID, cmd proto.Command) 
 
 	// Un deploy no ocupa uno de los lugares de los pedidos de logs: el motor
 	// contesta enseguida y lo corre aparte, de a uno.
-	if cmd.Operation == proto.OpDeploy || cmd.Operation == proto.OpRollback || cmd.Operation == proto.OpBootstrap {
+	switch cmd.Operation {
+	case proto.OpDeploy, proto.OpRollback, proto.OpBootstrap, proto.OpRestart:
 		ack := reject(id, proto.CommandUnavailable, "este agent no tiene el motor de deploy")
 		if e.deploy != nil {
 			ack = e.deploy.Start(id, cmd)

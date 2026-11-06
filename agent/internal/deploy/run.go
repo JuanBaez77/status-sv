@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ type run struct {
 	spec projectspec.Spec
 	// commit es el pedido; vacío es la punta de la rama.
 	commit string
+	// unit es la unidad a reiniciar en un reinicio; vacía es todas.
+	unit string
 
 	git gitRepo
 	rt  runtime
@@ -52,8 +55,17 @@ func (r *run) execute() {
 		err = r.rollbackSteps(ctx)
 	case proto.DeployKindBootstrap:
 		err = r.bootstrapSteps(ctx)
+	case proto.DeployKindRestart:
+		err = r.restartSteps(ctx)
 	default:
 		err = r.deploySteps(ctx)
+	}
+	if err == nil && r.j.Event.Kind == proto.DeployKindRestart {
+		// Un reinicio no deja un estado bueno nuevo: el código y las
+		// imágenes son los mismos.
+		r.finish(proto.DeploySucceeded, "", "")
+		r.e.log.Info("reinicio terminado", "deploy", r.j.Event.DeployID, "proyecto", r.j.Event.Project)
+		return
 	}
 	if err == nil {
 		r.succeed()
@@ -138,6 +150,53 @@ func (r *run) builds(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// restartSteps son los pasos de un reinicio (ADR-026): revisar, reiniciar y
+// verificar. No toca el código ni tiene vuelta atrás: si no queda bien, el
+// reinicio termina en failed y lo que corre queda como quedó.
+func (r *run) restartSteps(ctx context.Context) error {
+	if err := r.step(ctx, proto.StepPreflight, "", r.restartPreflight); err != nil {
+		return err
+	}
+	label := r.unit
+	if label == "" {
+		label = r.rt.StartLabel()
+	}
+	if err := r.labeled(ctx, proto.StepRestart, "", label, func(ctx context.Context, tail *runner.Tail) (string, error) {
+		return label, r.rt.Restart(ctx, r.unit, tail)
+	}); err != nil {
+		return err
+	}
+	return r.step(ctx, proto.StepHealthcheck, "", r.verify)
+}
+
+// restartPreflight revisa lo propio del runtime y que la unidad pedida sea
+// del proyecto, y anota el commit que corre, para que la historia no cambie
+// de versión por un reinicio.
+func (r *run) restartPreflight(ctx context.Context, _ *runner.Tail) (string, error) {
+	var err error
+	if r.rt, err = r.e.runtimeFor(r.j, &r.spec); err != nil {
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	detail, err := r.rt.Preflight(ctx)
+	if err != nil {
+		return "", err
+	}
+	units, err := r.rt.Units(ctx)
+	if err != nil {
+		return "", deployError(proto.DeployPreflightFailed, "%v", err)
+	}
+	if len(units) == 0 {
+		return "", deployError(proto.DeployPreflightFailed, "no hay nada del proyecto corriendo para reiniciar")
+	}
+	if r.unit != "" && !slices.Contains(units, r.unit) {
+		return "", deployError(proto.DeployPreflightFailed, "el proyecto no tiene la unidad %s; las suyas son %s", r.unit, strings.Join(units, ", "))
+	}
+	if st, err := r.e.store.loadState(r.j.Project.Name); err == nil && len(st.History) > 0 {
+		r.update(func(j *journal) { j.Event.Commit = st.History[0].Commit })
+	}
+	return detail, nil
 }
 
 // rollbackSteps son los pasos de un rollback manual: a donde estaba el
@@ -551,6 +610,10 @@ func (r *run) fail(cause error) {
 // tiene a dónde volver: baja lo que levantó, si llegó a levantar algo, y el
 // código clonado queda (ADR-021).
 func (r *run) undo(reason string) (bool, error) {
+	if r.j.Event.Kind == proto.DeployKindRestart {
+		// Un reinicio no tiene a dónde volver.
+		return false, nil
+	}
 	if r.j.Event.Kind == proto.DeployKindBootstrap {
 		if !r.j.UpStarted {
 			return false, nil

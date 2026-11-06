@@ -56,6 +56,9 @@ describe('deploys', () => {
     expect(statusLabel('succeeded', 'bootstrap')).toBe('Desplegado')
     expect(kindLabel('bootstrap')).toBe('primer deploy')
     expect(kindLabel('rollback')).toBe('rollback')
+    expect(kindLabel('restart')).toBe('reinicio')
+    expect(statusLabel('succeeded', 'restart')).toBe('Reiniciado')
+    expect(statusLabel('failed', 'restart')).toBe('Falló')
     expect(codeText('already_deployed')).toMatch(/lo que va es un deploy/)
   })
 

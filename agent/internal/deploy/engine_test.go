@@ -111,13 +111,14 @@ func (g *fakeGit) Checkout(_ context.Context, _, sha string, _ *runner.Tail) err
 // fakeCompose es un proyecto con un servicio, web. ref es la imagen a la que
 // apunta la referencia del compose; running, la que usa el contenedor.
 type fakeCompose struct {
-	mu       sync.Mutex
-	ref      string
-	running  string
-	calls    []string
-	buildErr error
-	stepErr  error
-	downErr  error
+	mu         sync.Mutex
+	ref        string
+	running    string
+	calls      []string
+	buildErr   error
+	stepErr    error
+	downErr    error
+	restartErr error
 	// ready dice si los contenedores están bien con la imagen que corre.
 	ready func(running string) bool
 	// buildGate, si no es nil, frena el build hasta que se cierra.
@@ -171,6 +172,11 @@ func (c *fakeCompose) Up(context.Context, *runner.Tail) error {
 	c.running = c.ref
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *fakeCompose) Restart(_ context.Context, service string, _ *runner.Tail) error {
+	c.call(strings.TrimSpace("restart " + service))
+	return c.restartErr
 }
 
 // Down saca los contenedores: no queda nada corriendo.

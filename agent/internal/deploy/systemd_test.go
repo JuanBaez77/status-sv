@@ -112,6 +112,17 @@ func (h *fakeHelper) RestartUnits(context.Context, string) error {
 	return nil
 }
 
+func (h *fakeHelper) RestartUnit(_ context.Context, _ string, unit string) error {
+	h.call("restart " + unit)
+	if h.restartErr != nil && h.broken() {
+		return h.restartErr
+	}
+	h.mu.Lock()
+	h.restarts++
+	h.mu.Unlock()
+	return nil
+}
+
 func (h *fakeHelper) StopUnits(context.Context, string) error {
 	h.call("stop")
 	if h.stopErr != nil {

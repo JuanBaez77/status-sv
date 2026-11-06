@@ -428,7 +428,7 @@ export const projects = {
 export type DeployStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
 
 /** DeployKind: `bootstrap` es el primer deploy de un proyecto (ADR-021). */
-export type DeployKind = 'deploy' | 'rollback' | 'bootstrap'
+export type DeployKind = 'deploy' | 'rollback' | 'bootstrap' | 'restart'
 
 export type StepName =
   | 'preflight'
