@@ -63,6 +63,7 @@ func runServe(ctx context.Context, args []string) error {
 	// Los deploys que el agent nunca confirmó se cierran solos.
 	background.Go(func() { apiServer.RunDeployExpiry(ctx) })
 	background.Go(func() { apiServer.RunProposalExpiry(ctx) })
+	background.Go(func() { apiServer.RunApprovalSweep(ctx) })
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

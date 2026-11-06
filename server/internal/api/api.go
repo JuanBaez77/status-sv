@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/JuanBaez77/status-sv/server/internal/approvals"
 	"github.com/JuanBaez77/status-sv/server/internal/audit"
 	"github.com/JuanBaez77/status-sv/server/internal/config"
 	"github.com/JuanBaez77/status-sv/server/internal/deploys"
@@ -60,6 +61,7 @@ type Server struct {
 	tokens          *tokens.Service
 	tokenLimiter    *ipLimiter
 	mcpLimiter      *ipLimiter
+	approvals       *approvals.Service
 }
 
 // New arma el servidor de la API.
@@ -91,6 +93,7 @@ func New(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *Server {
 		tokens:          tokens.NewService(pool, log),
 		tokenLimiter:    newIPLimiter(tokenRequestsPerMinute, tokenRequestsBurst, limiterTTL),
 		mcpLimiter:      newIPLimiter(mcpRequestsPerMinute, mcpRequestsBurst, limiterTTL),
+		approvals:       approvals.NewService(pool),
 	}
 }
 
@@ -141,6 +144,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tokens", s.requireSession(http.HandlerFunc(s.handleListTokens)))
 	mux.Handle("POST /v1/tokens", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleCreateToken))))
 	mux.Handle("DELETE /v1/tokens/{id}", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRevokeToken))))
+
+	// Los pedidos de escritura del MCP y su aprobación (ADR-026).
+	mux.Handle("GET /v1/approvals", s.requireSession(http.HandlerFunc(s.handleListApprovals)))
+	mux.Handle("GET /v1/approvals/{id}", s.requireSession(http.HandlerFunc(s.handleGetApproval)))
+	mux.Handle("POST /v1/approvals/{id}/approve", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleApproveApproval))))
+	mux.Handle("POST /v1/approvals/{id}/reject", crossOrigin.Handler(s.requireSession(http.HandlerFunc(s.handleRejectApproval))))
 	// El MCP (ADR-024): autenticado con su token, no con la sesión del panel.
 	mux.Handle("/mcp", s.mcpHandler())
 
