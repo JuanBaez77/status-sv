@@ -18,10 +18,14 @@
 #      bien y, una vez que quedó bien, lo que sigue son deploys.
 #   6. Todo quedó en audit_log.
 #   7. El MCP de lectura (ADR-024, ADR-025), con tokens creados como en el
-#      panel: las siete herramientas sobre lo que dejaron los pasos
+#      panel: las herramientas de lectura sobre lo que dejaron los pasos
 #      anteriores, un secreto sembrado en el log de un contenedor que llega
 #      enmascarado, los rechazos (sin token, inventado, desde un navegador,
 #      sin el scope, revocado) y cada llamada en audit_log como llm.
+#   8. Las escrituras por MCP (ADR-026): un deploy y un reinicio pedidos por
+#      un token no ejecutan nada hasta que se aprueban con TOTP; aprobados,
+#      corren de verdad. Un pedido rechazado y uno de un token revocado no
+#      ejecutan nada. Quién pidió y quién decidió, en audit_log.
 #
 # Corre con los binarios compilados acá, sin contenedores para el agent: tiene
 # que ver el Docker de la máquina como en un servidor. Hace falta:
@@ -642,6 +646,102 @@ DENEGADAS="$(contar "SELECT count(*) FROM audit_log WHERE actor = 'e2e-produccio
 [ "$(contar "SELECT count(*) FROM api_tokens WHERE token_hash = sha256('${MCP_TOKEN}'::bytea)")" = 1 ] || falla "la base no tiene el hash del token"
 [ "$(contar "SELECT count(*) FROM api_tokens WHERE prefix = '${MCP_TOKEN:0:12}'")" = 1 ] || falla "la base no tiene el prefijo del token"
 verde "ok: ${LLAMADAS} llamadas en audit_log como llm; ni el secreto ni el token quedaron en la base ni en los registros"
+
+# --- 8. Escrituras por MCP, con aprobación ---
+
+paso "8. escrituras por MCP: pedir, aprobar con TOTP, ejecutar (ADR-026)"
+crear_token e2e-escrituras '["read:staging","deploy:staging","restart:staging"]'
+TOKEN_ESCRITURA="$(jq -r .token "${TRABAJO}/token.json")"
+ID_ESCRITURA="$(jq -r .item.id "${TRABAJO}/token.json")"
+
+# escritura llama una herramienta con el token de escritura y devuelve su
+# salida estructurada; falla si la herramienta contestó con un error.
+escritura() {
+  local codigo
+  codigo="$(mcp "${TOKEN_ESCRITURA}" tools/call "{\"name\":\"$1\",\"arguments\":${2:-"{}"}}")"
+  [ "${codigo}" = 200 ] || falla "$1 devolvió ${codigo}: $(cat "${TRABAJO}/mcp.json")"
+  jq -e '.result.isError != true' "${TRABAJO}/mcp.json" >/dev/null || falla "$1 falló: $(jq -c '.result.content' "${TRABAJO}/mcp.json")"
+  jq -c '.result.structuredContent' "${TRABAJO}/mcp.json"
+}
+ultimo_deploy() { api "${URL}/v1/projects/${ID_PROYECTO}/deploys" | jq -r '.deploys[0].id'; }
+# aprobar aprueba un pedido como en el panel: el nombre del proyecto y un
+# código nuevo de la app. Deja la respuesta en ${TRABAJO}/aprobacion.json.
+aprobar() {
+  codigo_nuevo
+  api -o "${TRABAJO}/aprobacion.json" -w '%{http_code}' \
+    --data "{\"confirm\":\"${PROYECTO}\",\"totp_code\":\"${CODIGO}\"}" "${URL}/v1/approvals/$1/approve"
+}
+
+# Pedir no ejecuta nada.
+ANTES="$(ultimo_deploy)"
+SALIDA="$(escritura deploy "{\"project\":\"${PROYECTO}\",\"commit\":\"${V2}\",\"reason\":\"vuelve a v2 (e2e)\"}")"
+[ "$(jq -r .status <<<"${SALIDA}")" = pending_approval ] || falla "deploy por MCP: ${SALIDA}"
+PEDIDO="$(jq -r .approval_id <<<"${SALIDA}")"
+sleep 2
+[ "$(ultimo_deploy)" = "${ANTES}" ] || falla "un pedido sin aprobar llegó a desplegar"
+sirve v1 || falla "un pedido sin aprobar cambió el sitio"
+[ "$(escritura get_approval "{\"id\":\"${PEDIDO}\"}" | jq -r .status)" = pending ] || falla "el pedido no está pendiente"
+# Uno pendiente por proyecto.
+mcp "${TOKEN_ESCRITURA}" tools/call "{\"name\":\"restart\",\"arguments\":{\"project\":\"${PROYECTO}\"}}" >/dev/null
+error_de | grep -q "ya tiene un pedido esperando (${PEDIDO})" || falla "un segundo pedido: $(error_de)"
+verde "ok: el deploy por MCP quedó pendiente, sin tocar nada"
+
+# Aprobado, se despliega exactamente ese commit, pedido por el token.
+codigo="$(aprobar "${PEDIDO}")"
+[ "${codigo}" = 200 ] || falla "aprobar devolvió ${codigo}: $(cat "${TRABAJO}/aprobacion.json")"
+APROBADO="$(jq -r .deploy_id "${TRABAJO}/aprobacion.json")"
+esperar "terminó el deploy aprobado" 180 termino "${APROBADO}"
+DETALLE="$(detalle "${APROBADO}")"
+[ "$(jq -r '.status + " " + .commit + " " + .requested_by' <<<"${DETALLE}")" = "succeeded ${V2} e2e-escrituras" ] || falla "deploy aprobado: $(jq -c '{status,commit,requested_by,code,message}' <<<"${DETALLE}")"
+sirve v2 || falla "el sitio no sirve v2 después del deploy aprobado"
+SALIDA="$(escritura get_approval "{\"id\":\"${PEDIDO}\"}")"
+[ "$(jq -r '.status + " " + .decided_by + " " + .deploy_id' <<<"${SALIDA}")" = "approved ${USUARIO} ${APROBADO}" ] || falla "get_approval: ${SALIDA}"
+[ "$(escritura get_deploy "{\"deploy_id\":\"${APROBADO}\"}" | jq -r .deploy.status)" = succeeded ] || falla "get_deploy del deploy aprobado"
+verde "ok: aprobado con TOTP, desplegó v2 y get_approval lo sigue"
+
+# Un reinicio de un servicio, pedido por su contenedor: reinicia sin cambiar
+# nada.
+SALIDA="$(escritura restart "{\"project\":\"${PROYECTO}\",\"unit\":\"${COMPOSE_PROJECT}-web-1\"}")"
+[ "$(jq -r .unit <<<"${SALIDA}")" = web ] || falla "restart por MCP: ${SALIDA}"
+REINICIO_PEDIDO="$(jq -r .approval_id <<<"${SALIDA}")"
+codigo="$(aprobar "${REINICIO_PEDIDO}")"
+[ "${codigo}" = 200 ] || falla "aprobar el reinicio devolvió ${codigo}: $(cat "${TRABAJO}/aprobacion.json")"
+REINICIO="$(jq -r .deploy_id "${TRABAJO}/aprobacion.json")"
+esperar "terminó el reinicio" 120 termino "${REINICIO}"
+DETALLE="$(detalle "${REINICIO}")"
+[ "$(jq -r '.kind + " " + .status + " " + .commit' <<<"${DETALLE}")" = "restart succeeded ${V2}" ] || falla "reinicio: $(jq -c '{kind,status,commit,code,message}' <<<"${DETALLE}")"
+PASOS="$(jq -r '[.steps[] | .name + ":" + .status] | join(" ")' <<<"${DETALLE}")"
+[ "${PASOS}" = "preflight:ok restart:ok healthcheck:ok" ] || falla "pasos del reinicio: ${PASOS}"
+sirve v2 || falla "el sitio no sirve v2 después del reinicio"
+verde "ok: reinicio de web aprobado, sin compilar ni cambiar de versión"
+
+# Rechazado, no pasa nada.
+SALIDA="$(escritura deploy "{\"project\":\"${PROYECTO}\",\"commit\":\"${V1}\"}")"
+RECHAZADO="$(jq -r .approval_id <<<"${SALIDA}")"
+codigo="$(api -o /dev/null -w '%{http_code}' --data '{"note":"todavía no"}' "${URL}/v1/approvals/${RECHAZADO}/reject")"
+[ "${codigo}" = 200 ] || falla "rechazar devolvió ${codigo}"
+[ "$(escritura get_approval "{\"id\":\"${RECHAZADO}\"}" | jq -r .status)" = rejected ] || falla "el pedido no quedó rechazado"
+[ "$(ultimo_deploy)" = "${REINICIO}" ] || falla "un pedido rechazado llegó a ejecutarse"
+
+# Un pedido no sobrevive a su token.
+SALIDA="$(escritura deploy "{\"project\":\"${PROYECTO}\",\"commit\":\"${V1}\"}")"
+HUERFANO="$(jq -r .approval_id <<<"${SALIDA}")"
+codigo="$(api -o /dev/null -w '%{http_code}' -X DELETE "${URL}/v1/tokens/${ID_ESCRITURA}")"
+[ "${codigo}" = 200 ] || falla "revocar el token de escritura devolvió ${codigo}"
+codigo="$(api -o "${TRABAJO}/aprobacion.json" -w '%{http_code}' --data "{\"confirm\":\"${PROYECTO}\",\"totp_code\":\"000000\"}" "${URL}/v1/approvals/${HUERFANO}/approve")"
+[ "${codigo}" = 409 ] && grep -q "revocado o venció" "${TRABAJO}/aprobacion.json" || falla "aprobar con el token revocado: ${codigo} $(cat "${TRABAJO}/aprobacion.json")"
+[ "$(api "${URL}/v1/approvals/${HUERFANO}" | jq -r .status)" = cancelled ] || falla "el pedido del token revocado no quedó cancelado"
+[ "$(ultimo_deploy)" = "${REINICIO}" ] || falla "el pedido de un token revocado llegó a ejecutarse"
+verde "ok: uno rechazado y uno de un token revocado no ejecutan nada"
+
+# La auditoría: quién pidió (el token, como llm) y quién decidió.
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action = 'approval.request' AND actor = 'e2e-escrituras' AND actor_type = 'llm'")" = 4 ] || falla "faltan pedidos en la auditoría"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action = 'approval.approve' AND actor = '${USUARIO}' AND result = 'ok'")" = 2 ] || falla "faltan aprobaciones en la auditoría"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action = 'approval.reject' AND actor = '${USUARIO}'")" = 1 ] || falla "falta el rechazo en la auditoría"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action = 'approval.cancel' AND actor_type = 'system'")" = 1 ] || falla "falta la cancelación en la auditoría"
+[ "$(contar "SELECT count(*) FROM audit_log WHERE action = 'restart.request' AND result = 'accepted' AND detail->>'pedido_por' = 'e2e-escrituras'")" = 1 ] || falla "falta el reinicio en la auditoría"
+! grep -qF "${TOKEN_ESCRITURA}" "${TRABAJO}/server.log" || falla "los registros del control plane tienen el token de escritura"
+verde "ok: pedidos, aprobaciones, rechazo y cancelación en audit_log"
 
 paso "listo"
 verde "el deploy de punta a punta anduvo (inicio en ${INICIO_DEPLOY} ms)"
