@@ -682,3 +682,56 @@ export const mcpTokens = {
   create: (req: CreateTokenRequest) => api.post<CreatedToken>('/v1/tokens', req),
   revoke: (id: string) => api.del<McpToken>(`/v1/tokens/${encodeURIComponent(id)}`),
 }
+
+/** ApprovalOperation es lo que pide un token con escritura (ADR-026). */
+export type ApprovalOperation = 'deploy' | 'rollback' | 'restart' | 'bootstrap'
+
+/** ApprovalStatus es el estado de un pedido. Uno decidido no cambia más. */
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled'
+
+/** Approval es un pedido de escritura del MCP que espera, o ya tuvo, una decisión. */
+export type Approval = {
+  id: string
+  operation: ApprovalOperation
+  server_id: string
+  server: string
+  project_id: string | null
+  project: string
+  environment: 'production' | 'staging'
+  /** commit es el SHA completo que se aprueba; solo en un deploy. */
+  commit?: string
+  /** unit es la unidad a reiniciar; solo en un reinicio, y vacía es todas. */
+  unit?: string
+  /** reason es texto del LLM: no confiable, se muestra aparte y tal cual. */
+  reason?: string
+  requested_by: string
+  token_prefix: string
+  requested_ip: string
+  requested_at: string
+  expires_at: string
+  status: ApprovalStatus
+  decided_at: string | null
+  decided_by?: string
+  decision_note?: string
+  deploy_id: string | null
+  /** repo y running_commit vienen en los pendientes, para decidir. */
+  repo?: string
+  running_commit?: string
+}
+
+export type ApproveRequest = {
+  confirm: string
+  totp_code: string
+}
+
+export const approvals = {
+  list: (status?: ApprovalStatus) =>
+    api
+      .get<{ approvals: Approval[] }>(`/v1/approvals${status ? `?status=${status}` : ''}`)
+      .then((body) => body.approvals),
+  get: (id: string) => api.get<Approval>(`/v1/approvals/${encodeURIComponent(id)}`),
+  approve: ({ id, ...req }: ApproveRequest & { id: string }) =>
+    api.post<Approval>(`/v1/approvals/${encodeURIComponent(id)}/approve`, req),
+  reject: ({ id, note }: { id: string; note: string }) =>
+    api.post<Approval>(`/v1/approvals/${encodeURIComponent(id)}/reject`, { note }),
+}

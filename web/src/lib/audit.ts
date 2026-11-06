@@ -90,6 +90,7 @@ export const actionLabels: Record<string, string> = {
   'deploy.request': 'Pidió un deploy',
   'rollback.request': 'Pidió volver atrás',
   'bootstrap.request': 'Pidió un primer deploy',
+  'restart.request': 'Pidió un reinicio',
   'deploy.finish': 'Terminó un deploy',
   'logs.request': 'Pidió logs',
   'project.propose': 'Propuso un proyecto nuevo',
@@ -115,6 +116,11 @@ export const actionLabels: Record<string, string> = {
   'mcp.list_deploys': 'Leyó la historia de deploys (MCP)',
   'mcp.get_deploy': 'Leyó un deploy (MCP)',
   'mcp.get_logs': 'Pidió logs (MCP)',
+  'approval.request': 'Pidió una escritura (MCP)',
+  'approval.approve': 'Aprobó un pedido',
+  'approval.reject': 'Rechazó un pedido',
+  'approval.expire': 'Venció un pedido',
+  'approval.cancel': 'Canceló un pedido',
 }
 
 /** actionLabel devuelve la acción en palabras, o su nombre si es una que el panel no conoce. */
@@ -143,6 +149,8 @@ const resultLabels: Record<string, string> = {
   invalid: 'Pedido inválido',
   rate_limited: 'Frenado por el límite del token',
   unavailable: 'Agent no disponible',
+  pending_approval: 'Esperando aprobación',
+  no_answer: 'El agent no contestó',
 }
 
 /** resultLabel devuelve el resultado en palabras, o tal cual si no se conoce. */
