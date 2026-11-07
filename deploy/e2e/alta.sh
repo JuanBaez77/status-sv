@@ -181,9 +181,20 @@ done
 token="prueba-$$"
 mkdir -p "${webroot}/.well-known/acme-challenge"
 echo "${token}" >"${webroot}/.well-known/acme-challenge/${token}"
-llego="$(curl -fsS "http://${dominio}/.well-known/acme-challenge/${token}" || true)"
+# systemctl reload nginx vuelve antes de que se vayan los workers viejos, que
+# todavía pueden atender un pedido con la configuración anterior. El agent ya
+# esperó a que uno nuevo sirviera el desafío, pero el pedido de acá puede caer
+# en uno viejo: como Let's Encrypt, se le da margen, hasta 10 intentos cada
+# medio segundo. Si falla, llego se queda con lo que dijo curl.
+intento=1
+while :; do
+  llego="$(curl -fsS --max-time 2 "http://${dominio}/.well-known/acme-challenge/${token}" 2>&1)" && [ "${llego}" = "${token}" ] && break
+  [ "${intento}" -ge 10 ] && break
+  intento=$((intento + 1))
+  sleep 0.5
+done
 rm -f "${webroot}/.well-known/acme-challenge/${token}"
-[ "${llego}" = "${token}" ] || { echo "certbot de prueba: el desafío no llegó por http://${dominio}" >&2; exit 1; }
+[ "${llego}" = "${token}" ] || { echo "certbot de prueba: el desafío no llegó por http://${dominio} en ${intento} intentos: ${llego}" >&2; exit 1; }
 [ "${prueba}" = si ] && { echo "certbot de prueba: el desafío llegó (dry run)"; exit 0; }
 mkdir -p "/etc/letsencrypt/live/${nombre}"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=${dominio}" -addext "subjectAltName=DNS:${dominio}" \
