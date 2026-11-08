@@ -1151,6 +1151,7 @@ Quedan abiertos, fuera del sprint:
 
 - **La mudanza al VPS dedicado**, antes del primer token con escritura del Sprint 8
   ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). El VPS lo contrata Juan.
+  *(Descartada el 2026-11-05: ver [ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md).)*
 - **El alta en un servidor real**, como al cierre del Sprint 6.
 - **`bot-ypf` y `gcg-alertas` sin pasar `deploy-check`** en `sv-gcg`, como al cierre del Sprint 5.
 - **El consumo del CI.** Con la cuota de 3.000 minutos por mes, el CI de cada PR no entra: hay que
@@ -1187,8 +1188,8 @@ Tres reglas ordenan el sprint:
 
 CI y cotizador
 
-- [ ] En cada PR, los jobs de Go, integración y panel. Las pruebas de punta a punta (deploy,
-      systemd, alta, laboratorio y carga) y las metas del panel, en `main` y de noche.
+- [x] En cada PR, los jobs de Go, integración y panel. Las pruebas de punta a punta (deploy,
+      systemd, alta, laboratorio y carga) y las metas del panel, en `main` y de noche. *(#129)*
 - [ ] `cristales-baez` con el deploy prendido:
   - deploy key de solo lectura y permisos del agent;
   - el healthcheck en `/api/health/ready` (base y Redis);
@@ -1197,36 +1198,43 @@ CI y cotizador
 
 Aprobaciones
 
-- [ ] Migración 00014 con `approvals`, y el paquete que crea los pedidos, los decide, los vence y
-      los cancela.
-- [ ] Scopes `deploy`, `rollback` y `restart` por entorno, en la base, la API y el panel de tokens.
-- [ ] API de aprobaciones: listar, aprobar con TOTP y el nombre escrito, y rechazar. Al aprobar, el
-      mismo camino que un deploy del panel.
-- [ ] **Aprobaciones** en el panel:
+- [x] Migración 00014 con `approvals`, y el paquete que crea los pedidos, los decide, los vence y
+      los cancela. *(#132)*
+- [x] Scopes `deploy`, `rollback` y `restart` por entorno, en la base, la API y el panel de tokens.
+      *(#133)*
+- [x] API de aprobaciones: listar, aprobar con TOTP y el nombre escrito, y rechazar. Al aprobar, el
+      mismo camino que un deploy del panel. *(#135)*
+- [x] **Aprobaciones** en el panel *(#136)*:
   - los pedidos pendientes, en vivo;
   - lo que se va a ejecutar;
   - el motivo del LLM, marcado como no confiable.
 
 Agent
 
-- [ ] `restart` en el agent y en el ayudante root, solo de unidades de un proyecto declarado.
+- [x] `restart` en el agent y en el ayudante root, solo de unidades de un proyecto declarado.
+      *(#134)*
 
 MCP
 
-- [ ] `deploy` y `rollback` con `pending_approval`, y `get_approval`.
-- [ ] `restart`.
-- [ ] `register_project` y `bootstrap_project`.
+- [x] `deploy` y `rollback` con `pending_approval`, y `get_approval`. *(#137)*
+- [x] `restart`. *(#137)*
+- [ ] `register_project` y `bootstrap_project`. *(Sin empezar. Es la línea de corte del sprint: si
+      no entran, pasan a la Fase 4 y el alta sigue por el panel.)*
 
 Calidad y despliegue
 
-- [ ] Prueba de punta a punta del flujo: pedido, aprobación con TOTP, deploy y verificación. También
+- [x] Prueba de punta a punta del flujo: pedido, aprobación con TOTP, deploy y verificación. También
       un pedido rechazado, uno vencido, uno sin el scope, uno cuyo token se revoca mientras espera, y
-      `restart`.
-- [ ] Runbook:
+      `restart`. *(#138. El e2e cubre el pedido, la aprobación, el deploy, `restart`, el rechazo y
+      el token revocado. El pedido vencido se prueba en la integración de `approvals`, y el que no
+      tiene el scope, en los tests de `mcp`.)*
+- [x] Runbook *(#139)*:
   - aprobaciones y scopes de escritura;
   - qué hacer si un LLM pide algo raro;
   - proyectos que migran la base al arrancar.
-- [ ] Desplegar el sprint en `srv936263`, con los agents actualizados.
+- [ ] Desplegar el sprint en `srv936263`, con los agents actualizados. *(El control plane ya está:
+      el 2026-11-08, `/v1/approvals` contesta 401 y el panel publicado trae Aprobaciones. Falta
+      confirmar que los agents tengan la versión con `restart`, con `list_servers`.)*
 - [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code.
 
 Terminado cuando:
