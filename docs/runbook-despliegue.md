@@ -343,6 +343,31 @@ En Linux o macOS, `read -rs` lo pide sin mostrarlo, y queda en el perfil de la c
 read -rs STATUSSV_MCP_TOKEN && printf "export STATUSSV_MCP_TOKEN='%s'\n" "${STATUSSV_MCP_TOKEN}" >> ~/.profile
 ```
 
+**En un escritorio Linux con systemd (KDE Plasma, GNOME), o con fish**, `~/.profile` no alcanza:
+fish no lo lee, y la app de escritorio de Claude no arranca desde una shell de login. Ahí la
+variable va en `~/.config/environment.d/`, que la sesión gráfica carga al entrar y les pasa a
+todas las apps y terminales. Desde bash o zsh:
+
+```bash
+read -rs t && printf 'STATUSSV_MCP_TOKEN=%s\n' "$t" | install -D -m 600 /dev/stdin ~/.config/environment.d/statussv-mcp.conf; unset t
+```
+
+Desde fish:
+
+```fish
+read -s -P 'token: ' t; and printf 'STATUSSV_MCP_TOKEN=%s\n' $t | install -D -m 600 /dev/stdin ~/.config/environment.d/statussv-mcp.conf; set -e t
+```
+
+Después hay que **cerrar la sesión y volver a entrar**: una terminal nueva no alcanza. Para
+verificarlo sin mostrar el token:
+
+```bash
+systemctl --user show-environment | grep -q '^STATUSSV_MCP_TOKEN=svmcp_' && echo ok
+```
+
+En los dos casos el token queda en texto plano en un archivo de la cuenta, con permiso `0600`.
+Nunca va en un archivo de un repo.
+
 **3. Conectar Claude Code**, en una terminal nueva (para que tenga la variable):
 
 ```bash
@@ -366,12 +391,15 @@ claude mcp add --transport http --scope user status-sv https://<DOMINIO>/mcp --h
 claude mcp list
 ```
 
-`status-sv` tiene que figurar conectado. Adentro de Claude Code, `/mcp` lista las siete
-herramientas; para probar, pedirle "listá los servidores de status-sv". En el panel, el token
+`status-sv` tiene que figurar conectado. Adentro de Claude Code, `/mcp` lista las once
+herramientas: siete de lectura, `get_approval`, y `deploy`, `rollback` y `restart`. Todas
+aparecen con cualquier token, y las que el token no tiene permitidas contestan con un rechazo.
+Para probar, pedirle "listá los servidores de status-sv". En el panel, el token
 pasa a mostrar su último uso con la IP, y **Ver lo que hizo** lleva a la auditoría filtrada por él.
 
 **Rotar** (al menos antes de que venza): crear un token nuevo, guardarlo en la variable como en el
-paso 2 (pisa el anterior), abrir una terminal nueva y revocar el viejo en el panel. La
+paso 2 (pisa el anterior), abrir una terminal nueva (con `environment.d`, cerrar la sesión y
+volver a entrar) y revocar el viejo en el panel. La
 configuración de Claude Code no cambia: lee la variable.
 
 **Revocar.** En el panel, **Revocar**: deja de servir en el próximo pedido. Sin panel, por SSH en
@@ -656,8 +684,11 @@ prenderlo. Los proyectos de systemd y el alta de un proyecto nuevo tienen su sec
 > **Nunca en el servidor donde vive el control plane**
 > ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)): un compose puede pedir
 > `privileged` o montar el socket de Docker, y quien empuje a la rama de un proyecto de ese servidor
-> llegaría por el deploy a la base del control plane. En los demás servidores se prende recién con
-> el control plane ya mudado (sección 6).
+> llegaría por el deploy a la base del control plane. Hoy el control plane vive en `srv936263`, así
+> que ahí no se prende nunca. En los demás servidores, como `cristales-baez-prod` y `sv-gcg`, sí:
+> el control plane salió de `cristales-baez-prod` el 2026-10-02 (sección 6), y
+> [ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md) lo deja en `srv936263`
+> también con las escrituras por MCP.
 
 Hace falta, por proyecto:
 
