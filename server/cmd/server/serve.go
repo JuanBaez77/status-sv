@@ -48,22 +48,19 @@ func runServe(ctx context.Context, args []string) error {
 	defer pool.Close()
 
 	// Las particiones de métricas se crean por adelantado y se borran al
-	// vencer. Se espera a que el mantenimiento termine antes de cerrar el pool
-	// (los defer corren en orden inverso).
-	var background sync.WaitGroup
-	defer background.Wait()
+	// vencer. Las sesiones vencidas del panel ya no sirven; el barrido es para
+	// que la tabla no crezca.
 	partitions := metrics.NewPartitions(store.New(pool), log)
-	background.Go(func() { partitions.Run(ctx) })
-	// Las sesiones vencidas del panel ya no sirven; el barrido es para que la
-	// tabla no crezca.
 	sessions := users.NewService(pool, cfg.TOTPKey, log)
-	background.Go(func() { sessions.RunCleanup(ctx) })
-
 	apiServer := api.New(cfg, pool, log)
-	// Los deploys que el agent nunca confirmó se cierran solos.
-	background.Go(func() { apiServer.RunDeployExpiry(ctx) })
-	background.Go(func() { apiServer.RunProposalExpiry(ctx) })
-	background.Go(func() { apiServer.RunApprovalSweep(ctx) })
+	background := []func(context.Context){
+		partitions.Run,
+		sessions.RunCleanup,
+		// Los deploys que el agent nunca confirmó se cierran solos.
+		apiServer.RunDeployExpiry,
+		apiServer.RunProposalExpiry,
+		apiServer.RunApprovalSweep,
+	}
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -74,11 +71,44 @@ func runServe(ctx context.Context, args []string) error {
 		// (MaxBytesHandler) y, para el WebSocket, por mensaje.
 	}
 
+	// serve espera a las tareas de fondo antes de volver, así que el pool se
+	// cierra (por el defer de arriba) cuando ya nadie lo usa.
+	return serve(ctx, server, log, cfg.ShutdownGrace, background, func() {
+		log.InfoContext(ctx, "apagando", "espera", cfg.ShutdownGrace, "agents_conectados", apiServer.ConnectedAgents())
+		// Se les avisa a los agents antes de cortar, así reconectan con
+		// backoff en vez de esperar a que se les caiga el canal.
+		apiServer.CloseAgents("el control plane se está apagando")
+	})
+}
+
+// serve atiende con server hasta que ctx se cancela o hasta que el servidor no
+// puede escuchar, y mientras tanto corre las tareas de fondo.
+//
+// Las tareas reciben un contexto propio, que se cancela al salir por cualquiera
+// de los dos caminos. Si recibieran ctx, un error al escuchar (el puerto
+// ocupado) dejaría a serve esperando para siempre a tareas que solo terminan
+// con la señal de apagado. beforeShutdown corre solo en el apagado ordenado,
+// antes de cortar los pedidos en curso.
+func serve(ctx context.Context, server *http.Server, log *slog.Logger, grace time.Duration,
+	background []func(context.Context), beforeShutdown func(),
+) error {
+	tasksCtx, stopTasks := context.WithCancel(ctx)
+	var tasks sync.WaitGroup
+	// Cancelar y después esperar, en ese orden y en un solo defer: con dos defer
+	// separados, el orden inverso en que corren lo da vuelta fácil.
+	defer func() {
+		stopTasks()
+		tasks.Wait()
+	}()
+	for _, task := range background {
+		tasks.Go(func() { task(tasksCtx) })
+	}
+
 	errs := make(chan error, 1)
 	go func() {
-		log.InfoContext(ctx, "escuchando", "direccion", cfg.ListenAddr)
+		log.InfoContext(ctx, "escuchando", "direccion", server.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errs <- fmt.Errorf("escuchar en %s: %w", cfg.ListenAddr, err)
+			errs <- fmt.Errorf("escuchar en %s: %w", server.Addr, err)
 			return
 		}
 		errs <- nil
@@ -88,15 +118,12 @@ func runServe(ctx context.Context, args []string) error {
 	case err := <-errs:
 		return err
 	case <-ctx.Done():
-		log.InfoContext(ctx, "apagando", "espera", cfg.ShutdownGrace, "agents_conectados", apiServer.ConnectedAgents())
-		// Se les avisa a los agents antes de cortar, así reconectan con
-		// backoff en vez de esperar a que se les caiga el canal.
-		apiServer.CloseAgents("el control plane se está apagando")
+		beforeShutdown()
 	}
 
 	// El contexto de apagado no puede ser el que acaba de cancelarse: hay que
 	// darles tiempo a los pedidos en curso.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownGrace)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
