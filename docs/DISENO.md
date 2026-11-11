@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-10-09
+Última actualización: 2026-11-11
 
 ## Visión y alcance
 
@@ -1245,7 +1245,9 @@ Calidad y despliegue
 - [x] Desplegar el sprint en `srv936263`, con los agents actualizados. *(El 2026-11-08, el control
       plane ya trae Aprobaciones, y los dos agents pasaron a `9f9ff42`, según `list_servers` por
       MCP.)*
-- [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code.
+- [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code. *(El flujo ya anduvo en
+      producción con otro proyecto: el 2026-11-11, `claude-code en CachyOS` pidió por MCP un deploy
+      de `gcg-alertas` que salió bien. Falta hacerlo con el cotizador.)*
 
 Terminado cuando:
 
