@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-10-09
+Última actualización: 2026-11-11
 
 ## Visión y alcance
 
@@ -1154,6 +1154,9 @@ Quedan abiertos, fuera del sprint:
   *(Descartada el 2026-11-05: ver [ADR-027](adr/ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md).)*
 - **El alta en un servidor real**, como al cierre del Sprint 6.
 - **`bot-ypf` y `gcg-alertas` sin pasar `deploy-check`** en `sv-gcg`, como al cierre del Sprint 5.
+  *(Resuelto el 2026-11-08: `bot-ypf` tiene su deploy key, y `gcg-alertas` usa la de
+  `gcg-alertas-nbcargo`, que es del mismo repo. Los dos tienen los permisos del `workdir`. Los tres
+  proyectos de `sv-gcg` pasan `deploy-check` y se desplegaron desde el panel con el mismo commit.)*
 - **El consumo del CI.** Con la cuota de 3.000 minutos por mes, el CI de cada PR no entra: hay que
   achicarlo (por ejemplo, los e2e pesados solo en main y de noche) o subir el presupuesto de Actions.
 
@@ -1190,11 +1193,18 @@ CI y cotizador
 
 - [x] En cada PR, los jobs de Go, integración y panel. Las pruebas de punta a punta (deploy,
       systemd, alta, laboratorio y carga) y las metas del panel, en `main` y de noche. *(#129)*
-- [ ] `cristales-baez` con el deploy prendido:
+- [x] `cristales-baez` con el deploy prendido:
   - deploy key de solo lectura y permisos del agent;
   - el healthcheck en `/api/health/ready` (base y Redis);
   - `deploy-check` en verde;
   - un deploy del mismo commit desde el panel.
+
+  *(El 2026-11-08. La llave, los permisos y el healthcheck ya estaban desde el 2026-11-05.
+  `deploy-check` dio verde, pero el primer deploy de `27013f34` falló en "Anotar lo que corre":
+  `backup` y `perimeter` corrían con imágenes borradas. El Docker del servidor usa el almacén de
+  containerd, que deja borrar una imagen aunque un contenedor la use. Se recrearon esos dos
+  servicios con `up -d --no-deps --no-build --force-recreate`, y el segundo deploy salió bien:
+  8 contenedores sanos y healthcheck 200.)*
 
 Aprobaciones
 
@@ -1232,10 +1242,12 @@ Calidad y despliegue
   - aprobaciones y scopes de escritura;
   - qué hacer si un LLM pide algo raro;
   - proyectos que migran la base al arrancar.
-- [ ] Desplegar el sprint en `srv936263`, con los agents actualizados. *(El control plane ya está:
-      el 2026-11-08, `/v1/approvals` contesta 401 y el panel publicado trae Aprobaciones. Falta
-      confirmar que los agents tengan la versión con `restart`, con `list_servers`.)*
-- [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code.
+- [x] Desplegar el sprint en `srv936263`, con los agents actualizados. *(El 2026-11-08, el control
+      plane ya trae Aprobaciones, y los dos agents pasaron a `9f9ff42`, según `list_servers` por
+      MCP.)*
+- [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code. *(El flujo ya anduvo en
+      producción con otro proyecto: el 2026-11-11, `claude-code en CachyOS` pidió por MCP un deploy
+      de `gcg-alertas` que salió bien. Falta hacerlo con el cotizador.)*
 
 Terminado cuando:
 
