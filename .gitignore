@@ -5,6 +5,7 @@
 !.env.prod.example
 *.pem
 *.key
+*.password
 agent.credential
 credentials.json
 

@@ -16,3 +16,5 @@
 services:
   server:
     security_opt: !reset []
+  backup:
+    security_opt: !reset []

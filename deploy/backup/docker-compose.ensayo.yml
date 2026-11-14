@@ -1,0 +1,48 @@
+# Ensayo de restore: una PostgreSQL y un control plane descartables, sin puertos
+# en el host, para probar que una copia del backup se puede usar de verdad.
+#
+# No se levanta a mano: lo orquesta deploy/backup/ensayo-restore.sh. El nombre
+# del proyecto lo pone el script (-p), así no choca con el control plane que
+# corre en el mismo servidor.
+
+services:
+  postgres:
+    image: ${IMAGENES:-docker.io/library}/postgres:17-alpine
+    environment:
+      POSTGRES_USER: statussv
+      POSTGRES_PASSWORD: ensayo
+      POSTGRES_DB: statussv
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U statussv -d statussv"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    tmpfs:
+      # Lo restaurado no tiene que sobrevivir al ensayo.
+      - /var/lib/postgresql/data
+
+  server:
+    # La imagen del control plane que se prueba: en el servidor, la que ya corre.
+    image: ${STATUSSV_ENSAYO_IMAGEN:?falta STATUSSV_ENSAYO_IMAGEN}
+    environment:
+      DATABASE_URL: postgres://statussv:ensayo@postgres:5432/statussv?sslmode=disable
+      STATUSSV_LISTEN_ADDR: 0.0.0.0:8080
+      STATUSSV_LOG_FORMAT: text
+      STATUSSV_TOTP_KEY_FILE: /run/secrets/totp_key
+    secrets:
+      - totp_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+
+secrets:
+  totp_key:
+    # La clave TOTP que trajo la copia.
+    file: ${STATUSSV_ENSAYO_TOTP_KEY:?falta STATUSSV_ENSAYO_TOTP_KEY}

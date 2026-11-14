@@ -5,8 +5,8 @@ name: CI
 # las pruebas de punta a punta. Así que:
 #
 #   - En cada PR, los jobs livianos: Go, integración y panel (unos 7 minutos).
-#   - Los pesados (carga, punta a punta, deploy, deploy de systemd, alta,
-#     laboratorio y metas) corren en main, a mano desde Actions
+#   - Los pesados (carga, punta a punta, backup, deploy, deploy de systemd,
+#     alta, laboratorio y metas) corren en main, a mano desde Actions
 #     (workflow_dispatch, sobre cualquier rama) y en los PR con la etiqueta
 #     e2e. Un PR que toca el deploy, el agent o el protocolo lleva la etiqueta.
 #
@@ -197,6 +197,22 @@ jobs:
       # el latido llegue a la base y sobreviva a un reinicio del control plane.
       - name: Prueba de punta a punta
         run: ./deploy/e2e/run.sh
+
+  backup:
+    name: "Backup y restore de punta a punta: copia cifrada, ensayo y /readyz"
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'e2e') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Hace dos copias con las restricciones de producción, comprueba que otra
+      # contraseña no abre el repositorio, baja la última y levanta un control
+      # plane sobre ella: base nueva, migraciones y /readyz.
+      - name: Backup y restore de punta a punta
+        run: ./deploy/e2e/backup.sh
 
   deploy:
     name: "Deploy de punta a punta: bueno, roto, rollback y agent reiniciado"

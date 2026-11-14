@@ -45,7 +45,9 @@ roadmap de [DISENO.md](DISENO.md).
   que el CI publique las imágenes en un registro (GHCR) y los binarios del agent firmados, con
   checksum. El diseño ya lo pide para la Fase 4 (actualizaciones firmadas del agent).
 - **Revocar agents desde el panel.** Hoy se revoca con una sentencia SQL a mano (ver el runbook).
-- **Backups de PostgreSQL** del control plane, con un restore probado. Está en los riesgos del diseño.
+- ~~**Backups de PostgreSQL** del control plane, con un restore probado.~~ *(Hecho el 2026-11-14: copia
+  diaria cifrada con restic a Cloudflare R2, con la clave TOTP y el `.env`, y un ensayo de restore en
+  el CI. Ver "Backup y restore" en el runbook.)*
 - **Mover el control plane a un VPS dedicado.** El 2026-10-02 salió del servidor de un cliente y
   pasó a uno propio, pero compartido con otros productos
   ([ADR-018](adr/ADR-018-control-plane-en-servidor-propio-compartido.md)). El VPS dedicado sigue
@@ -55,7 +57,8 @@ roadmap de [DISENO.md](DISENO.md).
   `no-new-privileges`, que en el servidor de hoy (Docker de snap) hubo que quitar.
 - **Un ensayo de la mudanza en CI.** El volcado, la restauración y el arranque sobre datos
   restaurados solo se probaron a mano, el día de la mudanza. Un job que lo haga con la base de la
-  prueba de punta a punta lo cubriría.
+  prueba de punta a punta lo cubriría. *(Cubierto en parte desde el 2026-11-14: `deploy/e2e/backup.sh`
+  restaura una copia en una base nueva y arranca el control plane sobre ella.)*
 
 ## Lo que deja afuera el MCP de escritura del Sprint 8
 

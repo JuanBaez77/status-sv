@@ -84,3 +84,18 @@ COPY --from=builder /out/agent /usr/local/bin/agent
 USER statussv
 ENTRYPOINT ["/usr/local/bin/agent"]
 CMD ["run"]
+
+# --- Backup del control plane ---
+#
+# pg_dump de la misma versión que la base, y restic para cifrar y subir la copia
+# (deploy/backup/backup.sh). El script viaja adentro de la imagen: el Docker de
+# snap no deja montar archivos de cualquier carpeta del servidor.
+FROM ${IMAGENES}/postgres:17-alpine AS backup
+
+RUN apk add --no-cache restic
+
+COPY deploy/backup/backup.sh /usr/local/bin/backup.sh
+
+ENV RESTIC_CACHE_DIR=/cache
+ENTRYPOINT ["/usr/local/bin/backup.sh"]
+CMD ["servicio"]
