@@ -1,6 +1,6 @@
 # status-sv: Documento de diseño
 
-Última actualización: 2026-11-11
+Última actualización: 2026-11-14
 
 ## Visión y alcance
 
@@ -1228,8 +1228,8 @@ MCP
 
 - [x] `deploy` y `rollback` con `pending_approval`, y `get_approval`. *(#137)*
 - [x] `restart`. *(#137)*
-- [ ] `register_project` y `bootstrap_project`. *(Sin empezar. Es la línea de corte del sprint: si
-      no entran, pasan a la Fase 4 y el alta sigue por el panel.)*
+- [ ] `register_project` y `bootstrap_project`. *(No entraron: por la línea de corte del sprint,
+      pasan a la Fase 4, y el alta sigue por el panel.)*
 
 Calidad y despliegue
 
@@ -1245,9 +1245,19 @@ Calidad y despliegue
 - [x] Desplegar el sprint en `srv936263`, con los agents actualizados. *(El 2026-11-08, el control
       plane ya trae Aprobaciones, y los dos agents pasaron a `9f9ff42`, según `list_servers` por
       MCP.)*
-- [ ] Un arreglo real del cotizador, de punta a punta desde Claude Code. *(El flujo ya anduvo en
-      producción con otro proyecto: el 2026-11-11, `claude-code en CachyOS` pidió por MCP un deploy
-      de `gcg-alertas` que salió bien. Falta hacerlo con el cotizador.)*
+- [x] Un arreglo real del cotizador, de punta a punta desde Claude Code. *(El 2026-11-14:
+      - `get_logs` mostró que el worker se había caído el 2026-11-09 con "Timeout connecting to
+        server". El DNS interno de Docker tardó en resolver `redis`, y arq tenía 1 s para conectar
+        y ningún reintento.
+      - El arreglo fue cristales-baez#11: 3 s para conectar, 3 reintentos y `retry_on_timeout`, con
+        una prueba que hace vencer las primeras conexiones contra un Redis real.
+      - Después del merge, Claude Code pidió por MCP el deploy de `e7f5040`, Juan lo aprobó en el
+        panel con TOTP y el agent lo desplegó en 210 s. El healthcheck de `/api/health/ready` dio
+        200, y el worker nuevo arrancó sin errores.
+      - Antes, el 2026-11-11, el mismo flujo ya había andado con `gcg-alertas`.)*
+
+**Cerrado el 2026-11-14.** Con el arreglo del cotizador se cumple el criterio de salida de la Fase 3
+y del MVP. `register_project` y `bootstrap_project` pasan a la Fase 4.
 
 Terminado cuando:
 
