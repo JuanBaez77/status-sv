@@ -56,3 +56,4 @@ Qué más se evaluó y por qué se descartó.
 | [025](ADR-025-tokens-del-mcp-y-scopes.md) | Tokens del MCP: se crean en el panel con TOTP, vencen y llevan scopes por entorno y proyecto | aceptada |
 | [026](ADR-026-escrituras-por-mcp-y-aprobaciones.md) | Las escrituras por MCP piden aprobación en el panel, con TOTP, sobre un commit fijo | aceptada |
 | [027](ADR-027-control-plane-sigue-en-srv936263-con-escrituras.md) | El control plane sigue en `srv936263` también con escrituras por MCP | aceptada |
+| [028](ADR-028-backup-cifrado-del-control-plane-en-r2.md) | Backup cifrado del control plane con restic en Cloudflare R2 | aceptada |

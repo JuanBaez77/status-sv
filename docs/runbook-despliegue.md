@@ -487,6 +487,122 @@ el entrypoint, como el cotizador): **un rollback vuelve el código, no la base.*
 - Las migraciones tienen que ser compatibles con la versión anterior: si el deploy vuelve atrás,
   el código viejo tiene que andar con la base nueva.
 
+### Backup y restore
+
+El servicio `backup` (perfil `backup` de `docker-compose.prod.yml`) hace una copia cifrada con
+[restic](https://restic.net) **fuera del servidor**: en `srv936263`, a un bucket de Cloudflare R2.
+
+- **Qué copia:** la base (`pg_dump`, verificado con `pg_restore --list`), `secrets/totp.key` y
+  `.env`. Sin la clave TOTP, los segundos factores de la base no se pueden descifrar.
+- **Cuándo:** al arrancar el contenedor y después una vez por día, a las `STATUSSV_BACKUP_HORA_UTC`
+  (06 UTC: las 3 de la mañana en Buenos Aires).
+- **Qué guarda:** una copia por día durante una semana, una por semana durante un mes y una por mes
+  durante medio año. Cada vez, `restic check` lee el 10% de los datos del bucket.
+- **Cómo se ve si falla:** el contenedor queda `unhealthy` cuando la última copia buena tiene más de
+  26 horas. Con `STATUSSV_BACKUP_PING_URL`, además, avisa a un monitor externo como healthchecks.io.
+
+Todo se corre en `deploy/`. En `srv936263`, cada `docker compose` lleva además
+`-f docker-compose.snap.yml`.
+
+**1. El bucket (una sola vez, en Cloudflare).** En el panel de Cloudflare, en R2:
+
+- crear un bucket, por ejemplo `statussv-backups`;
+- crear un token de API de R2 con permiso **Object Read & Write solo en ese bucket**;
+- anotar el *Account ID*, el *Access Key ID* y el *Secret Access Key*.
+
+Cloudflare puede pedir un medio de pago para activar R2. Con este volumen (decenas de MB) entra en
+el plan gratis.
+
+**2. La contraseña del repositorio (una sola vez, en el servidor).**
+
+```bash
+openssl rand -base64 32 > secrets/restic.password
+chmod 0400 secrets/restic.password
+cat secrets/restic.password    # copiarla al gestor de contraseñas, FUERA del servidor
+```
+
+**Sin esta contraseña las copias no se pueden abrir**, y si queda solo en el servidor se pierde con
+él. Se guarda en el gestor de contraseñas antes de seguir. `*.password` está en `.gitignore`.
+
+**3. El `.env`.** Se agregan estas líneas, con los datos del paso 1 (ver `.env.prod.example`):
+
+```bash
+COMPOSE_PROFILES=backup
+STATUSSV_BACKUP_REPOSITORY=s3:https://<ACCOUNT_ID>.r2.cloudflarestorage.com/statussv-backups/status-sv
+STATUSSV_BACKUP_KEY_ID=<Access Key ID>
+STATUSSV_BACKUP_SECRET=<Secret Access Key>
+```
+
+Con `COMPOSE_PROFILES=backup`, cada `up -d` levanta también el backup.
+
+**4. Crear el repositorio y la primera copia.**
+
+```bash
+C="docker compose -f docker-compose.prod.yml -f docker-compose.snap.yml --env-file .env"
+$C build backup
+$C run --rm backup init          # una sola vez por bucket
+$C up -d backup                  # hace la primera copia al arrancar
+$C logs -f backup                # hasta ver "[backup] ... OK: ..."
+$C run --rm backup snapshots
+```
+
+**Una copia en el momento**, por ejemplo antes de una actualización que trae una migración:
+
+```bash
+$C exec backup backup.sh una-vez
+```
+
+**Bajar una copia.** La carpeta tiene que estar en `/root`, porque el Docker de snap no ve `/opt` ni
+`/tmp`. Restaurar necesita más capacidades que la copia diaria: escribir en la carpeta y devolverle
+a cada archivo su dueño.
+
+```bash
+mkdir -p /root/restore && chmod 0700 /root/restore
+$C run --rm --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+  -v /root/restore:/restore backup restaurar /restore            # o: restaurar <ID> /restore
+ls -R /root/restore     # work/statussv.dump, run/secrets/totp_key, backup/env/.env
+```
+
+**El ensayo: probar que la copia sirve, sin tocar lo que corre.** Levanta una base y un control
+plane descartables, sin puertos, con otro nombre de proyecto. Restaura el volcado, corre
+`migrate status` y `migrate up`, arranca con la clave de la copia y espera a `/readyz`:
+
+```bash
+STATUSSV_ENSAYO_IMAGEN=status-sv-server:$(grep ^STATUSSV_VERSION= .env | cut -d= -f2) \
+  ./backup/ensayo-restore.sh /root/restore
+rm -rf /root/restore
+```
+
+Conviene correrlo una vez por mes, y siempre después de cambiar algo del backup. El CI hace lo
+mismo en cada push a `main` (`deploy/e2e/backup.sh`), con un repositorio local.
+
+**Restaurar de verdad** (se perdió el servidor o la base):
+
+1. En el servidor nuevo, el paso 1 de este runbook hasta *Configuración y secretos*, pero con el
+   `.env` y la `totp.key` de la copia: `backup/env/.env` va a `deploy/.env`, y
+   `run/secrets/totp_key` va a `deploy/secrets/totp.key`, con dueño 10001 y permisos 0400.
+   Para bajar la copia en un servidor sin nada, alcanza con la imagen de backup y las variables
+   del repositorio:
+
+   ```bash
+   docker run --rm --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+     -e RESTIC_REPOSITORY='s3:https://...' -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+     -e AWS_DEFAULT_REGION=auto -e RESTIC_PASSWORD_FILE=/p -v /root/restic.password:/p:ro \
+     -v /root/restore:/restore status-sv-backup:<versión> restaurar /restore
+   ```
+
+2. Levantar solo la base, restaurar el volcado, migrar y levantar el resto:
+
+   ```bash
+   $C up -d --wait postgres
+   $C cp /root/restore/work/statussv.dump postgres:/tmp/statussv.dump
+   $C exec -T postgres pg_restore -U statussv -d statussv --no-owner --exit-on-error /tmp/statussv.dump
+   $C run --rm server migrate up
+   $C up -d
+   ```
+
+3. Verificar como en *Verificar*, y que los agents reconecten solos.
+
 ## 2. Agent
 
 ### Compilar y copiar el binario
@@ -1048,7 +1164,10 @@ reconecta; su historial de deploys y la auditoría quedan.
 
 ```bash
 # Si la versión nueva trae una migración, el respaldo primero: migrate down deshace el
-# esquema, pero no devuelve lo que la migración haya transformado.
+# esquema, pero no devuelve lo que la migración haya transformado. Con el backup prendido
+# (ver "Backup y restore"), una copia en el momento:
+docker compose -f docker-compose.prod.yml --env-file .env exec backup backup.sh una-vez
+# Sin el backup prendido, un volcado local:
 docker compose -f docker-compose.prod.yml --env-file .env exec -T postgres \
   pg_dump -U statussv -d statussv | gzip > /root/statussv-db-$(date +%Y%m%d-%H%M%S).sql.gz
 
@@ -1056,6 +1175,9 @@ docker compose -f docker-compose.prod.yml --env-file .env build server
 docker compose -f docker-compose.prod.yml --env-file .env run --rm server migrate up
 docker compose -f docker-compose.prod.yml --env-file .env up -d server
 ```
+
+Con el backup prendido, su imagen lleva la misma versión: `build server backup` y
+`up -d server backup`.
 
 En `srv936263` el directorio es `/root/status-sv/deploy` y cada comando lleva además
 `-f docker-compose.snap.yml` (sección 1, *Si el Docker del servidor es el de snap*).

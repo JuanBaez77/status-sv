@@ -82,6 +82,68 @@ services:
     networks:
       - internal
 
+  # La copia diaria, cifrada y fuera del servidor: la base, la clave TOTP y el
+  # .env (deploy/backup/backup.sh). Va con el perfil "backup", que se prende con
+  # COMPOSE_PROFILES=backup en deploy/.env, para que un servidor sin el
+  # almacenamiento configurado no lo levante.
+  backup:
+    profiles:
+      - backup
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: backup
+    image: status-sv-backup:${STATUSSV_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: statussv
+      PGDATABASE: statussv
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      # Sin ":?": el compose se interpola entero en cada comando, y un servidor
+      # sin backup no podría ni hacer "up -d server". Si falta, el script lo dice.
+      RESTIC_REPOSITORY: ${STATUSSV_BACKUP_REPOSITORY:-}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      AWS_ACCESS_KEY_ID: ${STATUSSV_BACKUP_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${STATUSSV_BACKUP_SECRET:-}
+      # R2 no tiene regiones; restic necesita una igual.
+      AWS_DEFAULT_REGION: auto
+      BACKUP_HORA_UTC: ${STATUSSV_BACKUP_HORA_UTC:-06}
+      BACKUP_PING_URL: ${STATUSSV_BACKUP_PING_URL:-}
+    secrets:
+      - totp_key
+      - restic_password
+    volumes:
+      - ./.env:/backup/env/.env:ro
+      # El volcado mientras se arma la copia, y la marca de la última buena.
+      - backup-work:/work
+      # La caché de restic: sin ella, cada copia vuelve a bajar los índices.
+      - backup-cache:/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # unhealthy si la última copia buena tiene más de 26 horas.
+      test: ["CMD-SHELL", "test -n \"$$(find /work/ultimo-ok -mmin -1560 2>/dev/null)\""]
+      interval: 5m
+      timeout: 10s
+      retries: 1
+      start_period: 15m
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Corre como root para leer el .env (de root, 0600), y DAC_READ_SEARCH le
+    # deja leer la clave TOTP, que es del usuario del control plane (0400). No
+    # tiene ninguna otra capacidad.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - internal
+
   caddy:
     profiles:
       - caddy
@@ -123,8 +185,14 @@ networks:
 secrets:
   totp_key:
     file: ./secrets/totp.key
+  # La contraseña del repositorio de restic. Se genera en el servidor y se
+  # guarda además FUERA de él: sin ella, las copias no se pueden abrir.
+  restic_password:
+    file: ./secrets/restic.password
 
 volumes:
   postgres-data:
+  backup-work:
+  backup-cache:
   caddy-data:
   caddy-config:
